@@ -31,6 +31,19 @@ MAX_BODY = 8192
 REQUEST_SECONDS = 15
 
 
+def _json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate JSON fields are not supported")
+        value[key] = item
+    return value
+
+
+def _json_constant(_):
+    raise ValueError("Nonfinite JSON numbers are not supported")
+
+
 def private_write(path: Path, data: bytes) -> None:
     fd, temporary = tempfile.mkstemp(prefix=".", dir=path.parent)
     try:
@@ -231,10 +244,23 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return session
 
+    def request_target(self):
+        try:
+            target = urlsplit(self.path)
+            if not self.path.startswith("/") or target.scheme or target.netloc or target.fragment:
+                raise ValueError("Use an origin-form control request")
+            return target
+        except ValueError:
+            self.reply(400, {"message": "Invalid control request target"})
+            self.close_connection = True
+            return None
+
     def do_GET(self):
         if not self.context_ok():
             return
-        parsed = urlsplit(self.path)
+        parsed = self.request_target()
+        if parsed is None:
+            return
         if parsed.path == "/api/challenge":
             try:
                 values = parse_qs(parsed.query, max_num_fields=1)
@@ -281,33 +307,52 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(503, {"message": "The local dashboard is not ready"})
 
     def read_body(self):
-        if self.headers.get("Transfer-Encoding"):
+        if self.headers.get_all("Transfer-Encoding", []):
             raise ValueError("Streaming control requests are not supported")
-        length = int(self.headers.get("Content-Length", "-1"))
-        if not 0 <= length <= MAX_BODY:
+        lengths = self.headers.get_all("Content-Length", [])
+        if (len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal()
+                or len(lengths[0]) > 10):
+            raise ValueError("Send one unambiguous control request size")
+        length = int(lengths[0])
+        if length > MAX_BODY:
             raise ValueError("The control request is too large or has no size")
-        if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+        types = self.headers.get_all("Content-Type", [])
+        if len(types) != 1 or types[0].split(";", 1)[0].strip().lower() != "application/json":
             raise ValueError("Send a JSON control request")
-        value = json.loads(self.rfile.read(length))
+        body = self.rfile.read(length)
+        if len(body) != length:
+            raise ValueError("The control request is incomplete")
+        value = json.loads(body.decode("utf-8"), object_pairs_hook=_json_object, parse_constant=_json_constant)
         if not isinstance(value, dict):
             raise ValueError("Invalid control request")
+        pending = [(value, 0)]
+        while pending:
+            item, depth = pending.pop()
+            if depth > 32:
+                raise ValueError("The control request is nested too deeply")
+            children = item.values() if isinstance(item, dict) else item if isinstance(item, list) else ()
+            pending.extend((child, depth + 1) for child in children)
         return value
 
     def do_POST(self):
         if not self.context_ok(post=True):
             self.close_connection = True
             return
-        path = urlsplit(self.path).path
+        target = self.request_target()
+        if target is None:
+            return
+        path = target.path
         try:
             data = self.read_body()
-        except (ValueError, OSError):
+        except (ValueError, OSError, RecursionError):
             self.reply(400, {"message": "Invalid or oversized control request"})
             self.close_connection = True
             return
         if path == "/api/bootstrap":
             nonce, proof, client = data.get("challenge"), data.get("proof"), data.get("client")
             valid = False
-            if all(isinstance(value, str) for value in (nonce, proof, client)) and self.headers.get("X-Mac-Guard") == "1":
+            if (all(isinstance(value, str) for value in (nonce, proof, client))
+                    and len(proof) == 64 and proof.isascii() and self.headers.get("X-Mac-Guard") == "1"):
                 with self.server.session_lock:
                     expires, expected_client = self.server.challenges.pop(nonce, (0, ""))
                     valid = (expires > time.time() and client == expected_client
