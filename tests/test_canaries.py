@@ -38,6 +38,9 @@ class CanaryMonitorTests(unittest.TestCase):
         for patcher in patches:
             self.addCleanup(patcher.stop)
         self.connection = self.connection_type.return_value
+        deadline = patch.object(canaries, "ResponseDeadline")
+        deadline.start()
+        self.addCleanup(deadline.stop)
         self.when_history()
 
     def when_history(self, *hits, status=200, kind="web", content_type="application/json", raw=None):

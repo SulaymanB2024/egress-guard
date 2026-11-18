@@ -22,6 +22,7 @@ import time
 from urllib.parse import urlencode
 
 from .paths import atomic_private, private_dir
+from .http_deadline import ResponseDeadline
 
 try:
     import fcntl
@@ -33,6 +34,7 @@ HOST = "canarytokens.org"
 HISTORY_PATH = "/d3aece8093b71007b5ccfedad91ebb11/history"
 INTERVAL = 60
 TIMEOUT = 15
+RESPONSE_SECONDS = 45
 MAX_BACKOFF = 900
 MAX_RESPONSE = 8 * 1024 * 1024
 MAX_PLACEMENTS = 32
@@ -122,18 +124,23 @@ def _fetch_history(token: str, auth_token: str, expected_kind: str | None) -> tu
         # HTTPSConnection does not follow redirects.
         connection = http.client.HTTPSConnection(HOST, timeout=TIMEOUT, context=ssl.create_default_context())
         try:
-            connection.request("GET", f"{HISTORY_PATH}?{query}", headers={
-                "Accept": "application/json",
-                "User-Agent": "EgressGuard/0.1",
-            })
-            with connection.getresponse() as response:
-                if response.status in (400, 401, 403, 404):
-                    raise CanaryError(CREDENTIAL_ERROR)
-                if response.status != 200:
-                    raise CanaryError(PROVIDER_ERROR)
-                if response.headers.get_content_type() != "application/json":
-                    raise CanaryError(HISTORY_ERROR)
-                body = response.read(MAX_RESPONSE + 1)
+            with ResponseDeadline(RESPONSE_SECONDS) as deadline:
+                connection.connect()
+                deadline.attach(connection.sock)
+                connection.request("GET", f"{HISTORY_PATH}?{query}", headers={
+                    "Accept": "application/json",
+                    "User-Agent": "EgressGuard/0.1",
+                })
+                with connection.getresponse() as response:
+                    deadline.check()
+                    if response.status in (400, 401, 403, 404):
+                        raise CanaryError(CREDENTIAL_ERROR)
+                    if response.status != 200:
+                        raise CanaryError(PROVIDER_ERROR)
+                    if response.headers.get_content_type() != "application/json":
+                        raise CanaryError(HISTORY_ERROR)
+                    body = response.read(MAX_RESPONSE + 1)
+                    deadline.check()
         finally:
             connection.close()
         if len(body) > MAX_RESPONSE:

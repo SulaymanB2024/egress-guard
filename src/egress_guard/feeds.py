@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from egress_guard.paths import atomic_private, private_dir
+from egress_guard.http_deadline import DeadlineHTTPHandler, DeadlineHTTPSHandler, ResponseDeadline
 
 HAGEZI = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/"
 ADGUARD = "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/"
@@ -22,6 +23,7 @@ MAX_FEED_BYTES = 32 * 1024 * 1024
 MAX_ENTRIES = 1_000_000
 STALE_SECONDS = 48 * 60 * 60
 MAX_CLOCK_SKEW = 24 * 60 * 60
+RESPONSE_SECONDS = 60
 DNS_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 DNS_NAME = re.compile(rf"(?:{DNS_LABEL}\.)*{DNS_LABEL}")
 
@@ -145,18 +147,23 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _download(feed: Feed) -> bytes:
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
     request = urllib.request.Request(feed.url, headers={"User-Agent": "egress-guard"})
     try:
-        with opener.open(request, timeout=20) as response:
-            length = response.headers.get("Content-Length")
-            if length is not None and (not length.isascii() or not length.isdecimal() or len(length) > 10):
-                raise ValueError("invalid feed content length")
-            expected = int(length) if length is not None else None
-            if response.status != 200 or (expected is not None and expected > MAX_FEED_BYTES):
-                raise ValueError("unexpected feed response")
-            data = response.read(MAX_FEED_BYTES + 1)
+        with ResponseDeadline(RESPONSE_SECONDS) as deadline:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect(),
+                                                  DeadlineHTTPHandler(deadline), DeadlineHTTPSHandler(deadline))
+            with opener.open(request, timeout=20) as response:
+                deadline.check()
+                length = response.headers.get("Content-Length")
+                if length is not None and (not length.isascii() or not length.isdecimal() or len(length) > 10):
+                    raise ValueError("invalid feed content length")
+                expected = int(length) if length is not None else None
+                if response.status != 200 or (expected is not None and expected > MAX_FEED_BYTES):
+                    raise ValueError("unexpected feed response")
+                data = response.read(MAX_FEED_BYTES + 1)
+                deadline.check()
     except urllib.error.HTTPError as error:
+        error.close()
         raise ValueError(f"feed returned HTTP {error.code}") from None
     except (OSError, http.client.HTTPException):
         raise ValueError("feed download failed") from None
