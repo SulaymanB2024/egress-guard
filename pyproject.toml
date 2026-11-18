@@ -32,4 +32,4 @@ Source = "https://github.com/SulaymanB2024/egress-guard"
 packages = ["src/egress_guard"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/scripts", "/docs", "/README.md", "/LICENSE", "/SECURITY.md", "/CONTRIBUTING.md", "/THIRD_PARTY_NOTICES.md", "/pyproject.toml"]
+include = ["/src", "/tests", "/scripts", "/docs", "/README.md", "/LICENSE", "/SECURITY.md", "/CONTRIBUTING.md", "/THIRD_PARTY_NOTICES.md", "/DESIGN_REFERENCES.md", "/pyproject.toml"]

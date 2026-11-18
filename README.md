@@ -93,6 +93,12 @@ Domain activity is stored locally with bounded buffering and retention. Request 
 
 See [architecture and threat model](docs/architecture.md), [security review and fixes](docs/security-review.md), [research and next steps](docs/research.md), [security policy](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
 
+## Dashboard
+
+See the [390 px and 1440 px review](docs/dashboard-review.md). These first-run captures use empty, isolated state.
+
+![First-run dashboard](docs/screenshots/first-run-1440.jpg)
+
 ## Contribute
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md). Tests use temporary state and mocks for native settings. Do not run tests against a live installation or submit real credentials, traffic logs, private machine paths or generated feed caches.
