@@ -6,6 +6,7 @@ connection/handshake limits remain the transport's responsibility.
 from contextlib import AbstractContextManager
 from functools import partial
 import http.client
+import json
 import socket
 import ssl
 import threading
@@ -125,3 +126,29 @@ class DeadlineHTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, request):
         return self.do_open(partial(_HTTPSConnection, response_deadline=self.response_deadline), request,
                             context=ssl.create_default_context())
+
+
+def request_json_object(connection, method, target, *, seconds, body=None, headers=None, limit=4096):
+    """Read one bounded JSON reply, including across an explicit reconnect.
+
+    Each exchange gets its own response budget. Callers retain ownership of
+    the HTTP connection and close it in their outer recovery path.
+    """
+    if connection.sock is None:
+        connection.connect()
+    with ResponseDeadline(seconds) as deadline:
+        deadline.attach(connection.sock)
+        connection.request(method, target, body=body, headers=headers or {})
+        with connection.getresponse() as response:
+            status = response.status
+            raw = response.read(limit + 1)
+            deadline.check()
+            if len(raw) > limit:
+                raise ValueError("The local response exceeded its size limit")
+    try:
+        value = json.loads(raw)
+    except RecursionError as exc:
+        raise ValueError("The local response is nested too deeply") from exc
+    if not isinstance(value, dict):
+        raise ValueError("The local response must be a JSON object")
+    return status, value

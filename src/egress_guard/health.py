@@ -1,11 +1,13 @@
 """A bounded local-only proxy identity check."""
 import http.client
-import json
 import hashlib
 import hmac
 import secrets
 
 from .paths import data_dir, supports_private_identity
+from .http_deadline import request_json_object
+
+HEALTH_RESPONSE_SECONDS = 2
 
 
 def response_proof(nonce, port, state):
@@ -21,12 +23,9 @@ def proxy_health(port: int, state=None) -> dict:
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
     try:
         nonce = secrets.token_urlsafe(32)
-        connection.request("GET", "http://egress-guard.invalid/health?nonce=" + nonce)
-        response = connection.getresponse()
-        data = json.loads(response.read(4096))
-        if not isinstance(data, dict):
-            return {"ready": False, "port": port, "https_decryption": False}
-        valid = (response.status == 200 and data.get("product") == "egress-guard"
+        status, data = request_json_object(connection, "GET", "http://egress-guard.invalid/health?nonce=" + nonce,
+                                           seconds=HEALTH_RESPONSE_SECONDS)
+        valid = (status == 200 and data.get("product") == "egress-guard"
                  and data.get("ready") is True and data.get("https_decryption") is False
                  and isinstance(data.get("proof"), str)
                  and hmac.compare_digest(data["proof"].encode(), response_proof(nonce, port, state or data_dir()).encode()))

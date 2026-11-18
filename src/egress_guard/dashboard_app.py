@@ -17,8 +17,16 @@ import webbrowser
 from .config import config_path, initialize, load_config
 from .feeds import feed_status, dns_name, update_feeds
 from .health import proxy_health
+from .http_deadline import request_json_object
 from .paths import atomic_private, data_dir, private_dir
 from .policy import Policy
+
+LAUNCHER_RESPONSE_SECONDS = 3
+
+
+def _launcher_token(value):
+    return (isinstance(value, str) and len(value) == 43
+            and all(char in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in value))
 
 
 def iso(value=None):
@@ -216,23 +224,22 @@ def open_dashboard():
     try:
         origin = f"http://127.0.0.1:{port}"
         client = secrets.token_urlsafe(32)
-        connection.request("GET", "/api/challenge?client=" + client)
-        response = connection.getresponse()
-        challenge = json.loads(response.read(4096))
+        status, challenge = request_json_object(connection, "GET", "/api/challenge?client=" + client,
+                                                seconds=LAUNCHER_RESPONSE_SECONDS)
         nonce = challenge.get("challenge")
         proof = challenge.get("proof")
-        if (response.status != 200 or not isinstance(nonce, str) or len(nonce) != 43
-                or not isinstance(proof, str) or len(proof) != 64):
+        if (status != 200 or not _launcher_token(nonce) or not isinstance(proof, str)
+                or len(proof) != 64 or any(char not in "0123456789abcdef" for char in proof)):
             raise ValueError("Start the dashboard before opening its controls")
         expected = hmac.new(key.encode(), f"egress-guard/v2:server:{origin}:{client}:{nonce}".encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(proof.encode(), expected.encode()):
             raise ValueError("The local service could not prove its identity")
         client_proof = hmac.new(key.encode(), f"egress-guard/v2:client:{origin}:{client}:{nonce}".encode(), hashlib.sha256).hexdigest()
-        connection.request("POST", "/api/bootstrap", json.dumps({"challenge": nonce, "client": client, "proof": client_proof}),
-                           {"Origin": origin, "Content-Type": "application/json", "X-Mac-Guard": "1"})
-        response = connection.getresponse()
-        result = json.loads(response.read(4096))
-        if response.status != 200 or not isinstance(result.get("token"), str) or len(result["token"]) != 43:
+        status, result = request_json_object(connection, "POST", "/api/bootstrap",
+            body=json.dumps({"challenge": nonce, "client": client, "proof": client_proof}),
+            headers={"Origin": origin, "Content-Type": "application/json", "X-Mac-Guard": "1"},
+            seconds=LAUNCHER_RESPONSE_SECONDS)
+        if status != 200 or not _launcher_token(result.get("token")):
             raise ValueError("The local connection could not be established")
         url = f"{origin}/#{result['token']}"
     except (OSError, ValueError, http.client.HTTPException):
