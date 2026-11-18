@@ -3,10 +3,13 @@ from copy import deepcopy
 from importlib.resources import files
 import os
 from pathlib import Path
+import stat
 import tomllib
 
 from .paths import atomic_private, data_dir, private_dir
 from .feeds import dns_name
+
+MAX_CONFIG_BYTES = 64 * 1024
 
 
 def config_path() -> Path:
@@ -17,13 +20,37 @@ def default_config() -> dict:
     return tomllib.loads(files("egress_guard").joinpath("default.toml").read_text())
 
 
+def _read_config(path: Path) -> str | None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CONFIG_BYTES:
+        raise ValueError("Configuration must be a small regular file")
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+             | getattr(os, "O_BINARY", 0))
+    try:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise ValueError("Configuration must be a small regular file")
+            body = handle.read(MAX_CONFIG_BYTES + 1)
+    except OSError as exc:
+        raise ValueError("Configuration could not be read as a small regular file") from exc
+    if len(body) > MAX_CONFIG_BYTES:
+        raise ValueError("Configuration exceeds its 64 KiB limit")
+    return body.decode("utf-8")
+
+
 def load_config(path: Path | None = None) -> dict:
     result = deepcopy(default_config())
     selected = path or config_path()
-    if selected.exists():
-        if selected.is_symlink() or selected.stat().st_size > 64 * 1024:
-            raise ValueError("Configuration must be a small regular file")
-        user = tomllib.loads(selected.read_text())
+    text = _read_config(selected)
+    if text is not None:
+        try:
+            user = tomllib.loads(text)
+        except RecursionError as exc:
+            raise ValueError("Configuration is nested too deeply") from exc
         if set(user) - set(result):
             raise ValueError("Unknown configuration section")
         for section, settings in user.items():
@@ -36,7 +63,8 @@ def load_config(path: Path | None = None) -> dict:
             raise ValueError(f"{key} must be between 1024 and 65535")
     if result["proxy"]["port"] == result["proxy"]["dashboard_port"]:
         raise ValueError("The proxy and dashboard need different ports")
-    if result["block"]["list_tier"] not in {"pro", "pro.plus", "ultimate"}:
+    if (not isinstance(result["block"]["list_tier"], str)
+            or result["block"]["list_tier"] not in {"pro", "pro.plus", "ultimate"}):
         raise ValueError("Unsupported filter tier")
     for key in ("cname_protection",):
         if type(result["block"][key]) is not bool:
@@ -61,7 +89,7 @@ def load_config(path: Path | None = None) -> dict:
 def initialize() -> Path:
     private_dir(data_dir())
     path = config_path()
-    if not path.exists():
+    if not os.path.lexists(path):
         atomic_private(path, files("egress_guard").joinpath("default.toml").read_bytes())
     load_config(path)
     return path
