@@ -1,0 +1,31 @@
+# Architecture and threat model
+
+```mermaid
+flowchart LR
+    C[Proxy-aware applications] --> P[Loopback proxy]
+    P --> R[Domain policy]
+    R --> F[Validated local feeds]
+    R --> O[Private timed controls]
+    P -->|Allowed: original encrypted TLS| I[Internet]
+    P --> L[Bounded domain-only ledger]
+    B[Local browser] -->|Session and CSRF| D[Loopback dashboard]
+    D --> R
+    D --> L
+    D --> N[Optional canary monitor]
+    N -->|Verified HTTPS history| T[Thinkst]
+    N --> A[macOS notifications]
+```
+
+Remote sites and incoming proxy requests are untrusted. Blocked CONNECT requests must be refused before upstream contact. HTTP target authority is authoritative; an inconsistent Host header cannot turn a remote request into a loopback exemption. HTTPS tunnels remain opaque, including their authentication data.
+
+The dashboard admits only its exact loopback Host/Origin, establishes a session using an install-specific private key, and requires a separate session-bound CSRF value for mutations. It serves no arbitrary filesystem paths and exposes a small fixed action set. No control API changes native network settings or runs user-provided commands.
+
+Feed files contain domain data rather than executable code. Every source has a fixed HTTPS URL, per-feed size and syntax requirements, minimum counts, shrink protection, an atomic last-good cache and local integrity metadata. Fresh retrieval and upstream publication time are distinct signals. CNAME data is exact-match only; wildcard-shaped records must not become parent-domain blocks.
+
+Native configuration calls fixed macOS tools through an authorized shell transaction. Service names are validated and shell-quoted. The transaction rechecks the service/location, rolls back partial mutations and writes a private receipt. Restore compares current settings to the installation's settings before changing them.
+
+Per-user background jobs and state are intentionally unprivileged. A local administrator or process already running as this user can interfere with them. The product does not parse every protocol, identify all applications reliably, prevent all data exfiltration or intercept ordinary HTTPS payloads.
+
+## Decisions made for this release
+
+The public edition excludes private corporate-agent inspection, broad certificate trust, machine-specific update installers and automatic account lockouts. It uses separate defaults and state paths from the local prototype. Native routing is opt-in and fails closed on conflicting settings; ordinary source installation does not change networking.

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "egress-guard"
+version = "0.1.0"
+description = "Local ad, tracker and threat filtering with encrypted HTTPS passthrough"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{name = "Egress Guard contributors"}]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+]
+dependencies = ["mitmproxy==12.3.1"]
+
+[project.scripts]
+egress-guard = "egress_guard.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/SulaymanB2024/egress-guard"
+Issues = "https://github.com/SulaymanB2024/egress-guard/issues"
+Source = "https://github.com/SulaymanB2024/egress-guard"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/egress_guard"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/scripts", "/docs", "/README.md", "/LICENSE", "/SECURITY.md", "/CONTRIBUTING.md", "/THIRD_PARTY_NOTICES.md", "/pyproject.toml"]

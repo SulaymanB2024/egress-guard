@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light">
+  <title>Egress Guard</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to protection status</a>
+  <header class="top">
+    <div class="top-inner">
+      <a class="brand" href="#main"><span class="brand-symbol" aria-hidden="true"></span> Egress Guard</a>
+      <nav id="dashboard-nav" aria-label="Dashboard" hidden>
+        <a href="#main">Overview</a>
+        <a href="#activity">Activity</a>
+        <a href="#checks">System checks</a>
+      </nav>
+      <span class="local"><span aria-hidden="true"></span> This Mac only</span>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div class="page-heading">
+      <h1>Protection overview</h1>
+      <div class="snapshot"><span id="checked-at">Connecting…</span><button id="refresh" type="button" class="button quiet" hidden>Refresh</button></div>
+    </div>
+    <noscript><p class="notice">Enable JavaScript to read the local protection service and use its controls.</p></noscript>
+    <p id="connection" class="notice" role="status">Connecting to the local protection service…</p>
+    <p id="notification" class="notice" role="status" hidden></p>
+
+    <div id="dashboard" hidden>
+      <div class="overview">
+        <section class="protection" aria-labelledby="protection-label">
+          <div class="protection-body">
+            <div class="protection-icon" id="protection-icon" aria-hidden="true"><span>·</span></div>
+            <div>
+              <p class="eyebrow" id="protection-label">Network protection</p>
+              <h2 id="protection-title">Checking status</h2>
+              <p id="protection-detail"></p>
+            </div>
+          </div>
+          <div class="protection-footer">
+            <p id="protection-scope">Applies to connections using the system proxy.</p>
+            <div class="button-group">
+              <button id="pause" class="button on-dark" type="button" hidden>Pause ad filtering</button>
+              <button id="resume" class="button on-dark" type="button" hidden>Resume ad filtering</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="domain" class="lookup" aria-labelledby="domain-title">
+          <h2 id="domain-title">Check a domain</h2>
+          <p id="domain-help">See how this Mac’s proxy would handle a hostname.</p>
+          <form id="lookup" class="lookup-form">
+            <label class="visually-hidden" for="hostname">Domain name</label>
+            <input id="hostname" name="host" type="text" placeholder="example.com" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="253" required aria-describedby="domain-help">
+            <button class="button primary" type="submit">Check</button>
+          </form>
+          <div id="lookup-result" class="lookup-result" role="status" hidden></div>
+          <div id="lookup-actions" class="button-group" hidden>
+            <button id="allow" class="button quiet" type="button" hidden>Allow temporarily</button>
+            <button id="block" class="button quiet" type="button" hidden>Block domain</button>
+            <button id="unblock" class="button quiet" type="button" hidden>Remove manual block</button>
+          </div>
+        </section>
+      </div>
+
+      <section id="activity" class="activity" aria-labelledby="activity-title">
+        <div class="section-top">
+          <div>
+            <h2 id="activity-title">Network activity</h2>
+            <p id="activity-summary">Reading recent proxy decisions…</p>
+          </div>
+          <div class="activity-controls">
+            <label class="visually-hidden" for="activity-host">Filter recent hostnames</label>
+            <input id="activity-host" type="search" placeholder="Filter hostnames" autocomplete="off" spellcheck="false">
+            <label class="visually-hidden" for="activity-decision">Filter decisions</label>
+            <select id="activity-decision">
+              <option value="all">All decisions</option>
+              <option value="blocked">Blocked</option>
+              <option value="allowed">Allowed</option>
+              <option value="observed">Observed</option>
+            </select>
+          </div>
+        </div>
+        <div class="activity-sheet">
+          <p id="activity-message" class="empty" hidden></p>
+          <table id="activity-table" aria-describedby="activity-summary" hidden>
+            <thead><tr><th scope="col">Time</th><th scope="col">Domain</th><th scope="col">Decision</th><th scope="col">Reason</th></tr></thead>
+            <tbody id="activity-rows"></tbody>
+          </table>
+          <div class="page-controls" id="activity-pages" hidden>
+            <span id="activity-range" role="status"></span>
+            <div class="button-group">
+              <button class="button quiet" id="activity-prev" type="button">Previous</button>
+              <button class="button quiet" id="activity-next" type="button">Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="checks" class="checks" aria-labelledby="checks-title">
+        <div class="section-top"><h2 id="checks-title">System checks</h2></div>
+        <div class="check-grid">
+          <section class="check" aria-labelledby="proxy-title">
+            <div class="check-heading"><h3 id="proxy-title">Proxy health</h3></div>
+            <ul class="check-list" id="proxies"></ul>
+          </section>
+          <section class="check" aria-labelledby="canary-title">
+            <div class="check-heading"><h3 id="canary-title">Canary monitor</h3><div class="button-group">
+                <button id="pause-canaries" class="button quiet" type="button" hidden>Pause alerts</button>
+                <button id="resume-canaries" class="button quiet" type="button" hidden>Resume alerts</button>
+            </div></div>
+            <ul class="check-list" id="canaries"></ul>
+          </section>
+          <section class="check" aria-labelledby="feed-title">
+            <div class="check-heading"><h3 id="feed-title">Filter feeds</h3><button id="refresh-filters" class="button quiet" type="button" hidden>Refresh feeds</button></div>
+            <ul class="check-list" id="filters"></ul>
+          </section>
+          <section class="check" aria-labelledby="maintenance-title">
+            <div class="check-heading"><h3 id="maintenance-title">Mac maintenance</h3></div>
+            <ul class="check-list" id="maintenance"></ul>
+          </section>
+          <section id="exceptions" class="check exceptions" aria-labelledby="exceptions-title">
+            <div class="check-heading"><h3 id="exceptions-title" tabindex="-1">Temporary allows</h3></div>
+            <ul class="check-list" id="temporary-allows"></ul>
+          </section>
+          <section id="security-section" class="check" aria-labelledby="security-title" hidden>
+            <div class="check-heading"><h3 id="security-title">Mac security settings</h3></div>
+            <ul class="check-list" id="security"></ul>
+          </section>
+        </div>
+      </section>
+    </div>
+    <footer id="page-footer" hidden><span>Egress Guard</span><p>Activity shows destinations and policy decisions from this Mac’s proxy.</p></footer>
+  </main>
+
+  <dialog id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
+    <form id="confirm-form">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-detail"></p>
+      <div id="duration-control" hidden>
+        <label for="duration">Duration</label>
+        <select id="duration"></select>
+      </div>
+      <p id="action-status" class="notice" role="status" hidden></p>
+      <div class="button-group dialog-actions">
+        <button id="cancel" class="button quiet" type="button" autofocus>Cancel</button>
+        <button id="confirm-action" class="button primary" type="submit">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

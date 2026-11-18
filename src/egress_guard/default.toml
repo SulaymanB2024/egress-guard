@@ -1,0 +1,17 @@
+[proxy]
+port = 18080
+dashboard_port = 18081
+
+[block]
+list_tier = "pro.plus"
+cname_protection = true
+hosts = []
+allow = []
+dashboard_hosts = ["analytics.google.com", "clarity.microsoft.com", "claritystatic.azureedge.net", "app.posthog.com", "us.posthog.com", "eu.posthog.com"]
+
+[risk]
+block_plaintext_credentials = true
+
+[logging]
+retention_days = 7
+max_queue = 10000
