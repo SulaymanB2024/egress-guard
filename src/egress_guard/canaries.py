@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 import hashlib
+import heapq
 import http.client
 import ipaddress
 import json
@@ -36,6 +37,7 @@ MAX_BACKOFF = 900
 MAX_RESPONSE = 8 * 1024 * 1024
 MAX_PLACEMENTS = 32
 MAX_EVENT_IDS = 1024
+MAX_SEEN_IDS = 2 * MAX_EVENT_IDS
 TOKEN = re.compile(r"[a-z0-9]{25}")
 AUTH = re.compile(r"[a-f0-9]{32}")
 KIND = re.compile(r"[a-z][a-z0-9_-]{0,63}")
@@ -49,7 +51,7 @@ BACKLOG_ERROR = "The local canary alert backlog is full."
 PUBLIC_ERRORS = (HISTORY_ERROR, PROVIDER_ERROR, CREDENTIAL_ERROR, NOTIFICATION_ERROR, BACKLOG_ERROR)
 PUBLIC_FIELDS = (
     "label", "kind", "last_poll", "last_success", "next_attempt", "failures",
-    "notifications", "events", "error",
+    "notifications", "events", "error", "history_truncated",
 )
 NOTIFICATION_SCRIPT = (
     "on run argv\n"
@@ -96,7 +98,7 @@ def _timestamp(value: object) -> bool:
     return type(value) in (float, int) and 0 <= value <= 253402300799 and math.isfinite(value)
 
 
-def _event_id(hit: object, kind: str) -> str:
+def _validated_event(hit: object, kind: str) -> tuple[float, str]:
     if not isinstance(hit, dict) or not _timestamp(hit.get("time_of_hit")):
         raise CanaryError(HISTORY_ERROR)
     if hit.get("token_type", kind) != kind:
@@ -107,11 +109,13 @@ def _event_id(hit: object, kind: str) -> str:
     is_tor = hit.get("is_tor_relay")
     if is_tor is not None and type(is_tor) is not bool:
         raise CanaryError(HISTORY_ERROR)
-    stable = [float(hit["time_of_hit"]), *(hit.get(item) for item in fields), is_tor]
-    return hashlib.sha256(json.dumps(stable, separators=(",", ":")).encode()).hexdigest()
+    timestamp = float(hit["time_of_hit"])
+    stable = [timestamp, *(hit.get(item) for item in fields), is_tor]
+    digest = hashlib.sha256(json.dumps(stable, separators=(",", ":")).encode()).hexdigest()
+    return timestamp, digest
 
 
-def _fetch_history(token: str, auth_token: str, expected_kind: str | None) -> tuple[str, list[str]]:
+def _fetch_history(token: str, auth_token: str, expected_kind: str | None) -> tuple[str, list[str], bool]:
     query = urlencode({"token": token, "auth": auth_token})
     try:
         # Direct TLS avoids forwarding credentials through ambient HTTP proxies.
@@ -149,10 +153,29 @@ def _fetch_history(token: str, auth_token: str, expected_kind: str | None) -> tu
     if (
         not _matches(KIND, kind) or token in kind or auth_token in kind
         or (expected_kind is not None and kind != expected_kind)
-        or not isinstance(hits, list) or len(hits) > MAX_EVENT_IDS
+        or not isinstance(hits, list)
     ):
         raise CanaryError(HISTORY_ERROR)
-    return kind, list(dict.fromkeys(_event_id(hit, kind) for hit in hits))
+    # Validate every row and retain the most recent distinct events. The digest
+    # breaks timestamp ties consistently, regardless of provider ordering.
+    recent: list[tuple[float, str]] = []
+    retained: set[str] = set()
+    truncated = False
+    for hit in hits:
+        event = _validated_event(hit, kind)
+        digest = event[1]
+        if digest in retained:
+            continue
+        if len(recent) < MAX_EVENT_IDS:
+            heapq.heappush(recent, event)
+        else:
+            truncated = True
+            if event <= recent[0]:
+                continue
+            _, evicted = heapq.heapreplace(recent, event)
+            retained.remove(evicted)
+        retained.add(digest)
+    return kind, [digest for _, digest in sorted(recent)], truncated
 
 
 def _notify(message: str, title: str) -> None:
@@ -189,14 +212,15 @@ def _validate_state(value: object) -> list[dict]:
             not _matches(KIND, row.get("kind")) or row["token"] in row["kind"]
             or row["auth_token"] in row["kind"]
             or type(row.get("health_alerted")) is not bool
+            or type(row.setdefault("history_truncated", False)) is not bool
             or row.get("error") not in (*PUBLIC_ERRORS, None)
             or not all(_timestamp(row.get(key)) for key in ("last_poll", "last_success", "next_attempt"))
             or not all(type(row.get(key)) is int and row[key] >= 0 for key in ("failures", "notifications", "events"))
         ):
             raise CanaryError("Canary state is invalid.")
-        for key in ("seen", "pending"):
+        for key, limit in (("seen", MAX_SEEN_IDS), ("pending", MAX_EVENT_IDS)):
             ids = row.get(key)
-            if not isinstance(ids, list) or len(ids) > MAX_EVENT_IDS or not all(_matches(DIGEST, item) for item in ids):
+            if not isinstance(ids, list) or len(ids) > limit or not all(_matches(DIGEST, item) for item in ids):
                 raise CanaryError("Canary state is invalid.")
     if len({row["token"] for row in rows}) != len(rows) or len({row["label"].casefold() for row in rows}) != len(rows):
         raise CanaryError("Canary state is invalid.")
@@ -274,13 +298,13 @@ class CanaryMonitor:
             if any(row["token"] == data["token"] or row["label"].casefold() == label.casefold() for row in rows):
                 raise CanaryError("The token or placement label is already configured.")
 
-            kind, baseline = _fetch_history(data["token"], data["auth_token"], data.get("kind"))
+            kind, baseline, truncated = _fetch_history(data["token"], data["auth_token"], data.get("kind"))
             now = time.time()
             row = {
                 "label": label, "token": data["token"], "auth_token": data["auth_token"], "kind": kind,
                 "seen": baseline, "pending": [], "last_poll": now, "last_success": now,
                 "next_attempt": now + INTERVAL, "failures": 0, "notifications": 0, "events": 0,
-                "error": None, "health_alerted": False,
+                "error": None, "health_alerted": False, "history_truncated": truncated,
             }
             self._write([*rows, row])
             return _public_status(row)
@@ -295,12 +319,14 @@ class CanaryMonitor:
         row["next_attempt"] = now + INTERVAL
         self._write(rows)
         error = None
+        hits = None
         try:
-            _, hits = _fetch_history(row["token"], row["auth_token"], row["kind"])
+            _, hits, truncated = _fetch_history(row["token"], row["auth_token"], row["kind"])
         except CanaryError as exc:
             error = str(exc)
         else:
             row["last_success"] = time.time()
+            row["history_truncated"] = truncated
             known = set(row["seen"]) | set(row["pending"])
             new_ids = [item for item in hits if item not in known]
             room = MAX_EVENT_IDS - len(row["pending"])
@@ -318,7 +344,13 @@ class CanaryMonitor:
             else:
                 row["events"] += count
                 row["notifications"] += 1
-                row["seen"] = (row["seen"] + row["pending"])[-MAX_EVENT_IDS:]
+                seen = row["seen"] + row["pending"]
+                if hits is not None:
+                    retained = set(seen)
+                    current = [item for item in hits if item in retained]
+                    current_ids = set(current)
+                    seen = [item for item in seen if item not in current_ids] + current
+                row["seen"] = seen[-MAX_SEEN_IDS:]
                 row["pending"] = []
                 self._write(rows)
 

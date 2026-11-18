@@ -279,7 +279,17 @@ def _activation_script(service: str, before: Snapshot, installed: Proxy) -> str:
 def enable_proxy(
     service: str, port: int, state: Path, *, verify_health: Callable[[], None],
 ) -> dict:
-    """Enable the named service after the caller verifies its local proxy identity."""
+    """Reject system activation while the proxy runs as a per-user process."""
+    raise MacOSProxyError(
+        "Automatic system proxy activation is unavailable in this release. "
+        "Configure an individual browser or app to use the local proxy."
+    )
+
+
+def _experimental_enable_proxy(
+    service: str, port: int, state: Path, *, verify_health: Callable[[], None],
+) -> dict:
+    """Exercise the native transaction independently of listener lifetime management."""
     if not _valid_port(port):
         raise MacOSProxyError("The local proxy requires a port from 1 to 65535.")
     state = Path(state)

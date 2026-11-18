@@ -5,7 +5,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from egress_guard.policy import Policy, normalize_host
+from egress_guard.policy import MAX_CONTROL_BYTES, Policy, normalize_host
 
 
 class PolicyTests(unittest.TestCase):
@@ -70,6 +70,27 @@ class PolicyTests(unittest.TestCase):
         (self.state / "filter-controls.json").write_text("{" + " " * 65_537 + "}")
         self.policy.reload_controls()
         self.assertEqual(self.policy.decision("masked.example")["source"], "cname-feed")
+
+    def test_rule_file_distinguishes_missing_empty_and_invalid(self):
+        path = self.state / "block.txt"
+        with patch("egress_guard.policy.read_cached_feed", return_value=set()):
+            self.assertEqual(Policy({}, self.state).decision("local.example")["source"], "no-match")
+            path.write_bytes(b"")
+            self.assertEqual(Policy({}, self.state).decision("local.example")["source"], "no-match")
+            path.write_text("# custom block\nlocal.example # exact domain and descendants\n")
+            self.assertEqual(Policy({}, self.state).decision("a.local.example")["source"], "local-block")
+            for data, message in (
+                (b"#" * (MAX_CONTROL_BYTES + 1), "64 KiB"),
+                (b"local.example\n\xff", "UTF-8"),
+                (b"local.example\ninvalid/url\n", "invalid domain on line 2"),
+            ):
+                with self.subTest(message=message):
+                    path.write_bytes(data)
+                    with self.assertRaisesRegex(ValueError, message):
+                        Policy({}, self.state)
+            with patch.object(Path, "open", side_effect=PermissionError):
+                with self.assertRaisesRegex(ValueError, "block.txt could not be read"):
+                    Policy({}, self.state)
 
     def test_malformed_request_targets_and_ip_literals(self):
         for value in ("abc../", "*.example", "example..", "https://danger.example", "a" * 254, "日本.example"):

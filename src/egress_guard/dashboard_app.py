@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import secrets
 from urllib.parse import quote
 import webbrowser
 
@@ -49,7 +50,7 @@ class Application:
     def status(self):
         config = load_config(self.config_path)
         policy = self.policy()
-        healthy = proxy_health(config["proxy"]["port"])["ready"]
+        healthy = proxy_health(config["proxy"]["port"], self.state)["ready"]
         pause = self._read("filter-controls.json").get("tracker_pause_until", 0)
         paused = type(pause) in (int, float) and time.time() < pause <= time.time() + 86400
         ready = healthy and policy.ready()
@@ -62,19 +63,22 @@ class Application:
             "protection": {"state": state,
                 "message": "Ad filtering is paused; threat filtering stays active." if paused and ready else
                            "Verified local filters are active for applications using this proxy." if ready else
-                           "Start the proxy and refresh filters before enabling system routing.",
+                           "Start the proxy, refresh filters, and configure individual applications to use it.",
                 "pause_expires_at": iso(pause) if paused else None},
             "proxies": [{"name": "Loopback filtering proxy", "state": "active" if healthy else "degraded",
                          "detail": f"127.0.0.1:{config['proxy']['port']} · original HTTPS certificates"}],
             "filters": [{"name": item["name"], "state": "active" if item["status"] == "current" else "degraded",
                          "detail": item.get("error") or item["status"], "updated_at": item.get("updated_at"),
                          "entries": item.get("entries", 0)} for item in feeds],
-            "canaries": [{"name": item.get("label", "Canary"), "state": "degraded" if item.get("error") else
+            "canaries": [{"name": item.get("label", "Canary"), "state": "degraded" if item.get("error") or item.get("history_truncated") else
                           "active" if item.get("last_success") else "unknown",
-                          "detail": item.get("error") or "History monitored; alerts delivered locally on macOS.",
-                          "checked_at": iso(item["last_success"]) if item.get("last_success") else None} for item in targets],
-            "maintenance": [{"name": "Native system routing", "state": "unknown",
-                             "detail": "Enable explicitly with egress-guard proxy enable --service Wi-Fi. Stop restores settings owned by this installation."}],
+                          "detail": item.get("error") or ("History exceeded the 1,024-event polling window; older events may be missed."
+                                     if item.get("history_truncated") else "History monitored; alerts delivered locally on macOS."),
+                          "checked_at": iso(item["last_success"]) if item.get("last_success") else None} for item in targets]
+                         or [{"name": "No canaries registered", "state": "disabled",
+                              "detail": "Optional: import a Thinkst token to enable local alerts."}],
+            "maintenance": [{"name": "Client routing", "state": "unknown",
+                             "detail": "Configure individual clients for this loopback proxy. Automatic system-wide activation is withheld in this alpha; inspection and receipt-based recovery remain available."}],
             "controls": {"pause_minutes": [5, 15, 30], "allow_minutes": [5, 15, 30],
                          "resume": paused, "remove_allow": True, "refresh_filters": not self.refreshing,
                          "block": True, "unblock": True, "pause_canaries": False, "resume_canaries": False},
@@ -99,7 +103,7 @@ class Application:
         decision = self.policy().decision(host)
         manual = self._manual_rules()
         return {**decision, "host": host, "reason": decision.get("source", "unknown"),
-                "can_block": host not in load_config(self.config_path)["block"]["dashboard_hosts"] and host != "canarytokens.org",
+                "can_block": host not in manual and host not in load_config(self.config_path)["block"]["dashboard_hosts"] and host != "canarytokens.org",
                 "can_unblock": host in manual}
 
     def _read(self, name):
@@ -165,7 +169,10 @@ class Application:
                     lines.append(host)
                 elif action == "unblock":
                     lines = [line for line in lines if dns_name(line.split("#", 1)[0].strip()) != host]
-                atomic_private(path, ("\n".join(lines) + "\n").encode())
+                encoded = ("\n".join(lines) + "\n").encode()
+                if len(encoded) > 65536:
+                    raise ValueError("The local block list has reached its byte limit; existing rules were preserved")
+                atomic_private(path, encoded)
                 self._stamp = None
             elif action == "refresh_filters":
                 if self.refreshing:
@@ -208,7 +215,8 @@ def open_dashboard():
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
     try:
         origin = f"http://127.0.0.1:{port}"
-        connection.request("GET", "/api/challenge")
+        client = secrets.token_urlsafe(32)
+        connection.request("GET", "/api/challenge?client=" + client)
         response = connection.getresponse()
         challenge = json.loads(response.read(4096))
         nonce = challenge.get("challenge")
@@ -216,11 +224,11 @@ def open_dashboard():
         if (response.status != 200 or not isinstance(nonce, str) or len(nonce) != 43
                 or not isinstance(proof, str) or len(proof) != 64):
             raise ValueError("Start the dashboard before opening its controls")
-        expected = hmac.new(key.encode(), ("server:" + nonce).encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(key.encode(), f"egress-guard/v1:server:{client}:{nonce}".encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(proof.encode(), expected.encode()):
             raise ValueError("The local service could not prove its identity")
-        client_proof = hmac.new(key.encode(), ("client:" + nonce).encode(), hashlib.sha256).hexdigest()
-        connection.request("POST", "/api/bootstrap", json.dumps({"challenge": nonce, "proof": client_proof}),
+        client_proof = hmac.new(key.encode(), f"egress-guard/v1:client:{client}:{nonce}".encode(), hashlib.sha256).hexdigest()
+        connection.request("POST", "/api/bootstrap", json.dumps({"challenge": nonce, "client": client, "proof": client_proof}),
                            {"Origin": origin, "Content-Type": "application/json", "X-Mac-Guard": "1"})
         response = connection.getresponse()
         result = json.loads(response.read(4096))

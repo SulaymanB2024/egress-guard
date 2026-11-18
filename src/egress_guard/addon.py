@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from mitmproxy import ctx, http
 
 from egress_guard import __version__
 from egress_guard.config import config_path, load_config
 from egress_guard.feeds import CNAME_FEEDS, THREATS, TRACKERS
+from egress_guard.health import response_proof
 from egress_guard.ledger import Ledger
 from egress_guard.paths import data_dir, private_dir
 from egress_guard.policy import Policy, is_loopback, normalize_host
 
 HEALTH_HOST = "egress-guard.invalid"
+HEALTH_QUERY = re.compile(r"nonce=([A-Za-z0-9_-]{43})")
 CREDENTIAL_HEADERS = ("Authorization", "Cookie")
 
 
@@ -57,13 +60,18 @@ class EgressGuard:
         except (OSError, ValueError):
             ctx.master.shutdown()
             return
-        self.policy = Policy(config, self._state)
+        stamp = self._stamp()
+        try:
+            self.policy = Policy(config, self._state)
+        except ValueError:
+            # Remain loopback-only and report unready until valid rules are available.
+            pass
         self._block_plaintext_credentials = config["risk"]["block_plaintext_credentials"]
         self.ledger = Ledger(self._state / "events.sqlite3", **config["logging"])
-        self._refresh_task = asyncio.create_task(self._refresh(self._stamp()))
+        self._refresh_task = asyncio.create_task(self._refresh(stamp))
 
     def configure(self, updated) -> None:
-        if self.policy is not None and not self._safe_options():
+        if self._refresh_task is not None and not self._safe_options():
             self.policy = None
             ctx.master.shutdown()
 
@@ -77,8 +85,8 @@ class EgressGuard:
         stamps = []
         for path in self._watched:
             try:
-                stat = path.stat()
-                stamps.append((stat.st_ino, stat.st_mtime_ns, stat.st_size))
+                stat = path.lstat()
+                stamps.append((stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size))
             except OSError:
                 stamps.append(None)
         return tuple(stamps)
@@ -88,11 +96,10 @@ class EgressGuard:
         return Policy(config, self._state), config["risk"]["block_plaintext_credentials"]
 
     async def _refresh(self, stamp: tuple) -> None:
-        while self.policy is not None:
+        while True:
             await asyncio.sleep(1)
-            if self.policy is None:
-                return
-            self.policy.reload_controls()
+            if self.policy is not None:
+                self.policy.reload_controls()
             current = self._stamp()
             if current != stamp:
                 stamp = current
@@ -100,7 +107,7 @@ class EgressGuard:
                     policy, protect_credentials = await asyncio.to_thread(self._load_policy)
                 except (OSError, ValueError):
                     continue
-                if self.policy is not None and (policy.ready() or not self.policy.ready()):
+                if self._safe_options() and (policy.ready() or self.policy is None or not self.policy.ready()):
                     self.policy = policy
                     self._block_plaintext_credentials = protect_credentials
 
@@ -143,25 +150,42 @@ class EgressGuard:
         flow.request.headers.pop("Proxy-Authorization", None)
         self._apply(flow, "connect")
 
+    def _health(self, flow: http.HTTPFlow) -> None:
+        request = flow.request
+        path, separator, query = request.path.partition("?")
+        if request.scheme != "http" or request.port != 80 or request.method != "GET" or path != "/health":
+            self._deny(flow, 404, "Unknown Egress Guard endpoint.")
+            return
+        challenge = HEALTH_QUERY.fullmatch(query) if separator else None
+        if separator and challenge is None:
+            self._deny(flow, 400, "Invalid Egress Guard health challenge.")
+            return
+        if self._has_body(request):
+            flow.kill()
+            return
+        ready = bool(self.policy and self.policy.ready() and self.ledger and self.ledger.ready())
+        data = {"product": "egress-guard", "version": __version__, "ready": ready, "https_decryption": False}
+        if ready and challenge is not None:
+            port = ctx.options.listen_port
+            if type(port) is int:
+                try:
+                    data["proof"] = response_proof(challenge.group(1), port, self._state)
+                except (OSError, RuntimeError, ValueError):
+                    data["ready"] = False
+            else:
+                data["ready"] = False
+        flow.response = http.Response.make(200 if data["ready"] else 503, json.dumps(data), {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+        })
+
     def requestheaders(self, flow: http.HTTPFlow) -> None:
         request = flow.request
         request.headers.pop("Proxy-Authorization", None)
         request.headers.pop("Proxy-Connection", None)
         host = normalize_host(request.host)
-        if (
-            host == HEALTH_HOST and request.scheme == "http" and request.port == 80
-            and request.method == "GET" and request.path == "/health"
-        ):
-            if self._has_body(request):
-                flow.kill()
-                return
-            ready = bool(self.policy and self.policy.ready() and self.ledger and self.ledger.ready())
-            flow.response = http.Response.make(200 if ready else 503, json.dumps({
-                "product": "egress-guard",
-                "version": __version__,
-                "ready": ready,
-                "https_decryption": False,
-            }), {"Content-Type": "application/json", "Cache-Control": "no-store"})
+        if host == HEALTH_HOST:
+            self._health(flow)
             return
         if host is None or request.scheme != "http":
             self._deny(flow, 400, "Use a valid HTTP request target or HTTPS CONNECT tunnel.")

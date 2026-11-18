@@ -5,8 +5,10 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import socket
 import time
 import unittest
+from unittest.mock import patch
 
 from egress_guard.dashboard_http import ProtectionServer, installation_token
 
@@ -59,9 +61,10 @@ class DashboardHttpTest(unittest.TestCase):
 
     def login(self):
         nonce = self.server.new_bootstrap()
-        status, headers, _ = self.request("POST", "/api/session", json.dumps({"token": nonce}), {"X-Mac-Guard": "1"})
+        status, headers, body = self.request("POST", "/api/session", json.dumps({"token": nonce}), {"X-Mac-Guard": "1"})
         self.assertEqual(status, 200)
-        return headers["Set-Cookie"].split(";", 1)[0]
+        self.assertNotIn("Set-Cookie", headers)
+        return "Bearer " + json.loads(body)["session_token"]
 
     def test_data_requires_auth_and_static_does_not_leak_key(self):
         self.assertEqual(self.request("GET", "/api/status")[0], 401)
@@ -69,6 +72,27 @@ class DashboardHttpTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn(self.key.encode(), data)
         self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
+
+    def test_duplicate_launcher_challenge_is_rejected_without_disconnecting(self):
+        status, _, _ = self.request("GET", "/api/challenge?client=" + "z" * 43 + "&extra=1")
+        self.assertEqual(status, 400)
+
+    def test_unsupported_identity_backend_refuses_before_creating_state(self):
+        path = Path(self.temporary.name) / "unsupported"
+        with patch("egress_guard.dashboard_http.supports_private_identity", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "identity is unavailable"):
+                installation_token(path)
+        self.assertFalse(path.exists())
+
+    def test_unsupported_health_reports_unavailable_without_unsigned_probe(self):
+        from egress_guard.health import proxy_health
+        with patch("egress_guard.health.supports_private_identity", return_value=False), patch(
+            "egress_guard.health.http.client.HTTPConnection"
+        ) as connection:
+            result = proxy_health(18080)
+        connection.assert_not_called()
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["identity"], "unavailable")
 
     def test_rebinding_and_cross_site_requests_are_refused(self):
         self.assertEqual(self.request("GET", "/", headers={"Host": "attacker.invalid"})[0], 403)
@@ -82,27 +106,27 @@ class DashboardHttpTest(unittest.TestCase):
 
     def test_mutation_needs_session_csrf_and_exact_origin(self):
         cookie = self.login()
-        status, _, body = self.request("GET", "/api/status", headers={"Cookie": cookie})
+        status, _, body = self.request("GET", "/api/status", headers={"Authorization": cookie})
         self.assertEqual(status, 200)
         csrf = json.loads(body)["csrf_token"]
         value = json.dumps({"action": "pause", "minutes": 5})
-        self.assertEqual(self.request("POST", "/api/action", value, {"Cookie": cookie})[0], 403)
-        self.assertEqual(self.request("POST", "/api/action", value, {"Cookie": cookie, "X-CSRF-Token": csrf, "Origin": "https://attacker.invalid"})[0], 403)
+        self.assertEqual(self.request("POST", "/api/action", value, {"Authorization": cookie})[0], 403)
+        self.assertEqual(self.request("POST", "/api/action", value, {"Authorization": cookie, "X-CSRF-Token": csrf, "Origin": "https://attacker.invalid"})[0], 403)
         self.assertFalse(self.application.actions)
-        self.assertEqual(self.request("POST", "/api/action", value, {"Cookie": cookie, "X-CSRF-Token": csrf})[0], 200)
+        self.assertEqual(self.request("POST", "/api/action", value, {"Authorization": cookie, "X-CSRF-Token": csrf})[0], 200)
         self.assertEqual(self.application.actions, [{"action": "pause", "minutes": 5}])
 
     def test_expired_session_cannot_read_data(self):
         cookie = self.login()
         for session in self.server.sessions.values():
             session["expires"] = time.time() - 1
-        self.assertEqual(self.request("GET", "/api/status", headers={"Cookie": cookie})[0], 401)
+        self.assertEqual(self.request("GET", "/api/status", headers={"Authorization": cookie})[0], 401)
 
     def test_browser_bootstrap_is_one_use_and_not_the_persistent_key(self):
-        status, _, challenge = self.request("GET", "/api/challenge")
+        status, _, challenge = self.request("GET", "/api/challenge?client=" + "z" * 43)
         self.assertEqual(status, 200)
         challenge = json.loads(challenge)
-        value = {"challenge": challenge["challenge"], "proof": self.server.proof("client", challenge["challenge"])}
+        value = {"challenge": challenge["challenge"], "client": "z" * 43, "proof": self.server.proof("client", challenge["challenge"], "z" * 43)}
         status, _, body = self.request("POST", "/api/bootstrap", json.dumps(value), {"X-Mac-Guard": "1"})
         self.assertEqual(status, 200)
         nonce = json.loads(body)["token"]
@@ -113,9 +137,32 @@ class DashboardHttpTest(unittest.TestCase):
 
     def test_permanent_key_and_reflected_server_proof_are_not_login_credentials(self):
         self.assertEqual(self.request("POST", "/api/session", json.dumps({"token": self.key}), {"X-Mac-Guard": "1"})[0], 401)
-        _, _, body = self.request("GET", "/api/challenge")
+        _, _, body = self.request("GET", "/api/challenge?client=" + "z" * 43)
         reflected = json.loads(body)
         self.assertEqual(self.request("POST", "/api/bootstrap", json.dumps(reflected), {"X-Mac-Guard": "1"})[0], 401)
+
+    def test_cookie_replay_does_not_authorize_another_service(self):
+        bearer = self.login()
+        stolen_cookie = "EgressGuardSession=" + bearer.removeprefix("Bearer ")
+        self.assertEqual(self.request("GET", "/api/status", headers={"Cookie": stolen_cookie})[0], 401)
+        self.assertEqual(self.request("GET", "/api/status", headers={"Authorization": bearer})[0], 200)
+
+    def test_client_freshness_is_bound_into_server_and_client_proofs(self):
+        first, second = "a" * 43, "b" * 43
+        value = self.server.new_challenge(first)
+        self.assertNotEqual(value["proof"], self.server.proof("server", value["challenge"], second))
+        forged = {"challenge": value["challenge"], "client": second,
+                  "proof": self.server.proof("client", value["challenge"], second)}
+        self.assertEqual(self.request("POST", "/api/bootstrap", json.dumps(forged), {"X-Mac-Guard": "1"})[0], 401)
+
+    def test_connection_admission_is_bounded_before_worker_creation(self):
+        self.server.admission = threading.BoundedSemaphore(2)
+        sockets = [socket.create_connection(("127.0.0.1", self.server.server_port), timeout=2) for _ in range(2)]
+        try:
+            self.assertEqual(self.request("GET", "/")[0], 503)
+        finally:
+            for connection in sockets:
+                connection.close()
 
     def test_expired_bootstrap_does_not_create_a_session(self):
         nonce = self.server.new_bootstrap()

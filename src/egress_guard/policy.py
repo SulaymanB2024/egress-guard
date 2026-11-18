@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import stat
 import time
 from pathlib import Path
 
@@ -44,11 +45,19 @@ def _match(host: str, names: set[str]) -> str | None:
 
 def _read_small(path: Path) -> str:
     try:
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            return ""
+        if not stat.S_ISREG(mode):
+            raise ValueError(f"{path.name} must be a regular file")
         with path.open("rb") as file:
             data = file.read(MAX_CONTROL_BYTES + 1)
-        return data.decode("utf-8") if len(data) <= MAX_CONTROL_BYTES else ""
-    except (OSError, UnicodeError):
-        return ""
+        if len(data) > MAX_CONTROL_BYTES:
+            raise ValueError(f"{path.name} exceeds the 64 KiB limit")
+        return data.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"{path.name} could not be read as UTF-8") from exc
 
 
 def _read_controls(path: Path) -> dict:
@@ -60,11 +69,16 @@ def _read_controls(path: Path) -> dict:
 
 
 def _rules(path: Path) -> set[str]:
-    return {
-        domain
-        for line in _read_small(path).splitlines()
-        if (domain := dns_name(line.split("#", 1)[0].strip()))
-    }
+    names = set()
+    for number, line in enumerate(_read_small(path).splitlines(), start=1):
+        candidate = line.split("#", 1)[0].strip()
+        if not candidate:
+            continue
+        name = dns_name(candidate)
+        if name is None:
+            raise ValueError(f"{path.name} has an invalid domain on line {number}")
+        names.add(name)
+    return names
 
 
 def _expiry_valid(value: object, now: float) -> bool:

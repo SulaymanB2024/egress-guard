@@ -158,6 +158,74 @@ class CanaryMonitorTests(unittest.TestCase):
         self.assertEqual(retried["error"], canaries.PROVIDER_ERROR)
         self.assertEqual(self.notification.call_count, 2)
 
+    def test_duplicate_recent_rows_leave_room_for_an_older_distinct_event(self):
+        self.monitor.import_token(PLACEMENT)
+        self.now = 1060
+        recent = {"time_of_hit": 200}
+        older = {"time_of_hit": 100}
+        self.when_history(*([recent] * 1024), older)
+        report = self.monitor.poll_once()[0]
+        self.assertEqual(report["events"], 2)
+        self.assertFalse(report["history_truncated"])
+        self.assertEqual(report["notifications"], 1)
+
+    def test_large_history_reports_truncation_and_selects_latest_distinct_events(self):
+        events = [{"time_of_hit": timestamp} for timestamp in range(1, 1026)]
+        self.when_history(events[-1], *reversed(events))
+        report = self.monitor.import_token(PLACEMENT)
+        self.assertTrue(report["history_truncated"])
+        self.assertEqual(report["events"], 0)
+        seen = json.loads(self.monitor.path.read_text())["placements"][0]["seen"]
+        self.assertEqual(len(seen), 1024)
+        self.assertEqual(seen[-1], canaries._validated_event(events[-1], "web")[1])
+        self.assertNotIn(canaries._validated_event(events[0], "web")[1], seen)
+
+        self.now = report["next_attempt"]
+        self.when_history(*events, events[-1])
+        report = self.monitor.poll_once()[0]
+        self.assertTrue(report["history_truncated"])
+        self.assertEqual(report["events"], 0)
+        self.notification.assert_not_called()
+
+        self.now = report["next_attempt"]
+        self.when_history(*events[1:], {"time_of_hit": 1026})
+        report = self.monitor.poll_once()[0]
+        self.assertTrue(report["history_truncated"])
+        self.assertEqual(report["events"], 1)
+        self.notification.assert_called_once()
+
+    def test_large_history_rejects_malformed_fields_even_outside_recent_window(self):
+        events = [{"time_of_hit": timestamp} for timestamp in range(2, 1026)]
+        self.when_history(*events, {"time_of_hit": 1, "src_ip": ["invalid field"]})
+        with self.assertRaisesRegex(canaries.CanaryError, "invalid data"):
+            self.monitor.import_token(PLACEMENT)
+        self.assertFalse(self.monitor.path.exists())
+        self.notification.assert_not_called()
+
+    def test_truncated_history_keeps_pending_event_through_eviction_and_reappearance(self):
+        events = [{"time_of_hit": timestamp} for timestamp in range(1, 1026)]
+        self.when_history(*events)
+        report = self.monitor.import_token(PLACEMENT)
+        new_event = {"time_of_hit": 1026}
+        self.now = report["next_attempt"]
+        self.when_history(*events, new_event)
+        self.notification.side_effect = subprocess.TimeoutExpired("osascript", 15)
+        report = self.monitor.poll_once()[0]
+        self.assertEqual(report["events"], 0)
+
+        self.now = report["next_attempt"]
+        self.when_history(*events)
+        self.notification.side_effect = None
+        report = self.monitor.poll_once()[0]
+        self.assertEqual(report["events"], 1)
+        self.assertTrue(report["history_truncated"])
+
+        self.now = report["next_attempt"]
+        self.when_history(*events, new_event)
+        report = canaries.CanaryMonitor(self.state).poll_once()[0]
+        self.assertEqual(report["events"], 1)
+        self.assertEqual(self.notification.call_count, 2)
+
     def test_backoff_and_one_health_alert_until_provider_recovers(self):
         self.monitor.import_token(PLACEMENT)
         self.when_history(status=503)

@@ -48,6 +48,7 @@ class ConfigurationTests(unittest.TestCase):
         application = Application(self.state, self.state / "config.toml")
         application.action({"action": "block", "host": "tracking.example"})
         self.assertEqual(application.domain("tracking.example")["decision"], "blocked")
+        self.assertFalse(application.domain("tracking.example")["can_block"])
         with self.assertRaises(PermissionError):
             application.action({"action": "allow", "host": "tracking.example", "minutes": 5})
         with self.assertRaises(ValueError):
@@ -64,9 +65,29 @@ class ConfigurationTests(unittest.TestCase):
         with patch("egress_guard.dashboard_app.proxy_health", return_value={"ready": False}):
             data = application.status()
         self.assertEqual(data["protection"]["state"], "degraded")
-        self.assertEqual(data["canaries"], [])
+        self.assertEqual(data["canaries"][0]["state"], "disabled")
         self.assertNotIn("auth_token", json.dumps(data))
         self.assertFalse((self.state / "canaries.json").exists())
+
+    def test_dashboard_surfaces_canary_history_overflow(self):
+        application = Application(self.state, self.state / "config.toml")
+        with patch("egress_guard.dashboard_app.proxy_health", return_value={"ready": False}), patch.object(
+            application.canaries, "status", return_value=[{"label": "Test placement", "last_success": 1,
+                                                         "history_truncated": True}]
+        ):
+            data = application.status()
+        self.assertEqual(data["canaries"][0]["state"], "degraded")
+        self.assertIn("1,024", data["canaries"][0]["detail"])
+
+    def test_oversized_prospective_manual_edit_preserves_existing_rules(self):
+        application = Application(self.state, self.state / "config.toml")
+        path = self.state / "block.txt"
+        before = "kept.example\n#" + "x" * (65536 - len("kept.example\n#"))
+        path.write_text(before)
+        with self.assertRaises(ValueError):
+            application.action({"action": "block", "host": "new.example"})
+        self.assertEqual(path.read_text(), before)
+        self.assertEqual(application.domain("kept.example")["decision"], "blocked")
 
 
 if __name__ == "__main__":

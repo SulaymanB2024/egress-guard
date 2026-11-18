@@ -101,17 +101,27 @@ class MacOSProxyTests(unittest.TestCase):
         if result.returncode:
             raise macos.MacOSProxyError("Mock authorization returned an error.")
 
-    def enable(self):
-        return macos.enable_proxy(self.service, 18080, self.receipt, verify_health=self.verify)
+    def experimental_enable(self):
+        return macos._experimental_enable_proxy(self.service, 18080, self.receipt, verify_health=self.verify)
 
-    def test_read_only_inspection_and_shell_quoted_enable(self):
+    def test_public_enable_exits_before_commands_health_check_or_receipt(self):
+        with patch.object(macos, "_run") as native:
+            with self.assertRaisesRegex(macos.MacOSProxyError, "unavailable in this release"):
+                macos.enable_proxy(self.service, 18080, self.receipt, verify_health=self.verify)
+        native.assert_not_called()
+        self.verify.assert_not_called()
+        self.assertEqual(self.authorizations, [])
+        self.assertFalse(self.receipt.exists())
+        self.assertFalse(self.receipt.with_name(f".{self.receipt.name}.lock").exists())
+
+    def test_read_only_inspection_and_experimental_shell_quoted_enable(self):
         status = macos.inspect_proxy(self.service)
         self.assertEqual(status["location"], "Automatic")
         self.assertFalse(status["http"]["enabled"])
         self.assertEqual(self.read_status()["calls"], [])
         self.assertFalse(self.receipt.exists())
 
-        self.assertEqual(self.enable(), {"service": self.service, "port": 18080})
+        self.assertEqual(self.experimental_enable(), {"service": self.service, "port": 18080})
         self.verify.assert_called_once_with()
         self.assertEqual(len(self.authorizations), 1)
         self.assertFalse(self.marker.exists())
@@ -124,7 +134,7 @@ class MacOSProxyTests(unittest.TestCase):
     def test_health_failure_blocks_receipt_and_activation(self):
         self.verify.side_effect = macos.MacOSProxyError("Local proxy is unhealthy.")
         with self.assertRaisesRegex(macos.MacOSProxyError, "unhealthy"):
-            self.enable()
+            self.experimental_enable()
         self.assertEqual(self.authorizations, [])
         self.assertFalse(self.receipt.exists())
 
@@ -143,18 +153,18 @@ class MacOSProxyTests(unittest.TestCase):
                     status["securewebproxy"].update(enabled=True, server="example.invalid", port=8080)
                 self.write_status(status)
                 with self.assertRaisesRegex(macos.MacOSProxyError, "already configured"):
-                    self.enable()
+                    self.experimental_enable()
         self.assertEqual(self.authorizations, [])
         self.verify.assert_not_called()
         self.assertFalse(self.receipt.exists())
 
-    def test_partial_activation_rolls_back_in_same_authorization(self):
+    def test_experimental_partial_activation_rolls_back_in_same_authorization(self):
         status = self.read_status()
         status["fail"] = "-setsecurewebproxy"
         self.write_status(status)
 
         with self.assertRaisesRegex(macos.MacOSProxyError, "both proxies are disabled"):
-            self.enable()
+            self.experimental_enable()
 
         status = self.read_status()
         self.assertEqual(len(self.authorizations), 1)
@@ -171,7 +181,7 @@ class MacOSProxyTests(unittest.TestCase):
         original = self.read_status()
         original["securewebproxy"].update(server="old.example.invalid", port=5555)
         self.write_status(original)
-        self.enable()
+        self.experimental_enable()
 
         status = self.read_status()
         status["webproxy"].update(server="new.example.invalid", port=6666)
@@ -189,7 +199,7 @@ class MacOSProxyTests(unittest.TestCase):
         self.assertEqual(status["calls"][-1], ["-setsecurewebproxystate", self.service, "off"])
         self.assertFalse(self.receipt.exists())
 
-    def test_rechecks_settings_after_authorization_prompt(self):
+    def test_experimental_activation_rechecks_settings_after_authorization_prompt(self):
         def change_settings_then_authorize(script):
             status = self.read_status()
             status["pac"] = True
@@ -198,13 +208,13 @@ class MacOSProxyTests(unittest.TestCase):
 
         with patch.object(macos, "_authorized", change_settings_then_authorize):
             with self.assertRaisesRegex(macos.MacOSProxyError, "original proxy settings are intact"):
-                self.enable()
+                self.experimental_enable()
 
         self.assertEqual(self.read_status()["calls"], [])
         self.assertFalse(self.receipt.exists())
 
     def test_location_recheck_protects_restore(self):
-        self.enable()
+        self.experimental_enable()
         status = self.read_status()
         status["location"] = "Office"
         self.write_status(status)
@@ -216,7 +226,7 @@ class MacOSProxyTests(unittest.TestCase):
     def test_requires_explicit_service_and_valid_port_and_private_receipt(self):
         for port in (0, 65536, True, "18080"):
             with self.subTest(port=port), self.assertRaisesRegex(macos.MacOSProxyError, "requires a port"):
-                macos.enable_proxy(self.service, port, self.receipt, verify_health=self.verify)
+                macos._experimental_enable_proxy(self.service, port, self.receipt, verify_health=self.verify)
         for service in ("", "-help", "Other network"):
             with self.subTest(service=service), self.assertRaises(macos.MacOSProxyError):
                 macos.inspect_proxy(service)
@@ -224,7 +234,7 @@ class MacOSProxyTests(unittest.TestCase):
         target.write_text("Leave this file alone.")
         self.receipt.symlink_to(target)
         with self.assertRaises(macos.MacOSProxyError):
-            self.enable()
+            self.experimental_enable()
         with self.assertRaises(macos.MacOSProxyError):
             macos.restore_proxy(self.receipt)
         self.assertEqual(target.read_text(), "Leave this file alone.")

@@ -1,7 +1,9 @@
 from dataclasses import replace
+import datetime as dt
 from pathlib import Path
 import sqlite3
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import urllib.error
@@ -72,6 +74,37 @@ valid.test
         self.assertFalse(feeds.read_cached_feed(self.state, self.sources[1]))
         with patch("egress_guard.policy.selected_feeds", return_value=self.sources):
             self.assertFalse(Policy({}, self.state).ready())
+
+    def test_future_publication_keeps_the_previous_snapshot(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        current = f"# TimeUpdated: {now.isoformat()}\none.test\ntwo.test\n".encode("ascii")
+        later = now + dt.timedelta(days=2)
+        future = f"# TimeUpdated: {later.isoformat()}\nthree.test\nfour.test\n".encode("ascii")
+        with patch("egress_guard.feeds._download", return_value=current):
+            self.assertTrue(feeds.update_feeds(self.state, {})["ok"])
+        with patch("egress_guard.feeds._download", return_value=future):
+            report = feeds.update_feeds(self.state, {})
+        self.assertFalse(report["ok"])
+        for feed, row in zip(self.sources, report["feeds"], strict=True):
+            self.assertEqual(row["status"], "using-previous")
+            self.assertIn("publication timestamp", row["error"])
+            self.assertEqual(feeds.read_cached_feed(self.state, feed), {"one.test", "two.test"})
+
+    def test_future_snapshot_is_reported_invalid_and_does_not_set_rollback_floor(self):
+        (self.state / "blocklists").mkdir(mode=0o700)
+        poisoned = self.sources[0].path(self.state)
+        poisoned.write_bytes(feeds._snapshot({f"bad{number}.test" for number in range(8)},
+                                             time.time() + 7 * 86400))
+        invalid = feeds.feed_status(self.state)[0]
+        self.assertEqual(invalid["status"], "invalid")
+        self.assertIsNone(invalid["published_at"])
+        published = dt.datetime.now(dt.timezone.utc).isoformat()
+        current = f"# TimeUpdated: {published}\none.test\ntwo.test\n".encode("ascii")
+        with patch("egress_guard.feeds._download", return_value=current):
+            report = feeds.update_feeds(self.state, {})
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["feeds"][0]["status"], "current")
+        self.assertEqual(feeds.read_cached_feed(self.state, self.sources[0]), {"one.test", "two.test"})
 
     def test_refresh_does_not_overlap_another_writer(self):
         with patch("egress_guard.feeds._download", return_value=b"one.test\ntwo.test\n"):

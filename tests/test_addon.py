@@ -18,6 +18,8 @@ import time
 import unittest
 
 from egress_guard.feeds import _snapshot, selected_feeds
+from egress_guard.health import proxy_health
+from egress_guard.policy import MAX_CONTROL_BYTES
 
 MITMDUMP = Path(sys.executable).with_name("mitmdump")
 if not MITMDUMP.is_file():
@@ -101,7 +103,7 @@ class ProxyIntegrationTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        state = Path(directory.name)
+        self.state = state = Path(directory.name)
         tls, self.tls_client, self.expected_cert = certificate(state)
         self.plain_origin = self.serve()
         self.tls_origin = self.serve(tls)
@@ -136,6 +138,8 @@ class LoopbackOnly:
 
 addons = [EgressGuard(), LoopbackOnly()]
 """)
+    def start_proxy(self, *, ready=True):
+        state = self.state
         log = (state / "proxy.log").open("wb")
         self.addCleanup(log.close)
         config = state / "config.toml"
@@ -146,14 +150,14 @@ addons = [EgressGuard(), LoopbackOnly()]
                 "--listen-port", str(self.proxy_port), "--ignore-hosts", ".*",
                 "--set", "connection_strategy=lazy", "--set", "flow_detail=0",
                 "--set", "termlog_verbosity=error", "--set", f"confdir={state / 'mitm'}",
-                "-s", str(script),
+                "-s", str(state / "fixture.py"),
             ],
             stdout=log, stderr=subprocess.STDOUT,
             env={**os.environ, "EGRESS_GUARD_DATA": str(state), "EGRESS_GUARD_CONFIG": str(config),
                  "PYTHONPATH": str(SOURCE), "PYTHONDONTWRITEBYTECODE": "1"},
         )
         self.addCleanup(self.stop, process)
-        deadline = time.monotonic() + 8
+        deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 break
@@ -162,10 +166,10 @@ addons = [EgressGuard(), LoopbackOnly()]
             except OSError:
                 pass
             else:
-                if status == 200:
+                if status == (200 if ready else 503):
                     self.assertEqual(json.loads(body), {
                         "product": "egress-guard", "version": "0.1.0",
-                        "ready": True, "https_decryption": False,
+                        "ready": ready, "https_decryption": False,
                     })
                     return
             time.sleep(0.05)
@@ -207,6 +211,7 @@ addons = [EgressGuard(), LoopbackOnly()]
             connection.close()
 
     def test_health_plain_http_connect_denial_and_original_tls(self):
+        self.start_proxy()
         for blocked_host in ("blocked.test", "tracker.test"):
             with self.subTest(blocked_host=blocked_host), self.assertRaisesRegex(OSError, "403"):
                 self.tls(blocked_host)
@@ -262,6 +267,70 @@ addons = [EgressGuard(), LoopbackOnly()]
         self.assertIn(("passthrough.test", "blocked", "local-block", "connect"), rows)
         self.assertNotIn("fixture-secret", repr(rows))
         self.assertNotIn("private-test-value", repr(rows))
+
+
+    def test_health_authenticates_installation_and_rejects_static_replay(self):
+        self.start_proxy()
+        self.assertTrue(proxy_health(self.proxy_port, self.state)["ready"])
+        self.assertEqual(self.http("http://egress-guard.invalid/health?nonce=too-short")[0], 400)
+
+        _, observed = self.http("http://egress-guard.invalid/health?nonce=" + "A" * 43)
+        recorded = json.loads(observed)
+        self.assertIsInstance(recorded["proof"], str)
+
+        class StaticImposter(UpstreamHandler):
+            def do_GET(self):
+                body = json.dumps(self.server.payload).encode("ascii")
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        with ThreadingHTTPServer(("127.0.0.1", 0), StaticImposter) as imposter:
+            thread = threading.Thread(target=imposter.serve_forever, daemon=True)
+            thread.start()
+            try:
+                imposter.payload = recorded
+                self.assertFalse(proxy_health(imposter.server_port, self.state)["ready"])
+                imposter.payload = {key: val for key, val in recorded.items() if key != "proof"}
+                self.assertFalse(proxy_health(imposter.server_port, self.state)["ready"])
+            finally:
+                imposter.shutdown()
+                thread.join(2)
+
+    def assert_origin_status(self, expected):
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            status, _ = self.http("http://plaintext.test/rule-check")
+            if status == expected:
+                return
+            time.sleep(0.05)
+        self.assertEqual(status, expected)
+
+    def test_invalid_manual_rules_preserve_running_policy_until_repaired(self):
+        self.manual.write_text("plaintext.test\n")
+        self.start_proxy()
+        self.assert_origin_status(403)
+
+        self.manual.write_bytes(b"#" * (MAX_CONTROL_BYTES + 1))
+        # Span a complete watcher tick so an empty replacement policy would be observable.
+        end = time.monotonic() + 1.5
+        while time.monotonic() < end:
+            self.assertEqual(self.http("http://plaintext.test/rule-check")[0], 403)
+            time.sleep(0.05)
+        self.assertEqual(self.plain_origin.accepts, 0)
+        self.manual.write_text("# removed by the user\n")
+        self.assert_origin_status(200)
+
+    def test_invalid_manual_rules_at_start_are_unready_and_recover(self):
+        self.manual.write_text("plaintext.test\ninvalid/domain\n")
+        self.start_proxy(ready=False)
+        self.assertEqual(self.http("http://plaintext.test/rule-check")[0], 503)
+        self.assertEqual(self.plain_origin.accepts, 0)
+        self.manual.write_text("plaintext.test\n")
+        self.assert_origin_status(403)
+        self.assertEqual(self.http("http://egress-guard.invalid/health")[0], 200)
+        self.assertEqual(self.plain_origin.accepts, 0)
 
 
 if __name__ == "__main__":

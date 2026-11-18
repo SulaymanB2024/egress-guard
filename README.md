@@ -4,7 +4,7 @@ Local ad, tracker and threat filtering for macOS, with a portable Python core.
 
 Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps the origin server's certificate and encrypted contents. No root daemon, browser certificate trust, or account credentials are needed for filtering.
 
-**0.1.0 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. Windows and Linux can use the portable core and manually configured proxy; guided setup and native canary notifications are macOS features.
+**0.1.0 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. The core has no macOS routing dependency, but Windows transport has not been tested. Windows dashboard authentication and verified health are unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
 
 ## What it does
 
@@ -13,7 +13,7 @@ Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps 
 - Refuses external plaintext HTTP requests carrying cookies or authorization headers before forwarding them.
 - Provides an authenticated local dashboard with decision explanations, temporary exact-host exceptions, ad-filter pauses, manual rules and local activity.
 - Monitors canaries you explicitly register with Thinkst and sends batched macOS notifications. Registration verifies access and establishes a history baseline without exposing token values in logs or the dashboard.
-- Changes macOS system routing only when you explicitly request it. Restoration preserves settings subsequently changed by another application.
+- Leaves system-wide routing unchanged. Automatic native activation is withheld until endpoint ownership can be guaranteed across logout, crashes and reboot. Inspection and ownership-preserving recovery are retained.
 
 ## Install on macOS
 
@@ -36,15 +36,20 @@ EG="$HOME/Library/Application Support/Egress Guard/venv/bin/egress-guard"
 "$EG" open
 ```
 
-The dashboard opens on this machine only. To route a network service through the healthy proxy, choose the service explicitly:
+The dashboard opens on this machine only. Configure individual proxy-aware applications for `http://127.0.0.1:18080`. For example:
+
+```sh
+curl --proxy http://127.0.0.1:18080 https://example.com/
+```
+
+You can inspect existing system routing without changing it:
 
 ```sh
 /usr/sbin/networksetup -listallnetworkservices
 "$EG" proxy inspect --service "Wi-Fi"
-"$EG" proxy enable --service "Wi-Fi"
 ```
 
-macOS requests administrator approval for the fixed system network-setting commands. Existing PAC, SOCKS, authenticated or foreign enabled proxies require separate configuration and are refused. The helper never runs this project's Python code as root.
+This alpha does not enable a persistent machine-wide proxy. A per-user process cannot reserve an unprivileged port after its login session ends, while a network service's proxy setting may survive. On a Mac with untrusted local accounts, do not rely on an unattended unprivileged listener as a persistent routing endpoint.
 
 ## Restore or stop
 
@@ -53,7 +58,7 @@ macOS requests administrator approval for the fixed system network-setting comma
 "$EG" stop
 ```
 
-`stop` restores proxy settings owned by this installation before stopping its services. If approval is declined or restoration fails, it leaves the proxy available. Logs and registrations are retained. A disabled proxy's dormant server fields may remain at loopback because macOS cannot rewrite those fields without briefly enabling that server; active routing is restored and the result reports the remaining fields.
+`stop` restores any pre-existing receipt-owned proxy settings before stopping its services. Recovery may require administrator approval; if declined or restoration fails, it leaves the proxy available. Logs and registrations are retained. A disabled proxy's dormant server fields may remain at loopback because macOS cannot rewrite those fields without briefly enabling that server; the result reports those fields.
 
 For recovery without the CLI, turn off the matching `127.0.0.1:18080` HTTP and HTTPS settings for the affected service in macOS Network settings. Preserve any settings another application has since installed.
 
@@ -66,7 +71,7 @@ egress-guard refresh
 egress-guard run
 ```
 
-Configure individual clients for `http://127.0.0.1:18080`. Run `egress-guard dashboard` in another terminal and `egress-guard open` to access controls. The dashboard uses port `18081` by default. A fresh install cannot start filtering with an empty or unverified feed cache.
+Configure individual clients for `http://127.0.0.1:18080`. On macOS/Linux, run `egress-guard dashboard` in another terminal and `egress-guard open` to access controls. The dashboard uses port `18081` by default. A fresh install cannot start filtering with an empty or unverified feed cache. On Windows, `doctor` reports identity verification unavailable and the dashboard refuses to start; it never substitutes an unsigned readiness response.
 
 ## Canary registration
 
@@ -86,7 +91,7 @@ Filtering applies to clients using this proxy. Existing encrypted tunnels, appli
 
 Domain activity is stored locally with bounded buffering and retention. Request paths, bodies, cookies, authorization values and canary management keys are excluded from the activity log. A long storage outage can exhaust the bounded queue; health reports unavailable storage rather than claiming complete logging.
 
-See [architecture and threat model](docs/architecture.md), [research and next steps](docs/research.md), [security policy](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
+See [architecture and threat model](docs/architecture.md), [security review and fixes](docs/security-review.md), [research and next steps](docs/research.md), [security policy](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Contribute
 

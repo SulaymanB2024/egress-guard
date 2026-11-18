@@ -29,6 +29,8 @@ let lookupResult = null;
 let actionRequest = null;
 let submitting = false;
 let authExpired = false;
+let bearer = '';
+try { bearer = sessionStorage.getItem('egress-guard.session') || ''; } catch {}
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -75,6 +77,8 @@ function notice(id, message, isError = false) {
 }
 
 function expiredSession() {
+  bearer = '';
+  try { sessionStorage.removeItem('egress-guard.session'); } catch {}
   authExpired = true;
   status = null;
   events = null;
@@ -100,11 +104,11 @@ async function api(path, options = {}) {
   let response;
   try {
     response = await fetch(path, {
-      credentials: 'same-origin',
+      credentials: 'omit',
       cache: 'no-store',
       signal: options.signal || AbortSignal.timeout(12000),
       ...options,
-      headers: {'Accept': 'application/json', 'X-Mac-Guard': '1', ...options.headers},
+      headers: {'Accept': 'application/json', 'X-Mac-Guard': '1', ...(bearer ? {'Authorization': 'Bearer ' + bearer} : {}), ...options.headers},
     });
   } catch (error) {
     if (error.name === 'AbortError') throw error;
@@ -486,11 +490,14 @@ async function initialize() {
   if (/^[A-Za-z0-9_-]{43}$/.test(fragment)) {
     window.history.replaceState(null, '', window.location.pathname);
     try {
-      await api('/api/session', {
+      const session = await api('/api/session', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({token: fragment}),
       });
+      if (!/^[A-Za-z0-9_-]{43}$/.test(session.session_token || '')) throw new Error('The local session could not be established.');
+      bearer = session.session_token;
+      try { sessionStorage.setItem('egress-guard.session', bearer); } catch {}
     } catch (error) {
       expiredSession();
       return;

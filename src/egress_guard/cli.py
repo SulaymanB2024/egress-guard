@@ -50,7 +50,7 @@ def main(argv=None) -> int:
     lookup = commands.add_parser("check", help="Explain the decision for a domain")
     lookup.add_argument("host")
     native = commands.add_parser("proxy", help="Explicit, reversible macOS system proxy settings")
-    native.add_argument("operation", choices=("inspect", "enable", "restore"))
+    native.add_argument("operation", choices=("inspect", "restore"))
     native.add_argument("--service", help="Explicit network service, for example Wi-Fi")
     commands.add_parser("canary-import", help="Import one provider token as JSON from stdin; never put it in shell arguments")
     args = parser.parse_args(argv)
@@ -93,14 +93,7 @@ def main(argv=None) -> int:
             else:
                 if not args.service:
                     raise ValueError("Choose a network service with --service; no service is selected automatically.")
-                if args.operation == "inspect":
-                    result = inspect_proxy(args.service)
-                else:
-                    config = load_config()
-                    def verify():
-                        if not proxy_health(config["proxy"]["port"])["ready"]:
-                            raise ValueError("Start a healthy Egress Guard proxy before changing network settings")
-                    result = enable_proxy(args.service, config["proxy"]["port"], private_dir(data_dir()) / "proxy-receipt.json", verify_health=verify)
+                result = inspect_proxy(args.service)
             print(json.dumps(result, indent=2))
         return 0
     except KeyboardInterrupt:

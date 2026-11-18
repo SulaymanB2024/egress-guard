@@ -6,6 +6,10 @@ import sys
 import tempfile
 
 
+def supports_private_identity() -> bool:
+    return sys.platform != "win32" and hasattr(os, "getuid") and hasattr(os, "O_NOFOLLOW")
+
+
 def data_dir() -> Path:
     override = os.environ.get("EGRESS_GUARD_DATA")
     if override:

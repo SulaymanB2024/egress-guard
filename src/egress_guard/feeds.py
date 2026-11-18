@@ -21,6 +21,7 @@ ADGUARD = "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/d
 MAX_FEED_BYTES = 32 * 1024 * 1024
 MAX_ENTRIES = 1_000_000
 STALE_SECONDS = 48 * 60 * 60
+MAX_CLOCK_SKEW = 24 * 60 * 60
 DNS_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 DNS_NAME = re.compile(rf"(?:{DNS_LABEL}\.)*{DNS_LABEL}")
 
@@ -106,10 +107,17 @@ def _published_at(text: str) -> float | None:
     return None
 
 
+def _valid_clock(value: object, now: float) -> bool:
+    return type(value) in (int, float) and 0 <= value <= now + MAX_CLOCK_SKEW
+
+
 def _parse_feed(data: bytes, feed: Feed) -> tuple[set[str], float | None]:
     if len(data) > MAX_FEED_BYTES or not data.endswith(b"\n"):
         raise ValueError("feed exceeds the size limit or ends partway through a record")
     source = data.decode("utf-8-sig")
+    published = _published_at(source)
+    if published is not None and not _valid_clock(published, time.time()):
+        raise ValueError("feed publication timestamp is outside the permitted clock range")
     names: set[str] = set()
     skipped = 0
     for raw in source.splitlines():
@@ -127,7 +135,7 @@ def _parse_feed(data: bytes, feed: Feed) -> tuple[set[str], float | None]:
     # Upstream lists occasionally contain non-host DNS records or malformed labels.
     if len(names) < feed.minimum or skipped > max(10, len(names) // 20):
         raise ValueError("feed has too few domains or too many malformed records")
-    return names, _published_at(source)
+    return names, published
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -178,26 +186,33 @@ def _row(state: Path, feed: Feed) -> dict:
     cached = _read_meta(path, snapshot=True)
     attempt = _read_meta(_attempt_path(path))
     updated = cached.get("updated_at")
+    published = cached.get("published_at")
     entries = cached.get("entries")
     last_attempt = attempt.get("last_attempt")
     error = attempt.get("error")
-    if type(updated) not in (int, float) or type(entries) is not int:
+    now = time.time()
+    if not cached:
         status = "missing"
+    elif (
+        not _valid_clock(updated, now) or (published is not None and not _valid_clock(published, now))
+        or type(entries) is not int
+    ):
+        status = "invalid"
+        error = "feed snapshot has invalid metadata"
     elif error and type(last_attempt) in (int, float) and last_attempt >= updated:
         status = "using-previous"
     else:
         error = None
-        published = cached.get("published_at")
-        clock = published if type(published) in (int, float) else updated
-        status = "stale" if time.time() - clock > STALE_SECONDS else "current"
+        clock = updated if published is None else published
+        status = "stale" if now - clock > STALE_SECONDS else "current"
     return {
         "id": feed.id,
         "name": feed.name,
         "url": feed.url,
         "category": feed.category,
         "entries": entries,
-        "updated_at": updated,
-        "published_at": cached.get("published_at"),
+        "updated_at": updated if _valid_clock(updated, now) else None,
+        "published_at": published if _valid_clock(published, now) else None,
         "last_attempt": last_attempt,
         "status": status,
         "error": error,
@@ -240,12 +255,17 @@ def _refresh(state: Path, config: dict) -> dict:
         try:
             names, published = _parse_feed(_download(feed), feed)
             previous = _read_meta(path, snapshot=True)
-            old_count = previous.get("entries")
-            if type(old_count) is int and len(names) * 2 < old_count:
-                raise ValueError("feed domain count fell by more than half")
             old_published = previous.get("published_at")
-            if type(old_published) in (int, float) and (published is None or published < old_published):
-                raise ValueError("feed is older than the installed snapshot")
+            previous_clock_valid = _valid_clock(previous.get("updated_at"), started) and (
+                old_published is None or _valid_clock(old_published, started)
+            )
+            # Older releases could persist a future clock. Do not use it as a rollback floor.
+            if previous_clock_valid:
+                old_count = previous.get("entries")
+                if type(old_count) is int and len(names) * 2 < old_count:
+                    raise ValueError("feed domain count fell by more than half")
+                if old_published is not None and (published is None or published < old_published):
+                    raise ValueError("feed is older than the installed snapshot")
             content = _snapshot(names, published)
             if len(content) > MAX_FEED_BYTES:
                 raise ValueError("normalized feed exceeds the size limit")
