@@ -15,6 +15,12 @@ The testing lane also reproduced and fixed a live cross-port authentication rela
 
 All 93 integrated tests passed on macOS ARM64, Python 3.12.13 and mitmproxy 12.3.1. Additional checks cover Host/Origin validation, CSRF, plaintext credential refusal, CONNECT blocking before upstream contact, unchanged upstream TLS certificates, corrupted/empty feed refusal, atomic cache replacement, bounded activity storage, private files, and mocked macOS recovery. Canary tests use synthetic values and mocked provider/native notification calls; history beyond the polling window appears as degraded status.
 
-The release does not activate native routing on the development Mac. Native transactions are tested with mocks. Hardware and macOS-version coverage, an OS-managed routing service, signed distribution, a dependency artifact lock, browser-level sponsored-content filtering and a reproducible effectiveness benchmark remain follow-up work.
+The release does not activate native routing on the development Mac. Native transactions are tested with mocks. Hardware and macOS-version coverage, an OS-managed routing service, signed distribution, browser-level sponsored-content filtering and a reproducible effectiveness benchmark remain follow-up work.
 
 Windows dashboard identity and verified health deliberately report unavailable until an ACL-verified private identity backend is implemented. Unsupported identity handling and duplicate canary-history rows have dedicated regression checks.
+
+## 0.1.1 follow-up
+
+Feed/canary responses and local health/launcher responses now have post-connect header/body deadlines, supplementing idle timeouts. Trickle responses cannot occupy a refresh, poll or dashboard health worker indefinitely. Local replies are size-bounded JSON objects; malformed tokens never reach the browser launcher. Configuration loading rejects special/linked files, bounds the actual read, preserves dangling links and reports malformed settings cleanly.
+
+The installer uses exact, hash-checked runtime and build dependencies, disables further resolution for the local project and checks the resulting environment. The explicit OSV checker separates offline inventory, known matches and incomplete review. Four upstream Tornado package advisories remain open; [source reachability and the parent-version constraint](../requirements/README.md) are recorded without claiming those package versions are patched.

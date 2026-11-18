@@ -24,12 +24,14 @@ fi
 umask 077
 "$python_bin" -I - "$source_root" "$@" <<'PY'
 import os
+import importlib.util
 from pathlib import Path
 import shlex
 import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import venv
 
 
@@ -39,12 +41,22 @@ def install():
 
     project = Path(sys.argv[1])
     target = project
-    if len(sys.argv) == 3:
+    wheel_supplied = len(sys.argv) == 3
+    if wheel_supplied:
         target = Path(sys.argv[2]).expanduser().resolve(strict=True)
         if not target.is_file() or target.suffix != ".whl":
             raise RuntimeError("Supply the path to a local wheel.")
     elif not (project / "pyproject.toml").is_file():
         raise RuntimeError("Run this script from the project checkout or supply a local wheel.")
+
+    specification = importlib.util.spec_from_file_location("egress_guard_install_locks", project / "src/egress_guard/lockfile.py")
+    lock_reader = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(lock_reader)
+    names = ["runtime.lock"] if wheel_supplied else ["runtime.lock", "build.lock"]
+    try:
+        locks = [(name, lock_reader.read_lock(project / "requirements" / name)[0]) for name in names]
+    except (OSError, ValueError) as error:
+        raise RuntimeError("A release dependency lock is missing, linked or invalid.") from error
 
     install_root = Path.home()
     for name in ("Library", "Application Support", "Egress Guard"):
@@ -68,12 +80,26 @@ def install():
     try:
         venv.create(environment, with_pip=True, symlinks=False)
         python = environment / "bin" / "python"
-        subprocess.run(
-            [str(python), "-I", "-m", "pip", "--isolated", "--disable-pip-version-check",
-             "install", "--index-url", "https://pypi.org/simple", str(target)],
-            check=True,
-            env={**os.environ, "PIP_CONFIG_FILE": os.devnull},
-        )
+        pip = [str(python), "-I", "-m", "pip", "--isolated", "--disable-pip-version-check", "--no-cache-dir"]
+        pip_env = {**os.environ, "PIP_CONFIG_FILE": os.devnull}
+        with tempfile.TemporaryDirectory(prefix=".install-locks-", dir=install_root) as temporary:
+            for name, body in locks:
+                lock = Path(temporary) / name
+                descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(body)
+                subprocess.run(
+                    [*pip, "install", "--require-hashes", "--only-binary=:all:",
+                     "--index-url", "https://pypi.org/simple", "-r", str(lock)],
+                    check=True, env=pip_env,
+                )
+            # The local project may not resolve or fetch dependencies after the
+            # reviewed private lock snapshots have been installed.
+            subprocess.run(
+                [*pip, "install", "--no-deps", "--no-build-isolation", "--no-index", str(target)],
+                check=True, env=pip_env,
+            )
+            subprocess.run([*pip, "check"], check=True, env=pip_env)
         if not cli.is_file() or cli.is_symlink() or not os.access(cli, os.X_OK):
             raise RuntimeError("The package did not install the Egress Guard command.")
     except (OSError, RuntimeError, subprocess.CalledProcessError, KeyboardInterrupt):

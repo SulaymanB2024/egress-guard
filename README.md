@@ -4,7 +4,7 @@ Local ad, tracker and threat filtering for macOS, with a portable Python core.
 
 Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps the origin server's certificate and encrypted contents. No root daemon, browser certificate trust, or account credentials are needed for filtering.
 
-**0.1.0 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. The core has no macOS routing dependency, but Windows transport has not been tested. Windows dashboard authentication and verified health are unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
+**0.1.1 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. The core has no macOS routing dependency, but Windows transport has not been tested. Windows dashboard authentication and verified health are unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
 
 ## What it does
 
@@ -26,7 +26,7 @@ Requirements: Python 3.12 or newer, an ordinary macOS account, and Internet acce
 sh scripts/install-macos.sh
 ```
 
-The installer creates a private virtual environment and prints its command path. It changes no proxy settings. If your default Python is older, select a suitable interpreter with `EGRESS_GUARD_PYTHON=/path/to/python3.12`.
+The installer creates a private virtual environment, installs hash-checked dependencies and prints its command path. It changes no proxy settings. If your default Python is older, select a suitable interpreter with `EGRESS_GUARD_PYTHON=/path/to/python3.12`. Dependency wheels must be available for your interpreter/platform; setup stops rather than compiling unreviewed dependency source. See [dependency locks and open upstream advisories](requirements/README.md).
 
 ```sh
 EG="$HOME/Library/Application Support/Egress Guard/venv/bin/egress-guard"
@@ -65,13 +65,21 @@ For recovery without the CLI, turn off the matching `127.0.0.1:18080` HTTP and H
 ## Portable use
 
 ```sh
-python -m pip install ./egress_guard-0.1.0-py3-none-any.whl
+python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r requirements/runtime.lock
+python -m pip install --no-deps --no-index ./egress_guard-0.1.1-py3-none-any.whl
+python -m pip check
 egress-guard init
 egress-guard refresh
 egress-guard run
 ```
 
 Configure individual clients for `http://127.0.0.1:18080`. On macOS/Linux, run `egress-guard dashboard` in another terminal and `egress-guard open` to access controls. The dashboard uses port `18081` by default. A fresh install cannot start filtering with an empty or unverified feed cache. On Windows, `doctor` reports identity verification unavailable and the dashboard refuses to start; it never substitutes an unsigned readiness response.
+
+Download the source archive for its `requirements` directory as well as the wheel. The source installer refuses an existing environment; this alpha has no automatic application-upgrade transaction. Existing users should keep their current installation intact until choosing a manual update plan.
+
+## Dependency intelligence
+
+Run `python3 -B scripts/audit-dependencies.py` from the source archive for an offline release inventory. Add `--online` to check those public package versions against OSV. This is an explicit maintenance check, not background telemetry. Four Tornado package advisories remain open under the transport's upstream version constraint; the affected web features are outside the shipped proxy/dashboard paths. [Scope, evidence and recovery status](requirements/README.md).
 
 ## Canary registration
 

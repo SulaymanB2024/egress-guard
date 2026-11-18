@@ -17,6 +17,7 @@ import threading
 import time
 import unittest
 
+from egress_guard import __version__
 from egress_guard.feeds import _snapshot, selected_feeds
 from egress_guard.health import proxy_health
 from egress_guard.policy import MAX_CONTROL_BYTES
@@ -168,7 +169,7 @@ addons = [EgressGuard(), LoopbackOnly()]
             else:
                 if status == (200 if ready else 503):
                     self.assertEqual(json.loads(body), {
-                        "product": "egress-guard", "version": "0.1.0",
+                        "product": "egress-guard", "version": __version__,
                         "ready": ready, "https_decryption": False,
                     })
                     return

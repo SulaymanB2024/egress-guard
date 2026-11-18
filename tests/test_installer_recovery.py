@@ -22,6 +22,12 @@ class InstallerRecoveryTests(unittest.TestCase):
         self.project = self.root / "source"
         self.project.mkdir()
         (self.project / "pyproject.toml").write_text("# synthetic install target\n")
+        (self.project / "requirements").mkdir()
+        module = self.project / "src/egress_guard/lockfile.py"
+        module.parent.mkdir(parents=True)
+        module.write_bytes((Path(__file__).resolve().parents[1] / "src/egress_guard/lockfile.py").read_bytes())
+        for name in ("runtime.lock", "build.lock"):
+            (self.project / "requirements" / name).write_text("demo==1.2.3 \\\n    --hash=sha256:" + "a" * 64 + "\n")
         self.install_root = self.home / "Library/Application Support/Egress Guard"
         self.environment = self.install_root / "venv"
         script = Path(__file__).resolve().parents[1] / "scripts/install-macos.sh"
@@ -43,6 +49,8 @@ class InstallerRecoveryTests(unittest.TestCase):
         self.pip = pip.start()
         self.addCleanup(pip.stop)
         self.failure = None
+        self.failure_stage = "project"
+        self.snapshots = {}
         self.bad_entrypoint = False
         output = contextlib.redirect_stdout(io.StringIO())
         output.__enter__()
@@ -54,12 +62,33 @@ class InstallerRecoveryTests(unittest.TestCase):
         (environment / "bin/python").write_text("synthetic interpreter; never executed")
 
     def install_package(self, arguments, **options):
-        self.assertEqual(arguments[:10], [str(self.environment / "bin/python"), "-I", "-m", "pip", "--isolated",
-                                         "--disable-pip-version-check", "install", "--index-url", "https://pypi.org/simple", str(self.project)])
+        self.assertEqual(arguments[:6], [str(self.environment / "bin/python"), "-I", "-m", "pip", "--isolated",
+                                        "--disable-pip-version-check"])
         self.assertTrue(options["check"])
         self.assertEqual(options["env"]["PIP_CONFIG_FILE"], os.devnull)
-        if self.failure:
+        self.assertEqual(arguments[6], "--no-cache-dir")
+        if arguments[7] == "check":
+            if self.failure and self.failure_stage == "check":
+                raise self.failure
+            return subprocess.CompletedProcess(arguments, 0)
+        if "-r" in arguments:
+            self.assertIn("--require-hashes", arguments)
+            self.assertIn("--only-binary=:all:", arguments)
+            self.assertEqual(arguments[arguments.index("--index-url") + 1], "https://pypi.org/simple")
+            stage = Path(arguments[-1]).name
+            snapshot = Path(arguments[-1])
+            self.assertNotEqual(snapshot.parent, self.project / "requirements")
+            self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
+            self.snapshots[stage] = snapshot.read_bytes()
+        else:
+            self.assertIn("--no-deps", arguments)
+            self.assertIn("--no-build-isolation", arguments)
+            self.assertIn("--no-index", arguments)
+            stage = "project"
+        if self.failure and stage == self.failure_stage:
             raise self.failure
+        if stage != "project":
+            return subprocess.CompletedProcess(arguments, 0)
         cli = self.environment / "bin/egress-guard"
         if self.bad_entrypoint:
             cli.symlink_to(self.root / "outside-file")
@@ -81,8 +110,86 @@ class InstallerRecoveryTests(unittest.TestCase):
         self.assertEqual(self.install_root.stat().st_mode & 0o777, 0o700)
         self.assertEqual(self.environment.stat().st_mode & 0o777, 0o700)
         self.create.assert_called_once()
-        self.pip.assert_called_once()
+        self.assertEqual(self.pip.call_count, 4)
         self.assertTrue((self.environment / "bin/egress-guard").is_file())
+
+    def test_dependency_hash_failure_prevents_project_install_and_preserves_state(self):
+        sentinel = self.private_state()
+        self.failure_stage = "runtime.lock"
+        self.failure = subprocess.CalledProcessError(1, ["synthetic-hash-mismatch"])
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.install()
+        self.assertEqual(self.pip.call_count, 1)
+        self.assertFalse(self.environment.exists())
+        self.assertEqual(sentinel.read_bytes(), b"synthetic retained state")
+
+    def test_linked_or_oversized_lock_is_refused_before_environment_creation(self):
+        lock = self.project / "requirements/runtime.lock"
+        outside = self.root / "outside-lock"
+        outside.write_text("keep")
+        lock.unlink()
+        lock.symlink_to(outside)
+        with self.assertRaisesRegex(RuntimeError, "dependency lock"):
+            self.install()
+        self.create.assert_not_called()
+        self.pip.assert_not_called()
+        self.assertEqual(outside.read_text(), "keep")
+        lock.unlink()
+        lock.write_bytes(b"x" * (1024 * 1024 + 1))
+        with self.assertRaisesRegex(RuntimeError, "dependency lock"):
+            self.install()
+        self.create.assert_not_called()
+
+    def test_wheel_installs_runtime_lock_without_source_build_dependencies(self):
+        wheel = self.root / "egress_guard-0.1.1-py3-none-any.whl"
+        wheel.write_bytes(b"synthetic wheel; pip is mocked")
+        with patch.object(sys, "argv", ["installer", str(self.project), str(wheel)]):
+            self.install()
+        self.assertEqual(self.pip.call_count, 3)
+        self.assertTrue(self.pip.call_args_list[0].args[0][-1].endswith("runtime.lock"))
+        self.assertEqual(self.pip.call_args_list[1].args[0][-1], str(wheel.resolve()))
+
+    def test_dependency_inconsistency_refuses_to_keep_a_broken_installation(self):
+        sentinel = self.private_state()
+        self.failure_stage = "check"
+        self.failure = subprocess.CalledProcessError(1, ["synthetic-inconsistent-dependency"])
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.install()
+        self.assertFalse(self.environment.exists())
+        self.assertEqual(sentinel.read_bytes(), b"synthetic retained state")
+
+    def test_pip_directive_is_rejected_before_creating_an_environment(self):
+        (self.project / "requirements/runtime.lock").write_text("--extra-index-url https://example.invalid\n")
+        with self.assertRaisesRegex(RuntimeError, "dependency lock"):
+            self.install()
+        self.create.assert_not_called()
+        self.pip.assert_not_called()
+
+    def test_encoding_declaration_is_rejected_before_environment_creation(self):
+        lock = self.project / "requirements/runtime.lock"
+        lock.write_bytes(b"# coding: unicode_escape\n" + lock.read_bytes())
+        with self.assertRaisesRegex(RuntimeError, "dependency lock"):
+            self.install()
+        self.create.assert_not_called()
+        self.pip.assert_not_called()
+
+    def test_pip_consumes_the_validated_snapshot_despite_later_source_changes(self):
+        original = (self.project / "requirements/runtime.lock").read_bytes()
+        def changed(environment, **options):
+            self.create_environment(environment, **options)
+            (self.project / "requirements/runtime.lock").write_text("--extra-index-url https://example.invalid\n")
+        self.create.side_effect = changed
+        self.install()
+        self.assertEqual(self.snapshots["runtime.lock"], original)
+        self.assertFalse(list(self.install_root.glob(".install-locks-*")))
+
+    def test_source_directory_with_wheel_suffix_still_uses_the_build_lock(self):
+        changed = self.project.with_suffix(".whl")
+        self.project.rename(changed)
+        self.project = changed
+        with patch.object(sys, "argv", ["installer", str(self.project)]):
+            self.install()
+        self.assertEqual(set(self.snapshots), {"runtime.lock", "build.lock"})
 
     def test_existing_installation_is_preserved_without_attempting_an_upgrade(self):
         sentinel = self.private_state()

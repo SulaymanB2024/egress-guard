@@ -6,4 +6,6 @@
 4. Review the final source, package file list and dependency/license metadata. Exclude secrets, logs, generated certificates, feed caches, local records and personal paths.
 5. Create a tagged release with the reviewed source archive, wheel and SHA256SUMS. Download the assets again and verify their checksums.
 
+For dependency changes, regenerate and review both [hash locks](../requirements/README.md), run the explicit OSV query and assess every advisory match. A match is not a runtime reachability assessment; unresolved upstream alerts must stay visible. Exercise the actual installer function with a temporary home and real pip, including source build and supplied-wheel paths. Verify hash failure prevents project installation and that `pip check` passes. Never test against a real user's installation.
+
 Do not trigger or wait for GitHub Actions as a substitute for these checks. Do not label this unsigned alpha as notarized or imply that it protects clients which have not been configured to use the proxy.

@@ -16,4 +16,4 @@ Reviewed November 18, 2026. These choices describe the current release, not a cl
 2. Windows and Linux native routing adapters with ownership-preserving rollback and OS-specific integration tests.
 3. Benchmark bypasses, first-party ads and breakage against a reproducible local corpus. Track effectiveness separately from rule counts.
 4. Evaluate on-device semantic detection and DNS-level integration with explicit resource, privacy and false-positive budgets.
-5. Add a signed application-update channel and reproducible dependency artifact locks. Current releases are manually installed; feed data does not execute application updates.
+5. Add a signed, reversible application-update channel. Runtime/build hash locks and explicit OSV checks are now available; upstream Tornado advisories remain tracked in the [dependency notes](../requirements/README.md). Current releases are manually installed; feed data does not execute application updates.
