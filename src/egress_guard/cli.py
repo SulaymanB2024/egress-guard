@@ -87,7 +87,7 @@ def main(argv=None) -> int:
         elif args.command == "proxy":
             if sys.platform != "darwin":
                 raise ValueError("Guided system proxy configuration is available on macOS only")
-            from .macos import enable_proxy, inspect_proxy, restore_proxy
+            from .macos import inspect_proxy, restore_proxy
             if args.operation == "restore":
                 result = restore_proxy(data_dir() / "proxy-receipt.json")
             else:

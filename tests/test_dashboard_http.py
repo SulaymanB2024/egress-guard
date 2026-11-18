@@ -99,6 +99,12 @@ class DashboardHttpTest(unittest.TestCase):
         self.assertEqual(self.request("GET", "/", headers={"Sec-Fetch-Site": "cross-site"})[0], 403)
         self.assertEqual(self.request("POST", "/api/session", "{}", {"Origin": "https://attacker.invalid"})[0], 403)
 
+    def test_public_top_level_navigation_does_not_open_api_access(self):
+        navigation = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+        self.assertEqual(self.request("GET", "/", headers=navigation)[0], 200)
+        self.assertEqual(self.request("GET", "/api/status", headers={**navigation, "Authorization": self.login()})[0], 403)
+        self.assertEqual(self.request("GET", "/", headers={**navigation, "Host": "attacker.invalid"})[0], 403)
+
     def test_bad_and_unicode_keys_do_not_create_sessions(self):
         for value in ("wrong", "\u2603", None):
             self.assertEqual(self.request("POST", "/api/session", json.dumps({"token": value}), {"X-Mac-Guard": "1"})[0], 401)

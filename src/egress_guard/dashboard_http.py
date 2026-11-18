@@ -200,7 +200,10 @@ class Handler(BaseHTTPRequestHandler):
         if (post and origin != expected) or (origin and origin != expected):
             self.reply(403, {"message": "This action must come from Egress Guard"})
             return False
-        if self.headers.get("Sec-Fetch-Site") == "cross-site":
+        public_navigation = (self.command == "GET" and self.path == "/"
+                             and self.headers.get("Sec-Fetch-Mode") == "navigate"
+                             and self.headers.get("Sec-Fetch-Dest") == "document")
+        if self.headers.get("Sec-Fetch-Site") == "cross-site" and not public_navigation:
             self.reply(403, {"message": "Cross-site requests are not allowed"})
             return False
         return True
