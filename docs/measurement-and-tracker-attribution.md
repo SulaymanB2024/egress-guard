@@ -4,6 +4,11 @@ This note describes the separate Egress Guard instrumentation implementation and
 the scope of its local measurements. The public release notes list the features
 included in each published build.
 
+[Standalone standard-library reference examples](../examples/measurement/README.md)
+accompany this note in the source repository. They contain synthetic tests and
+no attribution dataset, listeners or installation integration. They are separate
+from the tagged 0.2.0 package.
+
 ## What gets measured
 
 - The proxy's heartbeat schedules a performance snapshot, including writer
