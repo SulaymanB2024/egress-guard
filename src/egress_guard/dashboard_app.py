@@ -224,10 +224,10 @@ def open_dashboard():
         if (response.status != 200 or not isinstance(nonce, str) or len(nonce) != 43
                 or not isinstance(proof, str) or len(proof) != 64):
             raise ValueError("Start the dashboard before opening its controls")
-        expected = hmac.new(key.encode(), f"egress-guard/v1:server:{client}:{nonce}".encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(key.encode(), f"egress-guard/v2:server:{origin}:{client}:{nonce}".encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(proof.encode(), expected.encode()):
             raise ValueError("The local service could not prove its identity")
-        client_proof = hmac.new(key.encode(), f"egress-guard/v1:client:{client}:{nonce}".encode(), hashlib.sha256).hexdigest()
+        client_proof = hmac.new(key.encode(), f"egress-guard/v2:client:{origin}:{client}:{nonce}".encode(), hashlib.sha256).hexdigest()
         connection.request("POST", "/api/bootstrap", json.dumps({"challenge": nonce, "client": client, "proof": client_proof}),
                            {"Origin": origin, "Content-Type": "application/json", "X-Mac-Guard": "1"})
         response = connection.getresponse()

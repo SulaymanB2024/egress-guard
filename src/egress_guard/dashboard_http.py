@@ -130,7 +130,9 @@ class ProtectionServer(ThreadingHTTPServer):
             return {"challenge": nonce, "proof": self.proof("server", nonce, client)}
 
     def proof(self, role, nonce, client):
-        message = f"egress-guard/v1:{role}:{client}:{nonce}".encode()
+        # Authenticate this bound endpoint as well as the fresh exchange. A
+        # genuine dashboard on another port must not serve as a relay oracle.
+        message = f"egress-guard/v2:{role}:{self.origin}:{client}:{nonce}".encode()
         return hmac.new(self.installation_key.encode(), message, hashlib.sha256).hexdigest()
 
     def new_bootstrap(self):
