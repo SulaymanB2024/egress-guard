@@ -4,11 +4,13 @@ Local ad, tracker and threat filtering for macOS, with a portable Python core.
 
 Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps the origin server's certificate and encrypted contents. No root daemon, browser certificate trust, or account credentials are needed for filtering.
 
-**0.1.1 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. The core has no macOS routing dependency, but Windows transport has not been tested. Windows dashboard authentication and verified health are unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
+**0.2.0 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. The core has no macOS routing dependency, but Windows transport has not been tested. Windows dashboard authentication and verified health are unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
 
 ## What it does
 
 - Blocks domains from HaGeZi's ad/tracker and threat feeds, plus curated, exact-match AdGuard CNAME aliases.
+- Inspects additional CNAME chains through the macOS system resolver on explicit request, with portable offline analysis and separate policy results for each alias. Conflicting or incomplete answers remain indeterminate.
+- Fetches community sponsor-timing suggestions by a short video hash prefix on explicit request, checks the supplied current duration, and exports attributed local JSON for manual review.
 - Updates feeds daily when macOS background services are enabled. Invalid, truncated or failed downloads retain the last good copy; the dashboard shows publication age separately from download success.
 - Refuses external plaintext HTTP requests carrying cookies or authorization headers before forwarding them.
 - Provides an authenticated local dashboard with decision explanations, temporary exact-host exceptions, ad-filter pauses, manual rules and local activity.
@@ -66,7 +68,7 @@ For recovery without the CLI, turn off the matching `127.0.0.1:18080` HTTP and H
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r requirements/runtime.lock
-python -m pip install --no-deps --no-index ./egress_guard-0.1.1-py3-none-any.whl
+python -m pip install --no-deps --no-index ./egress_guard-0.2.0-py3-none-any.whl
 python -m pip check
 egress-guard init
 egress-guard refresh
@@ -76,6 +78,12 @@ egress-guard run
 Configure individual clients for `http://127.0.0.1:18080`. On macOS/Linux, run `egress-guard dashboard` in another terminal and `egress-guard open` to access controls. The dashboard uses port `18081` by default. A fresh install cannot start filtering with an empty or unverified feed cache. On Windows, `doctor` reports identity verification unavailable and the dashboard refuses to start; it never substitutes an unsigned readiness response.
 
 Download the source archive for its `requirements` directory as well as the wheel. The source installer refuses an existing environment; this alpha has no automatic application-upgrade transaction. Existing users should keep their current installation intact until choosing a manual update plan.
+
+## Inspect disguised trackers and sponsor timings
+
+`egress-guard cname-check www.example.com` reports the current system resolver's alias chain and each hostname's policy. It leaves live filtering unchanged. Use `--answers-file /path/to/observations.json` for portable, offline analysis. Exit code 2 means the report is indeterminate, including when verified filter data is unavailable. [Details and resolver privacy](docs/cname-inspection.md).
+
+`egress-guard sponsor-fetch VIDEO_ID --duration SECONDS --output ./new-timings.json` explicitly asks SponsorBlock for community suggestions and atomically creates a new local file. It sends four hexadecimal hash characters and category filters; the provider still sees the connection and may identify the video from that prefix. Timings require manual review, and existing output files are preserved. No browser history is read and playback is unchanged. The optional browser companion is still under qualification. [Format, attribution and privacy](docs/sponsor-timings.md).
 
 ## Dependency intelligence
 
@@ -99,7 +107,7 @@ Filtering applies to clients using this proxy. Existing encrypted tunnels, appli
 
 Domain activity is stored locally with bounded buffering and retention. Request paths, bodies, cookies, authorization values and canary management keys are excluded from the activity log. A long storage outage can exhaust the bounded queue; health reports unavailable storage rather than claiming complete logging.
 
-See [architecture and threat model](docs/architecture.md), [security review and fixes](docs/security-review.md), [research and next steps](docs/research.md), [security policy](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
+Read the [0.2.0 technical writeup](docs/technology-writeup.md), [architecture and threat model](docs/architecture.md), [security review and fixes](docs/security-review.md), [research and next steps](docs/research.md), [security policy](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Dashboard
 

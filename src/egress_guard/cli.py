@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import os
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -13,6 +14,23 @@ from .feeds import feed_status, update_feeds
 from .health import proxy_health
 from .paths import data_dir, private_dir
 from .policy import Policy
+from .bounded_json import loads as bounded_json
+
+
+def _answers_file(path: str) -> object:
+    """Read an explicit offline fixture without following links or waiting on pipes."""
+    candidate = Path(path)
+    if candidate.is_symlink():
+        raise ValueError("The answers file must be a regular file, not a link")
+    descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                         | getattr(os, "O_BINARY", 0))
+    with os.fdopen(descriptor, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise ValueError("The answers file must be a regular file")
+        raw = handle.read(65537)
+    if len(raw) > 65536:
+        raise ValueError("The answers file exceeds 64 KiB")
+    return bounded_json(raw, limit=65536)
 
 
 def run_proxy() -> None:
@@ -49,6 +67,14 @@ def main(argv=None) -> int:
         commands.add_parser(name, help=text)
     lookup = commands.add_parser("check", help="Explain the decision for a domain")
     lookup.add_argument("host")
+    aliases = commands.add_parser("cname-check", help="Inspect DNS aliases without changing live filtering")
+    aliases.add_argument("host")
+    aliases.add_argument("--answers-file", help="Read an offline JSON observation fixture instead of making DNS queries")
+    sponsors = commands.add_parser("sponsor-fetch", help="Explicitly fetch community timing suggestions by a short video hash prefix")
+    sponsors.add_argument("video_id", help="Eleven-character YouTube video ID, without a URL")
+    sponsors.add_argument("--duration", type=float, required=True, help="Current video duration in seconds, checked against provider timings")
+    sponsors.add_argument("--include-selfpromo", action="store_true", help="Also request self-promotion timings")
+    sponsors.add_argument("--output", type=Path, help="Atomically create a new JSON file; refuse an existing path")
     native = commands.add_parser("proxy", help="Explicit, reversible macOS system proxy settings")
     native.add_argument("operation", choices=("inspect", "restore"))
     native.add_argument("--service", help="Explicit network service, for example Wi-Fi")
@@ -67,6 +93,28 @@ def main(argv=None) -> int:
             run_proxy()
         elif args.command == "check":
             print(json.dumps(Policy(load_config(), data_dir()).decision(args.host), indent=2))
+        elif args.command == "cname-check":
+            from .cname import inspect_answers, normalize_cname_host
+            from .dnssd import resolve_cnames
+            host = normalize_cname_host(args.host)
+            if host is None:
+                raise ValueError("CNAME inspection requires a valid, fully qualified DNS hostname")
+            policy = Policy(load_config(), data_dir())
+            observations = _answers_file(args.answers_file) if args.answers_file else resolve_cnames(host)
+            result = inspect_answers(host, observations, policy)
+            result["observation_source"] = "offline-file" if args.answers_file else "system-resolver"
+            print(json.dumps(result, indent=2))
+            return 2 if result["indeterminate"] else 0
+        elif args.command == "sponsor-fetch":
+            from .sponsors import fetch_suggestions, save_export
+            if args.output and os.path.lexists(args.output):
+                raise ValueError("The output path already exists; choose a new filename")
+            result = fetch_suggestions(args.video_id, args.duration, include_selfpromo=args.include_selfpromo)
+            if args.output:
+                save_export(args.output, result)
+                print("Community timing suggestions saved. Review the video before using them.")
+            else:
+                print(json.dumps(result, indent=2, allow_nan=False))
         elif args.command == "doctor":
             config = load_config()
             print(json.dumps({"version": __version__, "proxy": proxy_health(config["proxy"]["port"]),

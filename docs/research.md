@@ -12,6 +12,11 @@ Reviewed November 18, 2026. These choices describe the current release, not a cl
 
 ## Next work
 
+The [0.2.0 technical writeup](technology-writeup.md) documents the implemented
+system-resolver inspection, explicit SponsorBlock timing export, and subsequent
+research from SINBAD, Brave procedural filtering and audio ad detection. The
+new inspection and export commands leave live enforcement/playback unchanged.
+
 1. Design an OS-managed routing endpoint with lifetime ownership across boot, logout and service failure before enabling machine-wide routing. Test installation and restoration on supported macOS versions and Intel hardware; add signing/notarization when an appropriate identity is available.
 2. Windows and Linux native routing adapters with ownership-preserving rollback and OS-specific integration tests.
 3. Benchmark bypasses, first-party ads and breakage against a reproducible local corpus. Track effectiveness separately from rule counts.
