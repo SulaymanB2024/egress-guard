@@ -1,0 +1,18 @@
+{
+  "comment": "Requests the publisher fixture page makes, as Firefox webRequest would describe them. expect is the required decision with fixtures/publisher/rules.json loaded.",
+  "page": "https://publisher.example/article",
+  "requests": [
+    {"name": "article document", "url": "https://publisher.example/article", "type": "main_frame", "frameId": 0, "expect": "allow"},
+    {"name": "stylesheet", "url": "https://publisher.example/static/site.css", "type": "stylesheet", "frameId": 0, "documentUrl": "https://publisher.example/article", "expect": "allow"},
+    {"name": "page script", "url": "https://publisher.example/static/app.js", "type": "script", "frameId": 0, "documentUrl": "https://publisher.example/article", "expect": "allow"},
+    {"name": "session xhr", "url": "https://publisher.example/api/session", "type": "xmlhttprequest", "frameId": 0, "documentUrl": "https://publisher.example/article", "expect": "allow"},
+    {"name": "video media", "url": "https://publisher.example/media/clip.webm", "type": "media", "frameId": 0, "documentUrl": "https://publisher.example/article", "expect": "allow"},
+    {"name": "login post", "url": "https://publisher.example/login", "type": "main_frame", "frameId": 0, "expect": "allow"},
+    {"name": "analytics beacon", "url": "https://publisher.example/collect", "type": "beacon", "frameId": 0, "documentUrl": "https://publisher.example/article", "expect": "block"},
+    {"name": "analytics beacon with query", "url": "https://publisher.example/collect?v=2&e=pageview", "type": "beacon", "frameId": 0, "documentUrl": "https://publisher.example/article", "expect": "block"},
+    {"name": "lookalike path", "url": "https://publisher.example/collection/today", "type": "xmlhttprequest", "frameId": 0, "documentUrl": "https://publisher.example/article", "expect": "allow"},
+    {"name": "collect from embedded iframe on publisher", "url": "https://publisher.example/collect", "type": "beacon", "frameId": 7, "documentUrl": "https://embed.video.example/player", "frameAncestors": [{"url": "https://publisher.example/article", "frameId": 0}], "expect": "block"},
+    {"name": "same path while on another site", "url": "https://publisher.example/collect", "type": "beacon", "frameId": 0, "documentUrl": "https://other.example/", "expect": "allow"},
+    {"name": "collect as a navigation", "url": "https://publisher.example/collect", "type": "main_frame", "frameId": 0, "expect": "allow"}
+  ]
+}
