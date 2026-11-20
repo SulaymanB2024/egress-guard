@@ -83,6 +83,8 @@ def load_config(path: Path | None = None) -> dict:
         value = result["logging"][key]
         if type(value) is not int or not low <= value <= high:
             raise ValueError(f"Invalid {key}")
+    if result["logging"]["history"] not in ("full", "aggregate", "none"):
+        raise ValueError("history must be full, aggregate or none")
     return result
 
 

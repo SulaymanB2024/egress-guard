@@ -15,3 +15,12 @@ block_plaintext_credentials = true
 [logging]
 retention_days = 7
 max_queue = 10000
+# What the local activity history keeps. Hostnames can themselves identify people or accounts.
+#   "full"      (default) one row per decision: time, hostname, allow/block and reason.
+#   "aggregate" per-day counts by decision and reason. Allowed traffic is stored without
+#               hostnames; blocked hostnames are kept only as a count per host per day,
+#               with no per-event timestamps.
+#   "none"      no history is written to disk; decisions are only counted in memory.
+# Changing the mode never deletes rows written earlier: old "full" rows stay in
+# events.sqlite3, unused, until you delete that file (ordinary deletion, not secure erasure).
+history = "full"

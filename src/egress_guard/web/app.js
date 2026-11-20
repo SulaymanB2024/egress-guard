@@ -22,6 +22,7 @@ const protectionStates = {
 const records = new Map();
 let status = null;
 let events = null;
+let activityMeta = {history: 'full', dropped: 0};
 let eventPage = 0;
 let refreshPromise = null;
 let lookupController = null;
@@ -82,6 +83,7 @@ function expiredSession() {
   authExpired = true;
   status = null;
   events = null;
+  activityMeta = {history: 'full', dropped: 0};
   records.clear();
   clearLookup();
   $('activity-rows').replaceChildren();
@@ -242,11 +244,19 @@ function renderActivity() {
     $('activity-message').textContent = 'Refresh to try again.';
     return;
   }
-  $('activity-summary').textContent = events.length
-    ? 'Showing up to ' + numberFormat.format(events.length) + ' recent proxy records. Hostname blocks are grouped by day.'
-    : 'Recent decisions from connections seen by this Mac’s proxy.';
+  const dropped = activityMeta.dropped;
+  $('activity-dropped').hidden = !dropped;
+  $('activity-dropped').textContent = dropped ? numberFormat.format(dropped) + (dropped === 1 ? ' event' : ' events') + ' not recorded.' : '';
+  const history = activityMeta.history;
+  $('activity-summary').textContent = history === 'none'
+    ? 'History is turned off. Decisions are counted in memory only, so no activity list is kept.'
+    : history === 'aggregate'
+      ? 'Daily totals only. Allowed traffic is counted without hostnames; blocked hostnames are kept as a count per day.'
+      : events.length
+        ? 'Showing up to ' + numberFormat.format(events.length) + ' recent proxy records, each with its time and hostname.'
+        : 'Recent decisions from connections seen by this Mac’s proxy.';
   if (!filtered.length) {
-    $('activity-message').textContent = events.length ? 'No recent decisions match these filters.' : 'No recent activity recorded.';
+    $('activity-message').textContent = history === 'none' ? 'No history is stored.' : events.length ? 'No recent decisions match these filters.' : 'No recent activity recorded.';
     $('activity-rows').replaceChildren();
     return;
   }
@@ -275,7 +285,7 @@ function renderActivity() {
     }
     const state = element('td');
     state.append(badge(event.decision));
-    row.append(time, domain, state, element('td', event.reason || '—'));
+    row.append(time, domain, state, element('td', (event.reason || '—') + (event.count > 1 ? ' × ' + numberFormat.format(event.count) : '')));
     return row;
   });
   $('activity-rows').replaceChildren(...rows);
@@ -350,10 +360,13 @@ async function refresh(manual = false) {
     renderStatus();
     if (!$('activity-rows').contains(document.activeElement)) {
       const next = activity.status === 'fulfilled' && activity.value.available !== false && Array.isArray(activity.value.events) ? activity.value.events : null;
-      const signature = JSON.stringify(next);
+      const value = activity.status === 'fulfilled' ? activity.value : {};
+      const meta = {history: ['aggregate', 'none'].includes(value.history) ? value.history : 'full', dropped: Number.isInteger(value.dropped) && value.dropped > 0 ? value.dropped : 0};
+      const signature = JSON.stringify([next, meta]);
       if (records.get('activity') !== signature) {
         records.set('activity', signature);
         events = next;
+        activityMeta = meta;
         renderActivity();
       }
     }
