@@ -7,7 +7,14 @@ list_tier = "pro.plus"
 cname_protection = true
 hosts = []
 allow = []
-dashboard_hosts = ["analytics.google.com", "clarity.microsoft.com", "claritystatic.azureedge.net", "app.posthog.com", "us.posthog.com", "eu.posthog.com"]
+# Exact hosts that skip tracker and CNAME decisions. Strict default: none.
+# Threat and manual block rules still apply to every exempted host.
+dashboard_hosts = []
+# Opt-in compatibility preset. ["analytics-dashboards"] exempts the analytics
+# reporting consoles analytics.google.com, clarity.microsoft.com,
+# claritystatic.azureedge.net, app.posthog.com, us.posthog.com and
+# eu.posthog.com, so their web dashboards keep working through the proxy.
+exemption_presets = []
 
 [risk]
 block_plaintext_credentials = true

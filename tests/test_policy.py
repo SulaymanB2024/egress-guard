@@ -5,7 +5,13 @@ import time
 import unittest
 from unittest.mock import patch
 
-from egress_guard.policy import MAX_CONTROL_BYTES, Policy, normalize_host
+from egress_guard.config import load_config
+from egress_guard.feeds import CachedFeed
+from egress_guard.policy import MAX_CONTROL_BYTES, Policy, PolicyRuntime, normalize_host
+
+
+def cached(names, published=None):
+    return CachedFeed(set(names), "digest-" + "-".join(sorted(names)), published, None)
 
 
 class PolicyTests(unittest.TestCase):
@@ -25,7 +31,8 @@ class PolicyTests(unittest.TestCase):
             "tracker": {"tracker.example", "dashboard.example", "analytics.example"},
             "cname": {"masked.example", "dashboard.danger.example", "manual.example"},
         }
-        with patch("egress_guard.policy.read_cached_feed", side_effect=lambda _, feed: snapshots[feed.category]):
+        self.snapshots = snapshots
+        with patch("egress_guard.policy.load_cached_feed", side_effect=lambda _, feed: cached(snapshots[feed.category])):
             self.policy = Policy(self.config, self.state)
 
     def test_priorities_and_match_boundaries(self):
@@ -73,7 +80,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_rule_file_distinguishes_missing_empty_and_invalid(self):
         path = self.state / "block.txt"
-        with patch("egress_guard.policy.read_cached_feed", return_value=set()):
+        with patch("egress_guard.policy.load_cached_feed", return_value=None):
             self.assertEqual(Policy({}, self.state).decision("local.example")["source"], "no-match")
             path.write_bytes(b"")
             self.assertEqual(Policy({}, self.state).decision("local.example")["source"], "no-match")
@@ -91,6 +98,102 @@ class PolicyTests(unittest.TestCase):
             with patch.object(Path, "open", side_effect=PermissionError):
                 with self.assertRaisesRegex(ValueError, "block.txt could not be read"):
                     Policy({}, self.state)
+
+    def test_corrupt_enabled_cname_cache_keeps_last_good_block_and_is_not_fully_ready(self):
+        self.assertEqual(self.policy.decision("masked.example")["source"], "cname-feed")
+        self.assertTrue(self.policy.ready())
+        self.assertFalse(self.policy.degraded())
+
+        def corrupt_cname(_, feed):
+            return None if feed.category == "cname" else cached(self.snapshots[feed.category])
+
+        with patch("egress_guard.policy.load_cached_feed", side_effect=corrupt_cname):
+            replacement = Policy(self.config, self.state, self.policy)
+            fresh = Policy(self.config, self.state)
+        # The running replacement keeps the verified CNAME component, and says so.
+        self.assertEqual(replacement.decision("masked.example"),
+                         {"decision": "blocked", "source": "cname-feed", "matched_domain": "masked.example",
+                          "can_allow": True})
+        self.assertTrue(replacement.degraded())
+        self.assertIn("last-good", replacement.coverage.values())
+        # Without a previous policy, an enabled feed with no data is never full readiness.
+        self.assertFalse(fresh.ready())
+        self.assertTrue(fresh.enforceable())
+        self.assertEqual(fresh.explain("masked.example")["decision"], "indeterminate")
+        self.assertNotEqual(fresh.revision, self.policy.revision)
+
+    def test_strict_default_exempts_nothing_and_preset_is_explicit(self):
+        trackers = {"analytics.google.com", "us.posthog.com", "tracker.example"}
+        load = lambda _, feed: cached(trackers if feed.category == "tracker" else {"danger.example"})
+        config = load_config(self.state / "missing.toml")
+        self.assertEqual((config["block"]["dashboard_hosts"], config["block"]["exemption_presets"]), ([], []))
+        with patch("egress_guard.policy.load_cached_feed", side_effect=load):
+            strict = Policy(config, self.state)
+            config["block"]["exemption_presets"] = ["analytics-dashboards"]
+            compatible = Policy(config, self.state)
+            (self.state / "block.txt").write_text("us.posthog.com\n")
+            manual = Policy(config, self.state)
+        self.assertEqual(strict.decision("analytics.google.com")["source"], "tracker-feed")
+        self.assertEqual(compatible.decision("analytics.google.com")["source"], "dashboard-exception")
+        self.assertEqual(manual.decision("us.posthog.com")["source"], "local-block")
+        (self.state / "config.toml").write_text('[block]\nexemption_presets = ["everything"]\n')
+        with self.assertRaisesRegex(ValueError, "exemption_presets"):
+            load_config(self.state / "config.toml")
+
+    def test_runtime_recovers_from_one_time_read_error_without_another_edit(self):
+        clock = [100.0]
+        failures = [0]
+        block = self.state / "block.txt"
+
+        def load(previous):
+            if failures[0]:
+                failures[0] -= 1
+                raise ValueError("block.txt could not be read as UTF-8")
+            with patch("egress_guard.policy.load_cached_feed",
+                       side_effect=lambda _, feed: cached(self.snapshots[feed.category])):
+                return Policy(self.config, self.state, previous)
+
+        observe = lambda: (block.stat().st_mtime_ns, block.stat().st_size) if block.exists() else None
+        runtime = PolicyRuntime(load, observe, clock=lambda: clock[0])
+        self.assertTrue(runtime.poll())
+        first = runtime.policy
+        self.assertFalse(runtime.status()["pending"])
+
+        block.write_text("late.example\n")
+        failures[0] = 1
+        self.assertFalse(runtime.poll())
+        status = runtime.status()
+        self.assertIs(runtime.policy, first)
+        self.assertTrue(status["pending"] and status["degraded"])
+        self.assertEqual(status["revision"], first.revision)
+        self.assertEqual(runtime.policy.decision("late.example")["source"], "no-match")
+        # Bounded backoff: no reload before the retry is due, then the same files apply.
+        with patch.object(runtime, "_load", side_effect=AssertionError("retried early")):
+            runtime.poll()
+        clock[0] += 1
+        self.assertTrue(runtime.poll())
+        status = runtime.status()
+        self.assertEqual(runtime.policy.decision("late.example")["source"], "local-block")
+        self.assertFalse(status["pending"] or status["degraded"])
+        self.assertNotEqual(status["revision"], first.revision)
+
+    def test_runtime_keeps_enforceable_policy_over_unenforceable_replacement(self):
+        stamp = [1]
+        empty = [False]
+
+        def load(previous):
+            source = (lambda *_: None) if empty[0] else (lambda _, feed: cached(self.snapshots[feed.category]))
+            with patch("egress_guard.policy.load_cached_feed", side_effect=source):
+                return Policy(self.config, self.state)  # no carry-forward, to force an empty candidate
+
+        runtime = PolicyRuntime(load, lambda: stamp[0], clock=lambda: 0.0)
+        runtime.poll()
+        running = runtime.policy
+        empty[0], stamp[0] = True, 2
+        self.assertFalse(runtime.poll())
+        self.assertIs(runtime.policy, running)
+        self.assertTrue(runtime.status()["pending"])
+        self.assertIn("threat or tracker", runtime.status()["error"])
 
     def test_malformed_request_targets_and_ip_literals(self):
         for value in ("abc../", "*.example", "example..", "https://danger.example", "a" * 254, "日本.example"):

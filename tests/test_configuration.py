@@ -10,6 +10,7 @@ from unittest.mock import patch
 from egress_guard.cli import main
 from egress_guard.config import initialize, load_config
 from egress_guard.dashboard_app import Application
+from egress_guard.feeds import CachedFeed
 from egress_guard.paths import data_dir
 
 
@@ -51,6 +52,11 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(application.domain("tracking.example")["can_block"])
         with self.assertRaises(PermissionError):
             application.action({"action": "allow", "host": "tracking.example", "minutes": 5})
+        # No analytics host is exempted by default, so it can be blocked manually.
+        application.action({"action": "block", "host": "analytics.google.com"})
+        self.assertEqual(application.domain("analytics.google.com")["source"], "local-block")
+        application.action({"action": "unblock", "host": "analytics.google.com"})
+        (self.state / "config.toml").write_text('[block]\nexemption_presets = ["analytics-dashboards"]\n')
         with self.assertRaises(ValueError):
             application.action({"action": "block", "host": "analytics.google.com"})
         with self.assertRaises(ValueError):
@@ -59,6 +65,55 @@ class ConfigurationTests(unittest.TestCase):
         self.assertGreater(json.loads((self.state / "filter-controls.json").read_text())["tracker_pause_until"], 0)
         application.action({"action": "unblock", "host": "tracking.example"})
         self.assertEqual(application.domain("tracking.example")["decision"], "allowed")
+
+    def test_dashboard_sees_same_size_replacement_with_preserved_mtime(self):
+        application = Application(self.state, self.state / "config.toml")
+        path = self.state / "block.txt"
+        path.write_text("first.example\n")
+        before = path.stat()
+        self.assertEqual(application.domain("first.example")["source"], "local-block")
+        replacement = self.state / "block.next"
+        replacement.write_text("other.example\n")
+        os.utime(replacement, ns=(before.st_atime_ns, before.st_mtime_ns))
+        os.replace(replacement, path)
+        after = path.stat()
+        self.assertEqual((after.st_size, after.st_mtime_ns), (before.st_size, before.st_mtime_ns))
+        self.assertEqual(application.domain("first.example")["source"], "no-match")
+        self.assertEqual(application.domain("other.example")["source"], "local-block")
+
+    def test_dashboard_reports_applied_only_for_the_proxy_reported_revision(self):
+        verified = CachedFeed({"one.example", "two.example"}, "digest", 1_700_000_000, None)
+        loader = patch("egress_guard.policy.load_cached_feed", return_value=verified)
+        loader.start()
+        self.addCleanup(loader.stop)
+        application = Application(self.state, self.state / "config.toml")
+        saved = application.policy().revision
+        for reported, applied, state in (
+            (None, False, "unknown"),
+            ({"revision": "0" * 64, "pending": False, "degraded": False}, False, "degraded"),
+            ({"revision": saved, "pending": True, "degraded": False}, False, "degraded"),
+            ({"revision": saved, "pending": False, "degraded": False}, True, "active"),
+        ):
+            with self.subTest(reported=reported), patch(
+                "egress_guard.dashboard_app.proxy_health", return_value={"ready": True, "policy": reported}
+            ):
+                data = application.status()
+            self.assertEqual(data["policy"]["saved_revision"], saved)
+            self.assertIs(data["policy"]["applied"], applied)
+            self.assertEqual(data["proxies"][1]["state"], state)
+            if not applied:
+                self.assertNotIn("applied by the proxy", data["proxies"][1]["detail"])
+        self.assertEqual(data["filters"][0]["published_at"], "2023-11-14T22:13:20+00:00")
+
+    def test_check_is_indeterminate_without_complete_feed_coverage(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(main(["check", "unlisted.example"]), 2)
+        result = json.loads(output.getvalue())
+        self.assertEqual((result["decision"], result["source"]), ("indeterminate", "no-match"))
+        self.assertFalse(result["policy_ready"])
+        self.assertEqual(set(result["coverage"].values()), {"missing"})
+        self.assertRegex(result["revision"], "^[0-9a-f]{64}$")
 
     def test_read_only_dashboard_does_not_expose_registration_secrets(self):
         application = Application(self.state, self.state / "config.toml")

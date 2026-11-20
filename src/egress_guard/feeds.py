@@ -230,25 +230,44 @@ def feed_status(state: Path, config: dict | None = None) -> list[dict]:
     return [_row(state, feed) for feed in selected_feeds(config or {})]
 
 
-def read_cached_feed(state: Path, feed: Feed) -> set[str]:
+@dataclass(frozen=True)
+class CachedFeed:
+    """One verified snapshot: its domains and the metadata covered by its digest check."""
+    names: set[str]
+    sha256: str
+    published_at: float | None
+    updated_at: float | None
+
+
+def load_cached_feed(state: Path, feed: Feed) -> CachedFeed | None:
+    """Return a verified snapshot, or None when it is missing, unreadable or corrupt."""
     path = feed.path(state)
     try:
         with path.open("rb") as file:
             data = file.read(MAX_FEED_BYTES + 1)
         meta, newline, contents = data.partition(b"\n")
         if len(data) > MAX_FEED_BYTES or not newline or not meta.startswith(b"# "):
-            return set()
+            return None
         metadata = json.loads(meta[2:])
         if not isinstance(metadata, dict):
-            return set()
-        if hashlib.sha256(contents).hexdigest() != metadata.get("sha256"):
-            return set()
+            return None
+        digest = hashlib.sha256(contents).hexdigest()
+        if digest != metadata.get("sha256"):
+            return None
         names = set(contents.decode("ascii").splitlines())
         if len(names) < feed.minimum or len(names) != metadata.get("entries"):
-            return set()
-        return names
+            return None
     except (OSError, ValueError, RecursionError):
-        return set()
+        return None
+    now = time.time()
+    published, updated = metadata.get("published_at"), metadata.get("updated_at")
+    return CachedFeed(names, digest, published if _valid_clock(published, now) else None,
+                      updated if _valid_clock(updated, now) else None)
+
+
+def read_cached_feed(state: Path, feed: Feed) -> set[str]:
+    snapshot = load_cached_feed(state, feed)
+    return set(snapshot.names) if snapshot else set()
 
 
 def _refresh(state: Path, config: dict) -> dict:

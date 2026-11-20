@@ -77,6 +77,10 @@ egress-guard run
 
 Configure individual clients for `http://127.0.0.1:18080`. On macOS/Linux, run `egress-guard dashboard` in another terminal and `egress-guard open` to access controls. The dashboard uses port `18081` by default. A fresh install cannot start filtering with an empty or unverified feed cache. On Windows, `doctor` reports identity verification unavailable and the dashboard refuses to start; it never substitutes an unsigned readiness response.
 
+Every enabled feed, including the CNAME feeds while `cname_protection = true`, must have a verified cache before filtering starts. The dashboard shows the saved policy revision next to the revision the proxy reports as applied. `egress-guard check host.example` reports `indeterminate` (exit code 2) instead of `allowed` while enabled feed coverage is incomplete.
+
+The default configuration exempts no hosts from tracker or CNAME decisions. To keep the Google Analytics, Microsoft Clarity and PostHog reporting consoles usable through the proxy, opt in with `exemption_presets = ["analytics-dashboards"]` under `[block]`, or list exact hosts in `dashboard_hosts`. Threat and manual block rules still apply to exempted hosts. Configurations created by earlier releases keep the six hosts they were written with in `dashboard_hosts`; set it to `[]` for the strict default.
+
 Download the source archive for its `requirements` directory as well as the wheel. The source installer refuses an existing environment; this alpha has no automatic application-upgrade transaction. Existing users should keep their current installation intact until choosing a manual update plan.
 
 ## Inspect disguised trackers and sponsor timings
