@@ -10,11 +10,10 @@ from mitmproxy import ctx, http
 
 from egress_guard import __version__
 from egress_guard.config import config_path, load_config
-from egress_guard.feeds import CNAME_FEEDS, THREATS, TRACKERS
-from egress_guard.health import response_proof
+from egress_guard.health import policy_proof, response_proof
 from egress_guard.ledger import Ledger
 from egress_guard.paths import data_dir, private_dir
-from egress_guard.policy import Policy, is_loopback, normalize_host
+from egress_guard.policy import Policy, PolicyRuntime, is_loopback, normalize_host, policy_stamp
 
 HEALTH_HOST = "egress-guard.invalid"
 HEALTH_QUERY = re.compile(r"nonce=([A-Za-z0-9_-]{43})")
@@ -23,10 +22,18 @@ CREDENTIAL_HEADERS = ("Authorization", "Cookie")
 
 class EgressGuard:
     def __init__(self) -> None:
-        self.policy: Policy | None = None
+        self.runtime: PolicyRuntime | None = None
         self.ledger: Ledger | None = None
         self._refresh_task: asyncio.Task | None = None
-        self._block_plaintext_credentials = True
+
+    @property
+    def policy(self) -> Policy | None:
+        return self.runtime.policy if self.runtime is not None else None
+
+    @property
+    def _block_plaintext_credentials(self) -> bool:
+        policy = self.policy
+        return True if policy is None else policy.block_plaintext_credentials
 
     @staticmethod
     def _safe_options() -> bool:
@@ -49,30 +56,20 @@ class EgressGuard:
             ctx.master.shutdown()
             return
         self._config_path = config_path()
-        self._watched = (
-            self._config_path,
-            self._state / "block.txt",
-            self._state / "allow.txt",
-            *(feed.path(self._state) for feed in (*TRACKERS.values(), THREATS, *CNAME_FEEDS)),
-        )
         try:
             config = load_config(self._config_path)
         except (OSError, ValueError):
             ctx.master.shutdown()
             return
-        stamp = self._stamp()
-        try:
-            self.policy = Policy(config, self._state)
-        except ValueError:
-            # Remain loopback-only and report unready until valid rules are available.
-            pass
-        self._block_plaintext_credentials = config["risk"]["block_plaintext_credentials"]
+        self.runtime = PolicyRuntime(self._load_policy, lambda: policy_stamp(self._config_path, self._state))
+        # An invalid rule file leaves no policy: remain loopback-only and unready while retrying.
+        self.runtime.poll()
         self.ledger = Ledger(self._state / "events.sqlite3", **config["logging"])
-        self._refresh_task = asyncio.create_task(self._refresh(stamp))
+        self._refresh_task = asyncio.create_task(self._refresh())
 
     def configure(self, updated) -> None:
         if self._refresh_task is not None and not self._safe_options():
-            self.policy = None
+            self.runtime.policy = None
             ctx.master.shutdown()
 
     def done(self) -> None:
@@ -81,35 +78,16 @@ class EgressGuard:
         if self.ledger is not None:
             self.ledger.close()
 
-    def _stamp(self) -> tuple:
-        stamps = []
-        for path in self._watched:
-            try:
-                stat = path.lstat()
-                stamps.append((stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size))
-            except OSError:
-                stamps.append(None)
-        return tuple(stamps)
+    def _load_policy(self, previous: Policy | None) -> Policy:
+        return Policy(load_config(self._config_path), self._state, previous)
 
-    def _load_policy(self) -> tuple[Policy, bool]:
-        config = load_config(self._config_path)
-        return Policy(config, self._state), config["risk"]["block_plaintext_credentials"]
-
-    async def _refresh(self, stamp: tuple) -> None:
+    async def _refresh(self) -> None:
         while True:
             await asyncio.sleep(1)
             if self.policy is not None:
                 self.policy.reload_controls()
-            current = self._stamp()
-            if current != stamp:
-                stamp = current
-                try:
-                    policy, protect_credentials = await asyncio.to_thread(self._load_policy)
-                except (OSError, ValueError):
-                    continue
-                if self._safe_options() and (policy.ready() or self.policy is None or not self.policy.ready()):
-                    self.policy = policy
-                    self._block_plaintext_credentials = protect_credentials
+            if self._safe_options():
+                await asyncio.to_thread(self.runtime.poll)
 
     @staticmethod
     def _has_body(request: http.Request) -> bool:
@@ -135,7 +113,7 @@ class EgressGuard:
 
     def _apply(self, flow: http.HTTPFlow, transport: str) -> bool:
         host = flow.request.host
-        if self.policy is None or not self.policy.ready():
+        if self.policy is None or not self.policy.enforceable():
             self._deny(flow, 503, "Egress Guard policy unavailable.")
             return False
         decision = self.policy.decision(host)
@@ -165,8 +143,16 @@ class EgressGuard:
             return
         ready = bool(self.policy and self.policy.ready() and self.ledger and self.ledger.ready())
         data = {"product": "egress-guard", "version": __version__, "ready": ready, "https_decryption": False}
+        port = ctx.options.listen_port
+        if challenge is not None and type(port) is int and self.runtime is not None:
+            # Applied revision, pending and degraded state travel only with an authenticated reply.
+            status = self.runtime.status()
+            try:
+                data["policy_proof"] = policy_proof(challenge.group(1), port, self._state, status)
+                data["policy"] = status
+            except (OSError, RuntimeError, ValueError):
+                data.pop("policy_proof", None)
         if ready and challenge is not None:
-            port = ctx.options.listen_port
             if type(port) is int:
                 try:
                     data["proof"] = response_proof(challenge.group(1), port, self._state)

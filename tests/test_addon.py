@@ -16,11 +16,14 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
+from unittest.mock import patch
 
 from egress_guard import __version__
+from egress_guard.config import load_config
 from egress_guard.feeds import _snapshot, selected_feeds
 from egress_guard.health import proxy_health
-from egress_guard.policy import MAX_CONTROL_BYTES
+from egress_guard.policy import MAX_CONTROL_BYTES, Policy
 
 MITMDUMP = Path(sys.executable).with_name("mitmdump")
 if not MITMDUMP.is_file():
@@ -126,6 +129,15 @@ from egress_guard.addon import EgressGuard
 
 _unchanged = policy.selected_feeds
 policy.selected_feeds = lambda cfg: tuple(replace(feed, minimum=1) for feed in _unchanged(cfg))
+
+_rules = policy._rules
+def _one_time_read_error(path):
+    marker = path.with_name("fail-next-load")
+    if path.name == "block.txt" and marker.exists():
+        marker.unlink()
+        raise ValueError("injected one-time read error")
+    return _rules(path)
+policy._rules = _one_time_read_error
 
 class LoopbackOnly:
     def server_connect(self, data):
@@ -322,6 +334,21 @@ addons = [EgressGuard(), LoopbackOnly()]
         self.assertEqual(self.plain_origin.accepts, 0)
         self.manual.write_text("# removed by the user\n")
         self.assert_origin_status(200)
+
+    def test_one_time_read_error_recovers_without_another_edit(self):
+        self.start_proxy()
+        self.assert_origin_status(200)
+        marker = self.state / "fail-next-load"
+        marker.touch()
+        self.manual.write_text("plaintext.test\n")
+        self.assert_origin_status(403)
+        self.assertFalse(marker.exists(), "the injected read error never ran")
+        with patch("egress_guard.policy.selected_feeds",
+                   lambda cfg: tuple(replace(feed, minimum=1) for feed in selected_feeds(cfg))):
+            saved = Policy(load_config(self.state / "config.toml"), self.state).revision
+        reported = proxy_health(self.proxy_port, self.state)["policy"]
+        self.assertEqual(reported["revision"], saved)
+        self.assertFalse(reported["pending"] or reported["degraded"])
 
     def test_invalid_manual_rules_at_start_are_unready_and_recover(self):
         self.manual.write_text("plaintext.test\ninvalid/domain\n")
