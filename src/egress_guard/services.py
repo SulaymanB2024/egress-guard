@@ -8,10 +8,17 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 from .config import config_path, initialize, load_config
+from .health import proxy_health
 from .paths import data_dir, private_dir
 from .policy import Policy
+
+
+READY_TIMEOUT_SECONDS = 10.0
+READY_POLL_SECONDS = 0.25
+ERROR_LOG_LIMIT = 256 * 1024
 
 
 def jobs():
@@ -69,6 +76,38 @@ def _service_lock():
         yield
 
 
+def _prepare_error_log():
+    """A private, size-bounded stderr file for the jobs; it never receives credentials or request contents."""
+    directory = private_dir(private_dir(data_dir()) / "logs")
+    path = directory / "services.err.log"
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(fd, "r+b") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
+            raise ValueError("The service error log must be an owned regular file")
+        os.fchmod(handle.fileno(), 0o600)
+        if info.st_size > ERROR_LOG_LIMIT:
+            # Keep the newest quarter of the budget so the latest failure stays readable.
+            handle.seek(info.st_size - ERROR_LOG_LIMIT // 4)
+            tail = handle.read()
+            handle.seek(0)
+            handle.write(tail)
+            handle.truncate()
+    return str(path)
+
+
+def _wait_for_ready(port, timeout=None, interval=None, sleep=time.sleep, clock=time.monotonic):
+    timeout = READY_TIMEOUT_SECONDS if timeout is None else timeout
+    interval = READY_POLL_SECONDS if interval is None else interval
+    deadline = clock() + timeout
+    while True:
+        if proxy_health(port, data_dir()).get("ready"):
+            return True
+        if clock() >= deadline:
+            return False
+        sleep(interval)
+
+
 def _running(label):
     result = subprocess.run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"], capture_output=True, timeout=5)
     return result.returncode == 0
@@ -103,13 +142,15 @@ def _start():
     directory.mkdir(exist_ok=True)
     if directory.is_symlink():
         raise ValueError("LaunchAgents must be a regular directory")
+    error_log = _prepare_error_log()
+    port = load_config()["proxy"]["port"]
     plan = []
     for label, action in jobs():
         target = directory / f"{label}.plist"
         definition = {"Label": label, "ProgramArguments": [sys.executable, "-I", "-B", "-m", "egress_guard", action],
                       "EnvironmentVariables": {"EGRESS_GUARD_DATA": str(data_dir()), "EGRESS_GUARD_CONFIG": str(config_path())},
                       "ProcessType": "Background", "LowPriorityIO": True, "Umask": 0o077,
-                      "StandardOutPath": "/dev/null", "StandardErrorPath": "/dev/null"}
+                      "StandardOutPath": "/dev/null", "StandardErrorPath": error_log}
         if action == "refresh":
             definition["StartCalendarInterval"] = {"Hour": 7, "Minute": 0}
         else:
@@ -131,6 +172,8 @@ def _start():
                 # A timed-out bootstrap may already have loaded its job.
                 attempted.append((label, action, target, definition))
                 subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(target)], capture_output=True, check=True, timeout=10)
+        if any(action == "run" for _, action, *_ in attempted) and not _wait_for_ready(port):
+            raise RuntimeError(f"The proxy worker did not become ready; setup was rolled back. See {error_log} for worker errors.")
     except BaseException:
         preserved = set()
         for label, action, target, definition in reversed(attempted):
@@ -166,21 +209,47 @@ def stop():
         _stop()
 
 
+def _snapshot(path):
+    """Identity and bytes of a definition, or None when nothing is there."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        return info.st_dev, info.st_ino, handle.read(65537)
+
+
 def _stop():
+    seen = {}
     for label, action in jobs():
         target = Path.home() / "Library/LaunchAgents" / f"{label}.plist"
-        if (target.exists() or target.is_symlink()) and not _owned_definition(target, label, action):
-            raise ValueError("A service definition is not owned by this installation; it was preserved")
+        if os.path.lexists(target):
+            if not _owned_definition(target, label, action):
+                raise ValueError("A service definition is not owned by this installation; it was preserved")
+            seen[target] = _snapshot(target)
     receipt = data_dir() / "proxy-receipt.json"
     if receipt.exists():
         from .macos import restore_proxy
         result = restore_proxy(receipt)
         print("Proxy restoration:", result)
-    for label, _ in jobs():
+    changed = []
+    for label, action in jobs():
         running = subprocess.run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"], capture_output=True, timeout=5)
         if not running.returncode:
             subprocess.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{label}"], capture_output=True, check=True, timeout=10)
         target = Path.home() / "Library/LaunchAgents" / f"{label}.plist"
-        if target.exists():
+        try:
+            current = _snapshot(target)
+            if current is None and target not in seen:
+                continue
+            if current != seen.get(target) or not _owned_definition(target, label, action):
+                raise ValueError("replaced")
             target.unlink()
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError):
+            changed.append(target.name)
+    if changed:
+        raise ValueError("A service definition changed during stop and was preserved: " + ", ".join(changed))
     print("Services stopped. Configuration, canary registrations and logs have been retained.")

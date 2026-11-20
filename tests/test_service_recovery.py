@@ -27,7 +27,7 @@ class ServiceRecoveryTests(unittest.TestCase):
         self.jobs = [("org.egressguard.test." + name, action) for name, action in
                      (("proxy", "run"), ("dashboard", "dashboard"), ("feeds", "refresh"))]
         for item in (patch.object(services, "_macos"), patch.object(services, "initialize"),
-                     patch.object(services, "load_config", return_value={}),
+                     patch.object(services, "load_config", return_value={"proxy": {"port": 8080}}),
                      patch.object(services, "data_dir", return_value=self.state),
                      patch.object(services, "config_path", return_value=self.configuration),
                      patch.object(services, "jobs", return_value=self.jobs),
@@ -40,6 +40,13 @@ class ServiceRecoveryTests(unittest.TestCase):
         native = patch.object(services.subprocess, "run", side_effect=self.native)
         self.native_call = native.start()
         self.addCleanup(native.stop)
+        self.health = patch.object(services, "proxy_health", return_value={"ready": True})
+        self.health_call = self.health.start()
+        self.addCleanup(self.health.stop)
+        for name, value in (("READY_TIMEOUT_SECONDS", 0.05), ("READY_POLL_SECONDS", 0.01)):
+            item = patch.object(services, name, value)
+            item.start()
+            self.addCleanup(item.stop)
         self.loaded = set()
         self.fail_bootstrap = None
         self.fail_bootout = None
@@ -57,7 +64,8 @@ class ServiceRecoveryTests(unittest.TestCase):
         value = {"Label": label, "ProgramArguments": [sys.executable, "-I", "-B", "-m", "egress_guard", action],
                  "EnvironmentVariables": {"EGRESS_GUARD_DATA": str(self.state), "EGRESS_GUARD_CONFIG": str(self.configuration)},
                  "ProcessType": "Background", "LowPriorityIO": True, "Umask": 0o077,
-                 "StandardOutPath": "/dev/null", "StandardErrorPath": "/dev/null"}
+                 "StandardOutPath": "/dev/null",
+                 "StandardErrorPath": str(self.state / "logs/services.err.log")}
         if action == "refresh":
             value["StartCalendarInterval"] = {"Hour": 7, "Minute": 0}
         else:
@@ -192,6 +200,53 @@ class ServiceRecoveryTests(unittest.TestCase):
         self.assertEqual(self.loaded, {label for label, _ in self.jobs})
         self.assertEqual({path: path.read_bytes() for path in self.directory.iterdir()}, before)
         self.assertTrue(all(call.args[0][1] == "print" for call in self.native_call.call_args_list))
+
+    def test_start_with_worker_that_never_becomes_ready_fails_and_rolls_back(self):
+        self.health_call.return_value = {"ready": False}
+        with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+            services.start()
+        self.assertEqual(self.loaded, set())
+        self.assertEqual(list(self.directory.iterdir()), [])
+        self.assertGreater(self.health_call.call_count, 1)
+
+    def test_start_with_ready_worker_succeeds_and_keeps_jobs(self):
+        self.health_call.side_effect = [{"ready": False}, {"ready": True}]
+        services.start()
+        self.assertEqual(self.loaded, {label for label, _ in self.jobs})
+        self.assertEqual(len(list(self.directory.iterdir())), 3)
+        self.assertEqual(self.health_call.call_args.args, (8080, self.state))
+
+    def test_swapped_definition_is_preserved_by_stop(self):
+        for index in range(3):
+            self.target(index).write_bytes(self.definition(index))
+        self.loaded = {label for label, _ in self.jobs}
+        foreign = plistlib.dumps({"Label": "foreign-job"})
+        original = self.native
+
+        def swap_after_preflight(arguments, **options):
+            if arguments[1] == "bootout" and arguments[-1].endswith(self.jobs[1][0]):
+                self.target(1).unlink()
+                self.target(1).write_bytes(foreign)
+            return original(arguments, **options)
+
+        self.native_call.side_effect = swap_after_preflight
+        with self.assertRaisesRegex(ValueError, "changed during stop"):
+            services.stop()
+        self.assertEqual(self.target(1).read_bytes(), foreign)
+        self.assertFalse(self.target(0).exists())
+        self.assertFalse(self.target(2).exists())
+
+    def test_error_log_is_private_and_bounded(self):
+        log = self.state / "logs/services.err.log"
+        log.parent.mkdir(mode=0o700)
+        log.write_bytes(b"x" * (services.ERROR_LOG_LIMIT * 3) + b"newest")
+        os.chmod(log, 0o644)
+        services.start()
+        self.assertLessEqual(log.stat().st_size, services.ERROR_LOG_LIMIT)
+        self.assertTrue(log.read_bytes().endswith(b"newest"))
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(log.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(plistlib.loads(self.target(0).read_bytes())["StandardErrorPath"], str(log))
 
 
 if __name__ == "__main__":
