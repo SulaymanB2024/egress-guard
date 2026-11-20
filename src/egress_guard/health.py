@@ -56,7 +56,9 @@ def proxy_health(port: int, state=None) -> dict:
                  and hmac.compare_digest(data["proof"].encode(), response_proof(nonce, port, state).encode()))
         # The applied-policy report is authenticated separately so it is visible while unready.
         return {"ready": bool(valid), "port": port, "https_decryption": False,
-                "policy": _verified_policy(data, nonce, port, state)}
+                "policy": _verified_policy(data, nonce, port, state),
+                # Display-only resource figures, accepted only from a proxy that proved its identity.
+                "footprint": data.get("footprint") if valid and isinstance(data.get("footprint"), dict) else None}
     except (OSError, ValueError, RuntimeError, http.client.HTTPException):
         return {"ready": False, "port": port, "https_decryption": False, "policy": None}
     finally:
