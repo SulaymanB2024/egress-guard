@@ -2,7 +2,7 @@
 
 ## Supported release
 
-Version 0.2.x is an alpha. Fixes will target the latest published 0.2.x release; 0.1.x is no longer supported. Review release notes before upgrading; the application does not execute downloaded application updates automatically.
+Version 0.3.x is an alpha. Fixes will target the latest published 0.3.x release; 0.2.x and earlier are no longer supported. Review release notes before upgrading; the application does not execute downloaded application updates automatically.
 
 ## Report a vulnerability
 
