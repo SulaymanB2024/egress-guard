@@ -282,6 +282,63 @@ addons = [EgressGuard(), LoopbackOnly()]
         self.assertNotIn("private-test-value", repr(rows))
 
 
+    def tunnel(self, host, first_bytes, *, chunks=()):
+        """Open an admitted CONNECT tunnel, send raw bytes and return what comes back."""
+        with socket.create_connection(("127.0.0.1", self.proxy_port), timeout=4) as client:
+            client.sendall(f"CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n\r\n".encode("ascii"))
+            head = b""
+            while b"\r\n\r\n" not in head:
+                data = client.recv(1024)
+                if not data:
+                    break
+                head += data
+            self.assertTrue(head.startswith(b"HTTP/1.1 200"), head)
+            client.sendall(first_bytes)
+            for chunk in chunks:
+                time.sleep(0.05)
+                try:
+                    client.sendall(chunk)
+                except OSError:
+                    break
+            received = b""
+            try:
+                while data := client.recv(4096):
+                    received += data
+            except OSError:
+                pass
+            return received
+
+    def test_connect_tunnel_refuses_plaintext_http(self):
+        self.start_proxy()
+        plaintext_request = (b"GET /tunnelled HTTP/1.1\r\nHost: plaintext.test\r\n"
+                             b"Authorization: Bearer fixture-secret\r\nCookie: fixture-cookie\r\n"
+                             b"Connection: close\r\n\r\n")
+        cases = {
+            "plaintext-http": (plaintext_request, ()),
+            "tiny-first-write": (b"\x16", (b"\x03\x01" + plaintext_request,)),
+            "tls-header-then-garbage": (b"\x16\x03\x01\x00\x10" + b"\x00" * 16, (plaintext_request,)),
+            "oversized-hello": (b"\x16\x03\x01\x40\x00\x01\xff\xff\xff" + b"\x00" * 0x3FFB,
+                                (b"\x16\x03\x01\x40\x00" + b"\x00" * 0x4000,) * 5),
+        }
+        for name, (first, rest) in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(self.tunnel("plaintext.test", first, chunks=rest), b"")
+        self.assertEqual(self.plain_origin.accepts, 0)
+        self.assertEqual(self.plain_origin.requests, [])
+
+        # TLS through an admitted tunnel still reaches the origin with its own certificate.
+        self.assertEqual(self.tls("passthrough.test"), (200, b"origin response"))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            with sqlite3.connect(self.database) as connection:
+                rows = connection.execute("SELECT host, decision, source, transport FROM events").fetchall()
+            if ("plaintext.test", "blocked", "non-tls-tunnel", "connect") in rows:
+                break
+            time.sleep(0.02)
+        self.assertIn(("plaintext.test", "blocked", "non-tls-tunnel", "connect"), rows)
+        self.assertNotIn("fixture-secret", repr(rows))
+        self.assertNotIn("Traceback", (self.state / "proxy.log").read_text())
+
     def test_health_authenticates_installation_and_rejects_static_replay(self):
         self.start_proxy()
         self.assertTrue(proxy_health(self.proxy_port, self.state)["ready"])

@@ -6,7 +6,10 @@ import asyncio
 import json
 import re
 
-from mitmproxy import ctx, http
+from mitmproxy import connection, ctx, http
+from mitmproxy.net.tls import starts_like_tls_record
+from mitmproxy.proxy import commands, layer
+from mitmproxy.proxy.layers.tls import parse_client_hello
 
 from egress_guard import __version__
 from egress_guard.config import config_path, load_config
@@ -18,6 +21,20 @@ from egress_guard.policy import Policy, PolicyRuntime, is_loopback, normalize_ho
 HEALTH_HOST = "egress-guard.invalid"
 HEALTH_QUERY = re.compile(r"nonce=([A-Za-z0-9_-]{43})")
 CREDENTIAL_HEADERS = ("Authorization", "Cookie")
+# A ClientHello, even with post-quantum key shares, fits well inside these bounds.
+MAX_CLIENT_HELLO_BYTES = 32 * 1024
+MAX_CLIENT_HELLO_READS = 32
+
+
+class RefusedTunnel(layer.Layer):
+    """Close the client side of a tunnel. The lazy upstream connection is never opened."""
+
+    closed = False
+
+    def _handle_event(self, event):
+        if not self.closed:
+            self.closed = True
+            yield commands.CloseConnection(self.context.client)
 
 
 class EgressGuard:
@@ -25,6 +42,8 @@ class EgressGuard:
         self.runtime: PolicyRuntime | None = None
         self.ledger: Ledger | None = None
         self._refresh_task: asyncio.Task | None = None
+        # Admitted CONNECT tunnels awaiting their first client bytes: client id -> [host, reads].
+        self._tunnels: dict[str, list] = {}
 
     @property
     def policy(self) -> Policy | None:
@@ -127,6 +146,35 @@ class EgressGuard:
     def http_connect(self, flow: http.HTTPFlow) -> None:
         flow.request.headers.pop("Proxy-Authorization", None)
         self._apply(flow, "connect")
+
+    def http_connected(self, flow: http.HTTPFlow) -> None:
+        host = normalize_host(flow.request.host)
+        if self._block_plaintext_credentials and host is not None and not is_loopback(host):
+            self._tunnels[flow.client_conn.id] = [host, 0]
+
+    def next_layer(self, nextlayer: layer.NextLayer) -> None:
+        # Script addons run before mitmproxy's own next-layer decision, which would otherwise
+        # relay an ignored tunnel unseen. Only a complete TLS ClientHello is admitted; plaintext
+        # HTTP inside CONNECT would bypass the credential check, so it is closed before any byte
+        # or connection reaches the origin. TLS is neither terminated nor re-signed.
+        tunnel = self._tunnels.get(nextlayer.context.client.id)
+        if tunnel is None or nextlayer.layer is not None:
+            return
+        tunnel[1] += 1
+        data = nextlayer.data_client()
+        try:
+            hello = parse_client_hello(data) if starts_like_tls_record(data) else False
+        except ValueError:
+            hello = False
+        if hello is None and len(data) <= MAX_CLIENT_HELLO_BYTES and tunnel[1] < MAX_CLIENT_HELLO_READS:
+            return  # Incomplete ClientHello; mitmproxy keeps waiting for the rest of it.
+        del self._tunnels[nextlayer.context.client.id]
+        if hello is None or hello is False:
+            self._event(tunnel[0], "blocked", "non-tls-tunnel", "connect")
+            nextlayer.layer = RefusedTunnel(nextlayer.context)
+
+    def client_disconnected(self, client: connection.Client) -> None:
+        self._tunnels.pop(client.id, None)
 
     def _health(self, flow: http.HTTPFlow) -> None:
         request = flow.request

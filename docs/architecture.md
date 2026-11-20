@@ -16,7 +16,7 @@ flowchart LR
     N --> A[macOS notifications]
 ```
 
-Remote sites and incoming proxy requests are untrusted. Blocked CONNECT requests must be refused before upstream contact. HTTP target authority is authoritative; an inconsistent Host header cannot turn a remote request into a loopback exemption. HTTPS tunnels remain opaque, including their authentication data.
+Remote sites and incoming proxy requests are untrusted. Blocked CONNECT requests must be refused before upstream contact. HTTP target authority is authoritative; an inconsistent Host header cannot turn a remote request into a loopback exemption. HTTPS tunnels remain opaque, including their authentication data. Port 443 does not prove TLS: while `block_plaintext_credentials` is on, an admitted tunnel to an external host must begin with a complete TLS ClientHello (at most 32 KiB over 32 reads); anything else closes the client connection before the lazy upstream connection opens. The ClientHello is parsed, not terminated or re-signed.
 
 The dashboard admits only its exact loopback Host/Origin. The native launcher and server authenticate each other using role-separated HMAC proofs bound to the exact origin and fresh client and server nonces. The install-specific key stays in a private file; the browser receives only a short-lived, one-use bootstrap. The resulting expiring bearer session is held in origin-scoped tab sessionStorage, never a cross-port cookie. Mutations also require a session-bound CSRF value. At most eight requests enter worker threads, with both idle and total request deadlines. The server serves three fixed static files and a small fixed action set. No control API changes native network settings or runs user-provided commands.
 

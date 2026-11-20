@@ -30,6 +30,7 @@ SOURCES = frozenset({
     "invalid-host", "invalid-request", "threat-intel", "local-block", "tracker-feed",
     "cname-feed", "tracker-paused", "local-allow", "temporary-exception",
     "dashboard-exception", "no-match", "plaintext-credentials", "not-ready",
+    "non-tls-tunnel",
 })
 MAX_QUEUE = 2048
 MAX_EVENTS = 10_000
