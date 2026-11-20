@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "rules": [
+    {
+      "id": "publisher-collect",
+      "kind": "request",
+      "site": "publisher.example",
+      "host": "publisher.example",
+      "path": "/collect",
+      "types": ["beacon", "ping", "xmlhttprequest", "image"],
+      "action": "block",
+      "note": "Same-origin analytics beacon"
+    },
+    {
+      "id": "publisher-sponsored-card",
+      "kind": "cosmetic",
+      "site": "publisher.example",
+      "selector": "article.card.teaser[data-ad-slot]",
+      "note": "Sponsored feed card"
+    }
+  ],
+  "exceptions": []
+}

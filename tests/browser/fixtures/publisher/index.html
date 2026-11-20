@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Publisher fixture</title>
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<header id="masthead"><a href="/">Publisher</a></header>
+<main id="content">
+  <article id="story" class="story">
+    <h1>Fixture article headline</h1>
+    <p>Article body text that must stay readable when the companion is active.</p>
+    <div id="player" class="media-embed">
+      <video id="clip" src="/media/clip.webm" controls preload="metadata" width="320" height="180"></video>
+    </div>
+  </article>
+  <section id="feed" class="feed">
+    <article id="card-organic-1" class="card teaser">
+      <h2>Organic story one</h2>
+      <p>Related reading.</p>
+    </article>
+    <article id="card-sponsored" class="card teaser" data-ad-slot="feed-2">
+      <h2>Sponsored story</h2>
+      <p>Paid placement with the same classes as organic cards.</p>
+    </article>
+    <article id="card-organic-2" class="card teaser">
+      <h2>Organic story two</h2>
+      <p>More related reading.</p>
+    </article>
+  </section>
+  <form id="login" class="card login" action="/login" method="post">
+    <label>Email <input name="email" type="email" autocomplete="username"></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password"></label>
+    <button type="submit">Sign in</button>
+  </form>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
