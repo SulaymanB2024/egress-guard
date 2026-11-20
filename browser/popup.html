@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Egress Guard</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header>
+  <h1>Egress Guard</h1>
+  <p id="site" class="muted">Loading…</p>
+</header>
+<p id="error" class="error" role="alert" hidden></p>
+
+<section aria-labelledby="blocked-h">
+  <h2 id="blocked-h">Blocked before sending</h2>
+  <p class="muted">Requests stopped on this page since it loaded.</p>
+  <ul id="blocked"></ul>
+</section>
+
+<section aria-labelledby="hidden-h">
+  <h2 id="hidden-h">Hidden after loading</h2>
+  <p id="hidden" class="muted"></p>
+  <div class="actions">
+    <button id="pick" type="button">Block an element…</button>
+    <button id="restore" type="button">Restore this page</button>
+  </div>
+</section>
+
+<section aria-labelledby="rules-h">
+  <h2 id="rules-h">Rules for this site</h2>
+  <ul id="rules"></ul>
+  <details>
+    <summary>Add an endpoint rule</summary>
+    <form id="add-rule">
+      <label>Host <input id="rule-host" name="host" required autocomplete="off" spellcheck="false"></label>
+      <label>Path <input id="rule-path" name="path" required autocomplete="off" spellcheck="false" placeholder="/collect"></label>
+      <fieldset id="rule-types">
+        <legend>Request types</legend>
+      </fieldset>
+      <button type="submit">Block endpoint</button>
+    </form>
+  </details>
+</section>
+
+<section aria-labelledby="exc-h">
+  <h2 id="exc-h">Temporary exceptions</h2>
+  <ul id="exceptions"></ul>
+</section>
+<script src="popup.js"></script>
+</body>
+</html>

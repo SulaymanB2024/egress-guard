@@ -37,7 +37,7 @@
   function describe({url, type, topUrl}) {
     let parsed;
     try { parsed = new URL(url); } catch { return null; }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:" && parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return null;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
     const host = hosts.normalizeHost(parsed.hostname);
     if (!host) return null;
     const topHost = hosts.hostOfUrl(topUrl);

@@ -13,7 +13,7 @@
 
   // main_frame is never blockable: a rule must not be able to stop navigation to a site.
   const RESOURCE_TYPES = Object.freeze(["beacon", "ping", "xmlhttprequest", "script", "image", "imageset", "stylesheet",
-    "font", "media", "sub_frame", "websocket", "object", "csp_report", "other"]);
+    "font", "media", "sub_frame", "object", "csp_report", "other"]);
   const ACTIONS = Object.freeze(["block", "allow"]);
   const PARTIES = Object.freeze(["any", "first", "third"]);
   const MAX_PATH = 256;
@@ -31,8 +31,11 @@
   const fail = (message) => { throw new RuleError(message); };
 
   function plainObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value) &&
-      Object.getPrototypeOf(value) === Object.prototype;
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+    // Cross-realm safe (storage and messaging may hand over objects from another compartment):
+    // the prototype must be null or some realm's Object.prototype, never a custom chain.
+    const proto = Object.getPrototypeOf(value);
+    return proto === null || (Object.getPrototypeOf(proto) === null && Object.prototype.hasOwnProperty.call(proto, "hasOwnProperty"));
   }
 
   function checkFields(value, allowed) {

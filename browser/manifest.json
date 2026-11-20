@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Egress Guard Companion (experimental)",
+  "version": "0.1.0",
+  "description": "Site-scoped endpoint blocking and reversible element hiding. Local rules only; no remote code or extension networking.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "browser-companion@egress-guard.invalid",
+      "strict_min_version": "128.0"
+    }
+  },
+  "permissions": ["webRequest", "webRequestBlocking", "storage", "alarms"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "scripts": ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["core/selectors.js", "core/picker.js", "content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {"default_title": "Egress Guard", "default_popup": "popup.html"},
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'"}
+}
