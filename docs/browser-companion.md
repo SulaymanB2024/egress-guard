@@ -22,13 +22,10 @@ released, and not yet connected to the proxy.
   one, since sponsored and organic cards often share every class), shows how
   many elements it matches, and saves a site rule only after a real click on
   **Create rule**. **Undo** removes the rule and restores the element.
-- **Temporary exceptions.** Each blocked request in the popup has
-  **Allow 15 min**. It allows that one exact path, for that site and that
-  resource type only, and is removed automatically when it expires. You can
-  remove it sooner.
-- **Popup.** Lists what was blocked before sending, what is hidden after
-  loading, this site's rules, and exceptions with time left. Plain system
-  fonts; all page-derived text is set with `textContent`.
+- **Temporary exceptions.** **Allow 15 min** on a blocked request allows that
+  exact path, site and resource type only, and is removed on expiry or by hand.
+- **Popup.** Blocked before sending, hidden after loading, this site's rules,
+  and exceptions with time left. Page-derived text uses `textContent` only.
 
 ## Rules and their limits
 
@@ -62,11 +59,10 @@ If no top-level site is known, the request is allowed.
 
 ## Load it temporarily in Firefox
 
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Choose **Load Temporary Add-on…** and select `browser/manifest.json`.
-3. If Firefox lists host access as optional, allow it in
-   `about:addons` → Egress Guard Companion → Permissions.
-4. Reload open pages. The add-on and its rules disappear when Firefox quits.
+Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary
+Add-on…** and select `browser/manifest.json`. If host access shows as optional,
+allow it under `about:addons` → Permissions, then reload open pages. The add-on
+and its rules disappear when Firefox quits.
 
 ## Permissions and why
 
@@ -90,8 +86,7 @@ remote code; extension pages allow only their own scripts and
   DNS layers stay responsible for that.
 - First-party, server-side processing is out of reach: data the site's server
   already has or forwards stays there.
-- A site can change its markup or paths and break a rule. Restore and remove
-  the rule if a page breaks.
+- Sites change markup and paths; remove a rule that breaks a page.
 - In-memory state (blocked list, last navigation per tab) resets when Firefox
   suspends the background script. Rules and exceptions are stored.
 - This is a small, rule-at-a-time tool. Use it alongside uBlock Origin, not
@@ -99,26 +94,21 @@ remote code; extension pages allow only their own scripts and
 
 ## Code layout and seams
 
-- `browser/core/` is free of browser APIs: `hosts.js`, `selectors.js`,
-  `rules.js` (validation), `decide.js` (request decisions and top-level
-  resolution), `store.js` (rules, exceptions, expiry; storage injected) and
-  `picker.js` (selector candidates).
-- `background.js` is the Firefox adapter. A Chrome DNR compiler can translate
-  validated rules from the same store into `declarativeNetRequest` rules, and a
-  native-messaging adapter can sync the store with the proxy, both without
-  changing `core/`.
-- Sponsor Skip/Undo from the earlier page-controls candidate is not carried
-  over. Its pure timing validator was clean, but its player controls depended
-  on YouTube markup and its DOM tests needed Happy DOM, which this repo does
-  not install. It can return as its own module later.
+`browser/core/` has no browser APIs: validation, decisions, top-level
+resolution, the store (storage injected) and picker candidates. `background.js`
+is the Firefox adapter. A Chrome DNR compiler can translate the same validated
+rules, and a native-messaging adapter can sync the store with the proxy,
+without changing `core/`. Sponsor Skip/Undo from the earlier page-controls
+candidate is not carried over: its player controls depended on YouTube markup
+and its DOM tests needed Happy DOM, which this repo does not install.
 
 ## What was verified, and how
 
-Node tests (no dependencies): `node --test 'tests/browser/*.test.cjs'`.
-They cover validation, hostile inputs, decisions for every fixture request,
-store expiry, the background adapter with a fake `browser` namespace, the
-content script and picker on a hand-rolled DOM stub, the popup, and a source
-scan for `innerHTML`, `eval`, remote URLs and networking calls.
+Node tests (no dependencies): `node --test 'tests/browser/*.test.cjs'`
+cover validation and hostile inputs, every fixture request decision, expiry,
+the background adapter with a fake `browser`, content script, picker and popup
+on a hand-rolled DOM stub, and a source scan for `innerHTML`, `eval`, remote
+URLs and networking calls.
 
 Real Firefox (160.0.1, headless, throwaway profile, loopback fixture only):
 `node tests/browser/firefox-headless.mjs`. It installs a temporary copy with a
