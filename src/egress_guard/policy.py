@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import stat
 import time
 from pathlib import Path
+from typing import Callable
 
-from egress_guard.feeds import dns_name, read_cached_feed, selected_feeds
+from egress_guard.config import EXEMPTION_PRESETS
+from egress_guard.feeds import CNAME_FEEDS, THREATS, TRACKERS, CachedFeed, dns_name, load_cached_feed, selected_feeds
 
 MAX_CONTROL_BYTES = 64 * 1024
 MAX_EXCEPTION_SECONDS = 24 * 60 * 60
@@ -85,28 +88,98 @@ def _expiry_valid(value: object, now: float) -> bool:
     return type(value) in (int, float) and now < value <= now + MAX_EXCEPTION_SECONDS
 
 
+def _union(parts: list[set[str]]) -> set[str]:
+    # A single snapshot is shared rather than copied; large feeds stay one set.
+    return parts[0] if len(parts) == 1 else set().union(*parts)
+
+
+def watched_paths(config_path: Path, state: Path) -> tuple[Path, ...]:
+    """Every file whose contents can change a host decision's policy revision."""
+    feeds = (*TRACKERS.values(), THREATS, *CNAME_FEEDS)
+    return (config_path, state / "block.txt", state / "allow.txt", *(feed.path(state) for feed in feeds))
+
+
+def policy_stamp(config_path: Path, state: Path) -> tuple:
+    """The shared change detector for the proxy and the dashboard.
+
+    Inode and ctime catch same-size replacements whose mtime was preserved.
+    """
+    stamps = []
+    for path in watched_paths(config_path, state):
+        try:
+            info = path.lstat()
+            stamps.append((info.st_ino, info.st_mtime_ns, info.st_ctime_ns, info.st_size))
+        except OSError:
+            stamps.append(None)
+    return tuple(stamps)
+
+
 class Policy:
-    def __init__(self, config: dict, state: Path) -> None:
+    def __init__(self, config: dict, state: Path, previous: Policy | None = None) -> None:
         self.state = state
         block = config.get("block", {})
         self.feeds = selected_feeds(config)
-        self.threats: set[str] = set()
-        self.trackers: set[str] = set()
-        self.cname: set[str] = set()
-        destinations = {"threat": self.threats, "tracker": self.trackers, "cname": self.cname}
+        # Each enabled feed is validated on its own. An unusable snapshot keeps the
+        # last verified component from the running policy instead of becoming empty.
+        prior = previous.components if previous is not None else {}
+        self.components: dict[str, CachedFeed] = {}
+        self.coverage: dict[str, str] = {}
+        groups: dict[str, list[set[str]]] = {"threat": [], "tracker": [], "cname": []}
         for feed in self.feeds:
-            destinations[feed.category].update(read_cached_feed(state, feed))
+            snapshot = load_cached_feed(state, feed)
+            if snapshot is not None:
+                self.coverage[feed.id] = "verified"
+            elif feed.id in prior:
+                snapshot = prior[feed.id]
+                self.coverage[feed.id] = "last-good"
+            else:
+                self.coverage[feed.id] = "missing"
+                continue
+            self.components[feed.id] = snapshot
+            groups[feed.category].append(snapshot.names)
+        self.threats = _union(groups["threat"])
+        self.trackers = _union(groups["tracker"])
+        self.cname = _union(groups["cname"])
         self.manual = _rules(state / "block.txt")
         self.manual.update(host for name in block.get("hosts", []) if (host := dns_name(name)))
         self.allow = _rules(state / "allow.txt")
         self.allow.update(host for name in block.get("allow", []) if (host := dns_name(name)))
+        # Exemptions are explicit: configured hosts plus any opted-in compatibility preset.
         self.dashboard_hosts = {
             host for name in block.get("dashboard_hosts", []) if (host := dns_name(name))
         }
+        for preset in block.get("exemption_presets", []):
+            self.dashboard_hosts.update(EXEMPTION_PRESETS.get(preset, ()))
+        self.block_plaintext_credentials = config.get("risk", {}).get("block_plaintext_credentials", True)
+        material = {
+            "config": config,
+            "manual": sorted(self.manual),
+            "allow": sorted(self.allow),
+            "feeds": {feed.id: getattr(self.components.get(feed.id), "sha256", None) for feed in self.feeds},
+        }
+        self.revision = hashlib.sha256(
+            json.dumps(material, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()
         self.reload_controls()
 
-    def ready(self) -> bool:
+    def enforceable(self) -> bool:
+        """Threat and tracker data are present, so the proxy can filter at all."""
         return bool(self.threats and self.trackers)
+
+    def ready(self) -> bool:
+        """Every enabled feed has verified data (current or last-good)."""
+        return self.enforceable() and "missing" not in self.coverage.values()
+
+    def degraded(self) -> bool:
+        return not self.ready() or "last-good" in self.coverage.values()
+
+    def published_at(self, feed_id: str) -> float | None:
+        component = self.components.get(feed_id)
+        return component.published_at if component else None
+
+    def summary(self) -> dict:
+        return {"revision": self.revision, "complete": self.ready(), "degraded": self.degraded(),
+                "coverage": dict(self.coverage)}
 
     def reload_controls(self) -> None:
         self.controls = _read_controls(self.state / "filter-controls.json")
@@ -144,3 +217,81 @@ class Policy:
             "matched_domain": match,
             "can_allow": source in ALLOWABLE,
         }
+
+    def explain(self, host: str) -> dict:
+        """A decision that says `indeterminate` when missing coverage could change an allow."""
+        result = self.decision(host)
+        if result["decision"] == "allowed" and not self.ready():
+            result["decision"] = "indeterminate"
+        return {**result, "policy_ready": self.ready(), **self.summary()}
+
+
+class PolicyRuntime:
+    """Observed, desired and applied policy generations for the long-running proxy.
+
+    `observed` is the latest filesystem stamp, `applied` the stamp whose load produced
+    the running policy. A failed or rejected load keeps the previous policy, stays
+    dirty and retries with bounded backoff; a further file change retries at once.
+    """
+
+    def __init__(self, load: Callable[[Policy | None], Policy], observe: Callable[[], tuple], *,
+                 clock: Callable[[], float] = time.monotonic, base_delay: float = 1.0,
+                 max_delay: float = 60.0) -> None:
+        self._load = load
+        self._observe = observe
+        self._clock = clock
+        self._base_delay = base_delay
+        self._max_delay = max_delay
+        self.policy: Policy | None = None
+        self.observed: tuple | None = None
+        self.applied: tuple | None = None
+        self._attempted: tuple | None = None
+        self._retry_at = 0.0
+        self._failures = 0
+        self._incomplete = False
+        self.error: str | None = None
+
+    @property
+    def pending(self) -> bool:
+        return self.policy is None or self.observed != self.applied
+
+    def _defer(self, error: str | None) -> None:
+        self._failures = min(self._failures + 1, 32)
+        delay = min(self._max_delay, self._base_delay * 2 ** (self._failures - 1))
+        self._retry_at = self._clock() + delay
+        self.error = error
+
+    def poll(self) -> bool:
+        """Apply the on-disk policy when it changed or is still owed; True on a swap."""
+        stamp = self._observe()
+        self.observed = stamp
+        if self.policy is not None and stamp == self.applied and not self._incomplete:
+            return False
+        if stamp == self._attempted and self._clock() < self._retry_at:
+            return False
+        self._attempted = stamp
+        try:
+            candidate = self._load(self.policy)
+        except (OSError, ValueError) as error:
+            self._defer((str(error) or "policy could not be loaded")[:160])
+            return False
+        current = self.policy
+        if not candidate.enforceable() and current is not None and current.enforceable():
+            self._defer("replacement policy lacks verified threat or tracker data")
+            return False
+        self.policy = candidate
+        self.applied = stamp
+        self._incomplete = candidate.degraded()
+        if self._incomplete:
+            # Last-good or missing components may be a transient read; keep retrying.
+            self._defer(None)
+        else:
+            self._failures, self._retry_at, self.error = 0, 0.0, None
+        return True
+
+    def status(self) -> dict:
+        policy = self.policy
+        summary = policy.summary() if policy else {"revision": None, "complete": False, "degraded": True,
+                                                   "coverage": {}}
+        summary["degraded"] = summary["degraded"] or self.error is not None
+        return {**summary, "pending": self.pending, "error": self.error}

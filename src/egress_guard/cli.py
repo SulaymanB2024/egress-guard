@@ -37,7 +37,8 @@ def run_proxy() -> None:
     initialize()
     config = load_config()
     if not Policy(config, data_dir()).ready():
-        raise ValueError("No verified filter cache is ready. Run 'egress-guard refresh' first.")
+        raise ValueError("No verified filter cache is ready for every enabled feed. Run 'egress-guard refresh' "
+                         "first, or set cname_protection = false if CNAME feeds cannot be fetched.")
     executable = Path(sys.executable).parent / ("mitmdump.exe" if os.name == "nt" else "mitmdump")
     if not executable.is_file():
         discovered = shutil.which("mitmdump")
@@ -92,7 +93,10 @@ def main(argv=None) -> int:
         elif args.command == "run":
             run_proxy()
         elif args.command == "check":
-            print(json.dumps(Policy(load_config(), data_dir()).decision(args.host), indent=2))
+            # Missing enabled feed data makes an allow indeterminate, never a verified "allowed".
+            result = Policy(load_config(), data_dir()).explain(args.host)
+            print(json.dumps(result, indent=2))
+            return 2 if result["decision"] == "indeterminate" else 0
         elif args.command == "cname-check":
             from .cname import inspect_answers, normalize_cname_host
             from .dnssd import resolve_cnames

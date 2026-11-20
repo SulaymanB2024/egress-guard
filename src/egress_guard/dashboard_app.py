@@ -20,7 +20,7 @@ from .health import proxy_health
 from .http_deadline import request_json_object
 from .ledger import read_activity
 from .paths import atomic_private, data_dir, private_dir
-from .policy import Policy
+from .policy import Policy, policy_stamp
 
 LAUNCHER_RESPONSE_SECONDS = 3
 
@@ -46,9 +46,7 @@ class Application:
         self.canaries = CanaryMonitor(self.state)
 
     def policy(self):
-        paths = [self.config_path, self.state / "block.txt", self.state / "allow.txt",
-                 *sorted((self.state / "blocklists").glob("*"))]
-        stamp = tuple((str(path), path.stat().st_mtime_ns, path.stat().st_size) for path in paths if path.is_file())
+        stamp = policy_stamp(self.config_path, self.state)
         with self.lock:
             if self._policy is None or stamp != self._stamp:
                 self._policy = Policy(load_config(self.config_path), self.state)
@@ -59,10 +57,12 @@ class Application:
     def status(self):
         config = load_config(self.config_path)
         policy = self.policy()
-        healthy = proxy_health(config["proxy"]["port"], self.state)["ready"]
+        health = proxy_health(config["proxy"]["port"], self.state)
+        healthy = health["ready"]
+        applied = self._applied(policy, health.get("policy"))
         pause = self._read("filter-controls.json").get("tracker_pause_until", 0)
         paused = type(pause) in (int, float) and time.time() < pause <= time.time() + 86400
-        ready = healthy and policy.ready()
+        ready = healthy and policy.ready() and applied["state"] == "active"
         state = "paused" if paused and ready else "active" if ready else "degraded"
         feeds = feed_status(self.state, config)
         exceptions = self._read("tracker-exceptions.json")
@@ -72,12 +72,20 @@ class Application:
             "protection": {"state": state,
                 "message": "Ad filtering is paused; threat filtering stays active." if paused and ready else
                            "Verified local filters are active for applications using this proxy." if ready else
+                           "Saved rules are waiting for the proxy to apply them." if healthy and policy.ready() else
                            "Start the proxy, refresh filters, and configure individual applications to use it.",
                 "pause_expires_at": iso(pause) if paused else None},
             "proxies": [{"name": "Loopback filtering proxy", "state": "active" if healthy else "degraded",
-                         "detail": f"127.0.0.1:{config['proxy']['port']} · original HTTPS certificates"}],
-            "filters": [{"name": item["name"], "state": "active" if item["status"] == "current" else "degraded",
+                         "detail": f"127.0.0.1:{config['proxy']['port']} · original HTTPS certificates"},
+                        {"name": "Applied policy", "state": applied["state"], "detail": applied["detail"]}],
+            "policy": {key: applied[key] for key in ("saved_revision", "applied_revision", "applied", "pending",
+                                                     "degraded")},
+            "filters": [{"name": item["name"],
+                         "state": "active" if item["status"] == "current" and policy.coverage.get(item["id"]) == "verified"
+                         else "degraded",
                          "detail": item.get("error") or item["status"], "updated_at": item.get("updated_at"),
+                         # Publication time comes from the digest-verified snapshot used for decisions.
+                         "published_at": iso(published) if (published := policy.published_at(item["id"])) else None,
                          "entries": item.get("entries", 0)} for item in feeds],
             "canaries": [{"name": item.get("label", "Canary"), "state": "degraded" if item.get("error") or item.get("history_truncated") else
                           "active" if item.get("last_success") else "unknown",
@@ -95,6 +103,26 @@ class Application:
                                   if dns_name(host) and type(expiry) in (int, float) and time.time() < expiry <= time.time() + 86400],
         }
 
+    @staticmethod
+    def _applied(policy, reported):
+        """Compare saved rules with the revision the proxy authenticated as running."""
+        saved = policy.revision
+        revision = reported.get("revision") if isinstance(reported, dict) else None
+        revision = revision if isinstance(revision, str) else None
+        pending = not isinstance(reported, dict) or reported.get("pending") is not False
+        degraded = not isinstance(reported, dict) or reported.get("degraded") is not False
+        applied = revision == saved and not pending
+        if revision is None:
+            state, detail = "unknown", f"Saved revision {saved[:12]}; the proxy has not reported an applied revision."
+        elif not applied:
+            state, detail = "degraded", f"Saved revision {saved[:12]} is not applied yet; the proxy runs {revision[:12]}."
+        elif degraded:
+            state, detail = "degraded", f"Revision {saved[:12]} applied with incomplete or last-good filter data."
+        else:
+            state, detail = "active", f"Revision {saved[:12]} applied by the proxy."
+        return {"state": state, "detail": detail, "saved_revision": saved, "applied_revision": revision,
+                "applied": applied, "pending": pending, "degraded": degraded}
+
     def activity(self):
         try:
             return read_activity(self.state / "events.sqlite3", 50)
@@ -103,11 +131,13 @@ class Application:
 
     def domain(self, host):
         host = self._host(host)
-        decision = self.policy().decision(host)
+        policy = self.policy()
+        decision = policy.decision(host)
         manual = self._manual_rules()
+        # Only hosts the user has explicitly exempted (or opted into via a preset) are protected.
         return {**decision, "host": host, "reason": decision.get("source", "unknown"),
-                "can_block": host not in manual and host not in load_config(self.config_path)["block"]["dashboard_hosts"] and host != "canarytokens.org",
-                "can_unblock": host in manual}
+                "can_block": host not in manual and host not in policy.dashboard_hosts and host != "canarytokens.org",
+                "can_unblock": host in manual, "saved_revision": policy.revision}
 
     def _read(self, name):
         path = self.state / name

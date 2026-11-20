@@ -10,6 +10,14 @@ from .paths import atomic_private, data_dir, private_dir
 from .feeds import dns_name
 
 MAX_CONFIG_BYTES = 64 * 1024
+# Opt-in compatibility presets. Each names exact hosts that skip tracker and
+# CNAME decisions; threat and manual block rules still apply to them.
+EXEMPTION_PRESETS = {
+    "analytics-dashboards": (
+        "analytics.google.com", "clarity.microsoft.com", "claritystatic.azureedge.net",
+        "app.posthog.com", "us.posthog.com", "eu.posthog.com",
+    ),
+}
 
 
 def config_path() -> Path:
@@ -79,6 +87,10 @@ def load_config(path: Path | None = None) -> dict:
         if any(value is None for value in normalized):
             raise ValueError(f"{key} contains an invalid domain name")
         result["block"][key] = normalized
+    presets = result["block"]["exemption_presets"]
+    if not isinstance(presets, list) or any(not isinstance(name, str) or name not in EXEMPTION_PRESETS
+                                            for name in presets):
+        raise ValueError("exemption_presets may only name: " + ", ".join(sorted(EXEMPTION_PRESETS)))
     for key, low, high in (("retention_days", 1, 30), ("max_queue", 100, 10000)):
         value = result["logging"][key]
         if type(value) is not int or not low <= value <= high:

@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from egress_guard.cname import MAX_HOPS, MAX_RECORDS, inspect_answers, normalize_cname_host
+from egress_guard.feeds import CachedFeed
 from egress_guard.policy import Policy
 
 
@@ -21,7 +22,8 @@ class CNAMEInspectionTests(unittest.TestCase):
         feeds = {
             "threat": {"malware.example"}, "tracker": {"metrics.example"}, "cname": {"static.example"},
         }
-        with patch("egress_guard.policy.read_cached_feed", side_effect=lambda _, feed: feeds[feed.category]):
+        cached = lambda _, feed: CachedFeed(feeds[feed.category], feed.id, None, None)
+        with patch("egress_guard.policy.load_cached_feed", side_effect=cached):
             self.policy = Policy({"block": {"hosts": ["manual.example"], "allow": ["static.example"]}},
                                  Path(__file__).parent / "unused-cname-state")
 
