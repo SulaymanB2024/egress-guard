@@ -1,4 +1,18 @@
-"""A bounded asynchronous SQLite ledger containing domain-level metadata."""
+"""A bounded asynchronous SQLite ledger containing domain-level metadata.
+
+History modes (``[logging] history``):
+
+* ``full``      one row per decision (timestamp, hostname, decision, reason, transport).
+* ``aggregate`` per-UTC-day counts by decision and reason. Allowed traffic is stored with no
+                hostname. Blocked traffic keeps its hostname as a per-day count, with no
+                per-event timestamp.
+* ``none``      no traffic rows are written; only in-memory counters exist for this process.
+
+Switching modes never deletes existing rows: an ``events`` table written under ``full`` stays in
+the database file, untouched and unread, until the user deletes it or the file. Deleting rows or
+the file is ordinary deletion, not secure erasure. Request bodies, cookies and authorization
+values are never passed to this module. The only other stored value is a drop counter.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +20,9 @@ import queue
 import sqlite3
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from egress_guard.policy import normalize_host
 
@@ -18,13 +34,20 @@ SOURCES = frozenset({
 MAX_QUEUE = 2048
 MAX_EVENTS = 10_000
 BATCH_SIZE = 128
+HISTORY_MODES = ("full", "aggregate", "none")
 
 
 class Ledger:
-    def __init__(self, path: Path, *, max_queue: int = MAX_QUEUE, retention_days: int = 7) -> None:
+    def __init__(self, path: Path, *, max_queue: int = MAX_QUEUE, retention_days: int = 7,
+                 history: str = "full") -> None:
         self.path = path
-        if not 1 <= max_queue <= 10_000 or not 1 <= retention_days <= 30:
+        if not 1 <= max_queue <= 10_000 or not 1 <= retention_days <= 30 or history not in HISTORY_MODES:
             raise ValueError("invalid ledger bounds")
+        self.history = history
+        self._counter_lock = threading.Lock()
+        self._dropped = 0
+        self._dropped_saved = -1
+        self._counts: dict[tuple[str, str], int] = {}
         self._retention_seconds = retention_days * 86400
         self._queue: queue.Queue[tuple] = queue.Queue(max_queue)
         self._ready = threading.Event()
@@ -46,11 +69,23 @@ class Ledger:
         with self._admission:
             if self._stop.is_set():
                 return False
+            with self._counter_lock:
+                self._counts[(decision, source)] = self._counts.get((decision, source), 0) + 1
+            if self.history == "none":
+                return True
             try:
                 self._queue.put_nowait((int(time.time()), hostname, decision, source, transport))
             except queue.Full:
+                # Count only; the dropped event itself is not kept anywhere.
+                with self._counter_lock:
+                    self._dropped += 1
                 return False
         return True
+
+    def status(self) -> dict:
+        with self._counter_lock:
+            return {"history": self.history, "dropped": self._dropped,
+                    "decisions": sum(self._counts.values())}
 
     def close(self) -> None:
         with self._admission:
@@ -63,6 +98,19 @@ class Ledger:
         try:
             connection.execute("PRAGMA journal_mode=WAL")
             with connection:
+                connection.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                connection.execute("INSERT OR REPLACE INTO meta VALUES ('history', ?)", (self.history,))
+                self._dropped_saved = -1
+                if self.history == "aggregate":
+                    connection.execute("""
+                        CREATE TABLE IF NOT EXISTS daily (
+                            day INTEGER NOT NULL, host TEXT NOT NULL, decision TEXT NOT NULL,
+                            source TEXT NOT NULL, count INTEGER NOT NULL,
+                            PRIMARY KEY (day, host, decision, source)
+                        )
+                    """)
+                if self.history != "full":
+                    return connection
                 connection.execute("""
                     CREATE TABLE IF NOT EXISTS events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +140,15 @@ class Ledger:
                 break
         return rows
 
+    def _save_dropped(self, connection: sqlite3.Connection) -> None:
+        # The dashboard runs in another process, so the counter is mirrored into the database.
+        with self._counter_lock:
+            value = self._dropped
+        if value != self._dropped_saved:
+            with connection:
+                connection.execute("INSERT OR REPLACE INTO meta VALUES ('dropped', ?)", (str(value),))
+            self._dropped_saved = value
+
     def _run(self) -> None:
         connection = None
         pending: list[tuple] = []
@@ -104,12 +161,31 @@ class Ledger:
                     now = time.time()
                     if now >= next_sweep:
                         with connection:
-                            connection.execute("DELETE FROM events WHERE ts < ?", (int(now - self._retention_seconds),))
+                            cutoff = int(now - self._retention_seconds)
+                            if self.history == "full":
+                                connection.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+                            elif self.history == "aggregate":
+                                connection.execute("DELETE FROM daily WHERE day < ?", (cutoff // 86400 * 86400,))
                         next_sweep = now + 60
+                    self._save_dropped(connection)
                     self._ready.set()
                     if not pending:
                         pending = self._take_batch()
-                    if pending:
+                    if pending and self.history == "aggregate":
+                        with connection:
+                            for ts, host, decision, source, _transport in pending:
+                                connection.execute(
+                                    "INSERT INTO daily VALUES (?,?,?,?,1) ON CONFLICT(day,host,decision,source) "
+                                    "DO UPDATE SET count = count + 1",
+                                    (ts // 86400 * 86400, host if decision == "blocked" else "", decision, source),
+                                )
+                            connection.execute("""
+                                DELETE FROM daily WHERE rowid IN (
+                                    SELECT rowid FROM daily ORDER BY day DESC LIMIT -1 OFFSET ?
+                                )
+                            """, (MAX_EVENTS,))
+                        pending = []
+                    elif pending:
                         with connection:
                             connection.executemany(
                                 "INSERT INTO events(ts,host,decision,source,transport) VALUES (?,?,?,?,?)",
@@ -132,3 +208,28 @@ class Ledger:
             self._ready.clear()
             if connection is not None:
                 connection.close()
+
+
+def read_activity(path: Path, limit: int = 50) -> dict:
+    """Read recent activity for the dashboard from whichever mode wrote the database."""
+    def iso(value: int) -> str:
+        return datetime.fromtimestamp(value, timezone.utc).isoformat()
+
+    result: dict = {"events": [], "limit": limit, "history": "full", "dropped": 0}
+    if not path.is_file() or path.is_symlink():
+        return result
+    with sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, timeout=0.25) as connection:
+        meta = dict(connection.execute("SELECT key, value FROM meta").fetchall()) \
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE name='meta'").fetchone() else {}
+        history = meta.get("history") if meta.get("history") in HISTORY_MODES else "full"
+        result["history"] = history
+        result["dropped"] = int(meta["dropped"]) if str(meta.get("dropped", "")).isdigit() else 0
+        if history == "full":
+            rows = connection.execute("SELECT ts,host,decision,source FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            result["events"] = [{"at": iso(r[0]), "host": r[1], "decision": r[2], "reason": r[3]} for r in rows]
+        elif history == "aggregate":
+            rows = connection.execute(
+                "SELECT day,host,decision,source,count FROM daily ORDER BY day DESC, count DESC LIMIT ?", (limit,)).fetchall()
+            result["events"] = [{"at": iso(r[0]), "host": r[1], "decision": r[2], "reason": r[3],
+                                 "count": r[4], "day_only": True} for r in rows]
+    return result

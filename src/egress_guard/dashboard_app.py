@@ -18,6 +18,7 @@ from .config import config_path, initialize, load_config
 from .feeds import feed_status, dns_name, update_feeds
 from .health import proxy_health
 from .http_deadline import request_json_object
+from .ledger import read_activity
 from .paths import atomic_private, data_dir, private_dir
 from .policy import Policy
 
@@ -95,16 +96,10 @@ class Application:
         }
 
     def activity(self):
-        path = self.state / "events.sqlite3"
-        events = []
-        if path.is_file() and not path.is_symlink():
-            try:
-                with sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, timeout=0.25) as connection:
-                    rows = connection.execute("SELECT ts,host,decision,source FROM events ORDER BY id DESC LIMIT 50").fetchall()
-                    events = [{"at": iso(row[0]), "host": row[1], "decision": row[2], "reason": row[3]} for row in rows]
-            except sqlite3.Error:
-                return {"events": [], "limit": 50, "message": "Local activity is temporarily unavailable"}
-        return {"events": events, "limit": 50}
+        try:
+            return read_activity(self.state / "events.sqlite3", 50)
+        except (sqlite3.Error, ValueError):
+            return {"events": [], "limit": 50, "message": "Local activity is temporarily unavailable"}
 
     def domain(self, host):
         host = self._host(host)
