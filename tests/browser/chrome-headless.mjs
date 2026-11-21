@@ -29,7 +29,7 @@ const check = (name, ok, detail = "") => { results.push({name, ok, detail}); con
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---- extension build ---------------------------------------------------------------
-const fixtureLists = loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true});
+const fixtureLists = loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true, allowMissing: true});
 let lists = fixtureLists;
 if (realFeeds) {
   const real = loadLists(path.resolve(realFeeds), {log: (m) => console.log(`note: ${m}`)});
@@ -295,19 +295,20 @@ try {
   const mismatch = await evaluate(page, `chrome.runtime.sendMessage({type: "continue-once", url: "http://phish.example:${port}/"})`);
   check("continue once: a request naming another address than the page shows is refused", /changed/.test(mismatch && mismatch.error || ""), JSON.stringify(mismatch));
 
-  // "Continue once" needs a deliberate two-step real click; then the site and its own assets load, trackers stay blocked.
+  // "Continue once" needs a deliberate two-step real click. Only the exact-host navigation is permitted;
+  // the page's resources retain all threat/tracker blocks and the navigation strips cookies and its referrer.
   await click(page, "#reveal");
   await sleep(200);
   await click(page, "#continue");
   const continued = await until(page, `location.href === ${JSON.stringify(THREAT)} && document.readyState === 'complete'`, "continue navigates to the site");
-  const assets = await waitFor(() => hitPaths().includes("malware-fixture.test/landing") && hitPaths().includes("malware-fixture.test/landing-asset.png"));
-  check("continue once: the page and its same-site asset load", continued && assets, hitPaths().join(" "));
+  const landed = await waitFor(() => hitPaths().includes("malware-fixture.test/landing"));
+  check("continue once: the exact-host page loads, its threat-listed assets remain blocked", continued && landed && !hitPaths().includes("malware-fixture.test/landing-asset.png"), hitPaths().join(" "));
   check("continue once: trackers on that page stay blocked", !hitPaths().includes("pixel.tracker-fixture.test/landing-pixel.gif"));
   check("continue once: another threat-listed host on that page stays blocked (image and frame)", !hits.some((h) => h.host === "phish.example"), hitPaths().join(" "));
-  const sessionCount = () => swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => r.length)");
+  const sessionCount = () => swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => r.filter((x) => [EGDnr.PRIORITY.continue, EGDnr.PRIORITY.continueHeaders].includes(x.priority)).length)");
   const sessionRules = await sessionCount();
-  const types = await swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => [...new Set(r.map((x) => x.action.type))].join())");
-  check("continue once: two plain allow session rules while on the site", sessionRules === 2 && types === "allow", `${sessionRules} ${types}`);
+  const types = await swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => [...new Set(r.filter((x) => [EGDnr.PRIORITY.continue, EGDnr.PRIORITY.continueHeaders].includes(x.priority)).map((x) => x.action.type))].sort().join())");
+  check("continue once: navigation allow plus independent header sanitation", sessionRules === 2 && types === "allow,modifyHeaders", `${sessionRules} ${types}`);
 
   // Leaving the site ends the exception; coming back shows the warning again.
   await navigate(page, PAGE);

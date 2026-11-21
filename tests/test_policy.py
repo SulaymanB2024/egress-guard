@@ -8,7 +8,7 @@ from unittest.mock import patch
 from egress_guard.config import load_config
 from egress_guard.feeds import CachedFeed
 from egress_guard.ledger import SOURCES
-from egress_guard.policy import CATEGORIES, MAX_CONTROL_BYTES, Policy, PolicyRuntime, normalize_host
+from egress_guard.policy import CATEGORIES, MAX_CONTROL_BYTES, Policy, PolicyRuntime, normalize_host, policy_stamp
 
 
 def cached(names, published=None):
@@ -94,6 +94,74 @@ class PolicyTests(unittest.TestCase):
             self.assertEqual(decide(private)["source"], "no-match")
         # A listed IP is matched exactly, never as a DNS suffix.
         self.assertEqual(decide("203.0.113.10")["source"], "no-match")
+
+    def test_equivalent_ips_cannot_evade_ip_threat_or_resolver_rules(self):
+        for host in ("::ffff:203.0.113.9", "[::ffff:cb00:7109]"):
+            self.assertEqual(self.policy.decision(host), self.policy.decision("203.0.113.9"))
+        for host in ("::ffff:8.8.8.8", "[::ffff:808:808]"):
+            self.assertEqual(self.policy.decision(host), self.policy.decision("8.8.8.8"))
+        for host in ("0x08080808", "0x8.0x8.0x8.0x8", "134744072", "010.010.010.010", "8.8.2056"):
+            self.assertEqual(self.policy.decision(host)["source"], "invalid-host")
+        self.assertEqual(normalize_host("[::ffff:127.0.0.1]"), "127.0.0.1")
+        self.assertEqual(normalize_host("0x8.example"), "0x8.example")
+        self.assertFalse(self.policy.decision("8.8.8.8")["can_allow"])
+        self.snapshots["malware-feed"] = {"::ffff:cb00:7109"}
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            old_cache = Policy(self.config, self.state)
+        self.assertEqual(old_cache.decision("203.0.113.9")["source"], "malware-feed")
+
+    def test_grants_and_pause_are_immutable_until_a_new_revision_is_applied(self):
+        config_path = self.state / "config.toml"
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            runtime = PolicyRuntime(lambda old: Policy(self.config, self.state, old),
+                                    lambda: policy_stamp(config_path, self.state))
+            self.assertTrue(runtime.poll())
+            before = runtime.policy
+            (self.state / "filter-controls.json").write_text(json.dumps({"tracker_pause_until": time.time() + 60}))
+            desired = Policy(self.config, self.state)
+            self.assertNotEqual(desired.revision, before.revision)
+            self.assertEqual(before.decision("analytics.example")["source"], "tracker-feed")
+            self.assertEqual(desired.decision("analytics.example")["source"], "tracker-paused")
+            self.assertTrue(runtime.poll())
+            self.assertEqual(runtime.status()["revision"], desired.revision)
+            (self.state / "filter-controls.json").write_text("{}")
+            (self.state / "tracker-exceptions.json").write_text(json.dumps({"analytics.example": time.time() + 60}))
+            self.assertTrue(runtime.poll())
+            self.assertNotEqual(runtime.status()["revision"], desired.revision)
+            self.assertEqual(runtime.policy.decision("analytics.example")["source"], "temporary-exception")
+
+    def test_invalid_control_timestamps_cannot_crash_the_runtime(self):
+        (self.state / "filter-controls.json").write_text(json.dumps({"tracker_pause_until": 10 ** 1000}))
+        (self.state / "tracker-exceptions.json").write_text('{"analytics.example": NaN}')
+        self.policy.reload_controls()
+        self.assertEqual(self.policy.decision("analytics.example")["source"], "tracker-feed")
+
+    def test_runtime_receipt_waits_for_runtime_settings_apply(self):
+        revision = [0]
+        refused = [False]
+
+        def apply(_candidate):
+            if refused[0]:
+                raise ValueError("writer has not acknowledged")
+
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            runtime = PolicyRuntime(lambda old: Policy(self.config, self.state, old), lambda: (revision[0],),
+                                    apply=apply, clock=lambda: 0.0)
+            self.assertTrue(runtime.poll())
+            original = runtime.policy
+            refused[0] = True
+            revision[0] += 1
+            self.assertFalse(runtime.poll())
+            self.assertIs(runtime.policy, original)
+            self.assertTrue(runtime.status()["pending"])
+            self.assertTrue(runtime.status()["degraded"])
+            refused[0] = False
+            revision[0] += 1
+            self.assertTrue(runtime.poll())
+            self.assertFalse(runtime.status()["pending"])
 
     def test_encrypted_dns_servers(self):
         decide = self.policy.decision

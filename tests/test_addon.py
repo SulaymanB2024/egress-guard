@@ -157,7 +157,9 @@ addons = [EgressGuard(), LoopbackOnly()]
         log = (state / "proxy.log").open("wb")
         self.addCleanup(log.close)
         config = state / "config.toml"
-        config.write_text(f"[proxy]\nport = {self.proxy_port}\n")
+        # Transport assertions inspect deliberately opted-in fixture history;
+        # fresh production configuration defaults to no traffic history.
+        config.write_text(f'[proxy]\nport = {self.proxy_port}\n[logging]\nhistory = "full"\n')
         process = subprocess.Popen(
             [
                 str(MITMDUMP), "--mode", "regular", "--listen-host", "127.0.0.1",
@@ -409,6 +411,40 @@ addons = [EgressGuard(), LoopbackOnly()]
         reported = proxy_health(self.proxy_port, self.state)["policy"]
         self.assertEqual(reported["revision"], saved)
         self.assertFalse(reported["pending"] or reported["degraded"])
+
+    def test_live_history_none_is_acknowledged_only_after_disk_logging_stops(self):
+        self.start_proxy()
+        self.assertEqual(self.http("http://plaintext.test/before-history-change")[0], 200)
+        deadline = time.monotonic() + 3
+        before = 0
+        while time.monotonic() < deadline:
+            with sqlite3.connect(self.database) as connection:
+                before = connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            if before:
+                break
+            time.sleep(0.02)
+        self.assertEqual(before, 1)
+        path = self.state / "config.toml"
+        path.write_text(f'[proxy]\nport = {self.proxy_port}\n[logging]\nhistory = "none"\n')
+        with patch("egress_guard.policy.selected_feeds",
+                   lambda cfg: tuple(replace(feed, minimum=1) for feed in selected_feeds(cfg))):
+            desired = Policy(load_config(path), self.state).revision
+        deadline = time.monotonic() + 10
+        reported = {}
+        while time.monotonic() < deadline:
+            reported = proxy_health(self.proxy_port, self.state).get("policy") or {}
+            if reported.get("revision") == desired and reported.get("pending") is False:
+                break
+            time.sleep(0.05)
+        self.assertEqual(reported.get("revision"), desired)
+        self.assertTrue(reported["logging"]["applied"])
+        self.assertEqual(reported["logging"]["history"], "none")
+        for _ in range(3):
+            self.assertEqual(self.http("http://plaintext.test/after-history-receipt")[0], 200)
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT value FROM meta WHERE key = 'history'").fetchone()[0], "none")
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM events").fetchone()[0], before)
+        self.assertNotIn("Traceback", (self.state / "proxy.log").read_text())
 
     def test_invalid_manual_rules_at_start_are_unready_and_recover(self):
         self.manual.write_text("plaintext.test\ninvalid/domain\n")

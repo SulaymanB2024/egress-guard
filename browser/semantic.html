@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local ad review · Egress Guard</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="semantic.css">
+</head>
+<body>
+<main class="review">
+  <header>
+    <p class="t-caption muted">Egress Guard · Experimental</p>
+    <h1 class="t-headline">Local ad review</h1>
+    <p id="site" class="host muted">Checking the source page…</p>
+  </header>
+  <p>Review possible sponsored cards on a public page. A scan collects up to 24 short card excerpts. Known sensitive pages and paths are excluded by conservative heuristics; those checks cannot recognize every private page.</p>
+  <label class="consent"><input type="checkbox" id="public-page"> This is a public page without private information.</label>
+  <div class="actions">
+    <button type="button" class="btn primary" id="scan" disabled>Scan page</button>
+    <button type="button" class="btn" id="analyze" disabled>Analyze locally</button>
+    <button type="button" class="btn quiet" id="cancel" hidden>Cancel analysis</button>
+  </div>
+  <p id="model-note" class="t-caption muted">Checking local model availability…</p>
+  <p class="t-caption muted">Optional analysis uses Chrome’s on-device model. Chrome may need to download it first. Card excerpts stay on this device; there is no cloud fallback. The model can propose labels only, and never changes network blocking. Accuracy has not been benchmarked.</p>
+  <p id="notice" role="status" aria-live="polite">Scan to review candidates before running the model.</p>
+  <p id="error" class="inline-error" role="alert" hidden></p>
+  <section aria-labelledby="candidates-heading">
+    <h2 id="candidates-heading" class="t-title">Candidates</h2>
+    <p id="empty" class="muted">No page content has been collected.</p>
+    <ul id="candidates" class="candidates"></ul>
+  </section>
+  <div class="actions">
+    <button type="button" class="btn" id="apply" disabled>Hide selected cards</button>
+    <button type="button" class="btn quiet" id="restore">Restore reviewed cards</button>
+  </div>
+  <p class="t-caption muted">Selections apply to this page load only. Changed or protected cards are rejected. Use Rules → Restore everything hidden here in the popup to undo all element hiding.</p>
+</main>
+<script src="core/local-model.js"></script>
+<script src="semantic.js"></script>
+</body>
+</html>

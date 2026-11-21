@@ -80,10 +80,12 @@ class EgressGuard:
         except (OSError, ValueError):
             ctx.master.shutdown()
             return
-        self.runtime = PolicyRuntime(self._load_policy, lambda: policy_stamp(self._config_path, self._state))
+        self._startup_proxy = dict(config["proxy"])
+        self.ledger = Ledger(self._state / "events.sqlite3", **config["logging"])
+        self.runtime = PolicyRuntime(self._load_policy, lambda: policy_stamp(self._config_path, self._state),
+                                     apply=self._apply_runtime_settings)
         # An invalid rule file leaves no policy: remain loopback-only and unready while retrying.
         self.runtime.poll()
-        self.ledger = Ledger(self._state / "events.sqlite3", **config["logging"])
         self._refresh_task = asyncio.create_task(self._refresh())
 
     def configure(self, updated) -> None:
@@ -100,11 +102,15 @@ class EgressGuard:
     def _load_policy(self, previous: Policy | None) -> Policy:
         return Policy(load_config(self._config_path), self._state, previous)
 
+    def _apply_runtime_settings(self, candidate: Policy) -> None:
+        if self.ledger is None or not self.ledger.reconfigure(**candidate.logging):
+            raise ValueError("History settings are waiting for the ledger writer to acknowledge them")
+        if candidate.proxy != self._startup_proxy:
+            raise ValueError("Changed listening ports require restarting the proxy and dashboard")
+
     async def _refresh(self) -> None:
         while True:
             await asyncio.sleep(1)
-            if self.policy is not None:
-                self.policy.reload_controls()
             if self._safe_options():
                 await asyncio.to_thread(self.runtime.poll)
 
@@ -195,6 +201,7 @@ class EgressGuard:
         if challenge is not None and type(port) is int and self.runtime is not None:
             # Applied revision, pending and degraded state travel only with an authenticated reply.
             status = self.runtime.status()
+            status["logging"] = self.ledger.status() if self.ledger is not None else None
             try:
                 data["policy_proof"] = policy_proof(challenge.group(1), port, self._state, status)
                 data["policy"] = status

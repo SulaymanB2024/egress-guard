@@ -32,6 +32,7 @@ MAX_CLOCK_SKEW = 24 * 60 * 60
 RESPONSE_SECONDS = 60
 DNS_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 DNS_NAME = re.compile(rf"(?:{DNS_LABEL}\.)*{DNS_LABEL}")
+LEGACY_IP_PART = re.compile(r"(?:[0-9]+|0x[0-9a-f]+)")
 
 
 def dns_name(value: object, *, dotted: bool = False) -> str | None:
@@ -41,6 +42,12 @@ def dns_name(value: object, *, dotted: bool = False) -> str | None:
     name = value.lower().removesuffix(".")
     if len(name) > 253 or DNS_NAME.fullmatch(name) is None:
         return None
+    # Some resolvers interpret one-to-four numeric/hex components as an IPv4
+    # address (for example 0x08080808). Never let those spellings become a DNS
+    # allow decision. Accept canonical literals only through ip_literal().
+    parts = name.split(".")
+    if len(parts) <= 4 and all(LEGACY_IP_PART.fullmatch(part) for part in parts):
+        return None
     suffix = name.rsplit(".", 1)[-1]
     if (dotted and "." not in name) or not any("a" <= char <= "z" for char in suffix):
         return None
@@ -48,11 +55,14 @@ def dns_name(value: object, *, dotted: bool = False) -> str | None:
 
 
 def ip_literal(value: object) -> str | None:
-    """Return the compressed text of an IP literal, or None for anything else."""
+    """Return one policy identity for an IP, including IPv4-mapped IPv6."""
     if not isinstance(value, str) or "%" in value:
         return None
     try:
-        return ipaddress.ip_address(value).compressed
+        address = ipaddress.ip_address(value)
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+            address = address.ipv4_mapped
+        return address.compressed
     except ValueError:
         return None
 

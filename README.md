@@ -4,7 +4,9 @@ Local ad, tracker and threat filtering for macOS, with a portable Python core.
 
 Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps the origin server's certificate and encrypted contents. No root daemon, browser certificate trust, or account credentials are needed for filtering.
 
-**0.6.0 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. The core has no macOS routing dependency, but Windows transport has not been tested. Windows dashboard authentication and verified health are unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
+**0.7.0 is alpha software.** This revision adds scoped browser cosmetics, reversible sponsored-card detection, optional on-device model review, reconciled browser policies and a read-only proxy receipt bridge. New configurations retain no domain history by default. Read the [0.7 changes and qualification limits](docs/release-0.7.md).
+
+The transport was previously exercised on macOS ARM64 with Python 3.12. The 0.7 changes have Linux isolated-test coverage; macOS launchd, installed-browser native messaging and the local model still require target-device qualification. Windows dashboard authentication and verified health remain unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
 
 ## What it does
 
@@ -15,6 +17,8 @@ Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps 
 - Updates feeds daily when macOS background services are enabled. Invalid, truncated or failed downloads retain the last good copy; the dashboard shows publication age separately from download success.
 - Refuses external plaintext HTTP requests carrying `Cookie` or `Authorization` headers before forwarding them, and closes a CONNECT tunnel to an external host unless its first bytes are a complete TLS ClientHello, so plaintext cannot travel through a tunnel unchecked. Other protocols over CONNECT, such as SSH, need `block_plaintext_credentials = false`. This is a guard against accidental plaintext credentials, not data-loss prevention: it reads only those two headers, never inspects encrypted traffic, and cannot stop a program that deliberately sends data elsewhere.
 - Provides an authenticated local dashboard with decision explanations, temporary exact-host exceptions, ad-filter pauses, manual rules and local activity.
+- Adds an optional Chrome 145+ companion for request-level filtering, scoped cosmetic rules, deterministic sponsored-card hiding and user-reviewed local model suggestions. Its popup distinguishes saved policy from applied policy and reports incomplete list coverage. [Build and use it](docs/browser-companion.md).
+- Offers an explicitly registered, read-only native messaging bridge so the Chrome popup can check the local proxy's authenticated policy and logging acknowledgments. It cannot change routing, weaken rules or prove device-wide coverage.
 - Monitors canaries you explicitly register with Thinkst and sends batched macOS notifications. Registration verifies access and establishes a history baseline without exposing token values in logs or the dashboard.
 - Leaves system-wide routing unchanged. Automatic native activation is withheld until endpoint ownership can be guaranteed across logout, crashes and reboot. Inspection and ownership-preserving recovery are retained.
 
@@ -69,7 +73,7 @@ For recovery without the CLI, turn off the matching `127.0.0.1:18080` HTTP and H
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r requirements/runtime.lock
-python -m pip install --no-deps --no-index ./egress_guard-0.6.0-py3-none-any.whl
+python -m pip install --no-deps --no-index ./egress_guard-0.7.0-py3-none-any.whl
 python -m pip check
 egress-guard init
 egress-guard refresh
@@ -138,7 +142,7 @@ The JSON fields are `label`, `token`, `auth_token`, and optional `kind`. Keep th
 
 Filtering applies to clients using this proxy. Existing encrypted tunnels, applications that bypass proxy settings, opaque UDP, and ads sharing a content origin need other controls. Browser cosmetic filtering remains useful: Chrome's [uBlock Origin Lite](https://github.com/uBlockOrigin/uBOL-home) and maintained Firefox/Brave protections provide capabilities outside a domain proxy. No certificate is installed or trusted. The transport may create unused private CA files inside its private configuration directory.
 
-Domain activity is stored locally with bounded buffering and retention. Request paths, bodies, cookies, authorization values and canary management keys are excluded from the activity log. A long storage outage can exhaust the bounded queue; health reports unavailable storage rather than claiming complete logging.
+New configurations set `[logging] history = "none"`. Choose `aggregate` or `full` explicitly for local activity history; both use bounded buffering and retention. Existing saved choices are preserved on upgrade. Switching to `none` stops new traffic records after the writer acknowledges the change; it does not erase earlier records. Request paths, bodies, cookies, authorization values and canary management keys are excluded from the activity log. [Logging transitions and receipts](docs/core-0.7.md).
 
 Read the [0.2.0 technical writeup](docs/technology-writeup.md), [architecture and threat model](docs/architecture.md), [security review and fixes](docs/security-review.md), [research and next steps](docs/research.md), [security policy](SECURITY.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
 

@@ -119,14 +119,19 @@ test("extension pages: no inline scripts or styles, no remote resources, at most
 });
 
 // ---- popup behaviour ---------------------------------------------------------------------------------------------
-async function popupWith(state, page = {site: "publisher.example", paused: false, hidden: 0, shown: 0, protectedRules: [], overbroadRules: []}) {
+async function popupWith(state, page = {site: "publisher.example", paused: false, hidden: 0, shown: 0, protectedRules: [], overbroadRules: []}, options = {}) {
   const doc = parseHTML(read("browser/popup.html"));
   const sent = [];
   const browser = {
     runtime: {sendMessage: async (msg) => { sent.push(msg); return msg.type === "popup-state" ? JSON.parse(JSON.stringify(state)) : {ok: true}; }},
     tabs: {query: async () => [{id: 1, url: "https://publisher.example/a"}], sendMessage: async () => page},
   };
-  const ctx = vm.createContext({document: doc, browser, console, close: () => {}});
+  if (options.chrome) browser.runtime.getManifest = () => ({manifest_version: 3});
+  if (options.native) {
+    browser.permissions = {request: async value => { sent.push({type: "permission", value}); return true; }};
+    browser.runtime.sendNativeMessage = async (host, value) => { sent.push({type: "native", host, value}); return options.native; };
+  }
+  const ctx = vm.createContext({document: doc, browser, ...(options.chrome ? {chrome: browser} : {}), console, close: () => {}});
   vm.runInContext(read("browser/popup.js"), ctx, {filename: "popup.js"});
   await ctx.__EGPopup.ready;
   return {doc, sent, api: ctx.__EGPopup, $: (id) => doc.getElementById(id), text: (id) => allText(doc.getElementById(id))};
@@ -215,6 +220,7 @@ test("popup: protection levels are a segmented control; Pause and the default st
   const ff = await popupWith({...STATE, mode: undefined, cleaning: undefined});
   assert.equal(ff.$("protection").hidden, true, "a build without levels (Firefox) shows none");
   assert.equal(ff.$("fact-links").hidden, true);
+  assert.equal(ff.text("status-word"), "Manual rules");
 });
 
 test("truncation: hostnames in the middle by whole labels; URLs keep the host and the last segment", async () => {
@@ -263,4 +269,57 @@ test("popup: a paused site says Paused until HH:MM, offers a filled Resume, and 
   userClick(live.$("pause"));
   await new Promise((r) => setImmediate(r));
   assert.ok(live.sent.some((m) => m.type === "pause-site"), "Pause asks the worker, not the page");
+});
+
+test("popup does not present saved-but-unapplied policy or incomplete lists as protected", async () => {
+  const p = await popupWith({...STATE, requestedMode: "strict", policy: {state: "degraded", error: "DNR update failed"}});
+  assert.equal(p.text("status-word"), "Degraded");
+  assert.equal(p.$("policy-issue").hidden, false);
+  assert.equal(p.$("modes").childNodes.find(node => node.getAttribute("aria-pressed") === "true").textContent, "Standard");
+  userClick(p.$("policy-retry"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(p.sent.some(message => message.type === "retry-policy"));
+  const reduced = await popupWith({...STATE, policy: {state: "applied"}, coverage: {complete: false, missing: ["easyprivacy"], stale: []}});
+  assert.equal(reduced.text("status-word"), "Reduced");
+  assert.match(reduced.text("coverage-note"), /easyprivacy/);
+});
+
+test("popup reports failed or pending built-in CSS instead of calling the page protected", async () => {
+  for (const generic of [{available: true, on: false, error: "scripting unavailable"}, {available: true, on: false, pending: true}]) {
+    const p = await popupWith({...STATE, generic: true}, {site: STATE.site, paused: false, hidden: 0, shown: 0, protectedRules: [], overbroadRules: [], generic});
+    assert.equal(p.text("status-word"), "Reduced");
+    assert.match(p.text("generic-note"), /could not be applied|waiting for the browser/);
+  }
+});
+
+test("Chrome browser alias keeps review visible and native receipts are read only after a permission gesture", async () => {
+  const receipt = {schema: 1, ok: true, product: "egress-guard", capabilities: {read_only: true, mutations: false},
+    status: {proxy_ready: true, policy: {applied: true, complete: true, pending: false, degraded: false, saved_revision: "a".repeat(64), applied_revision: "a".repeat(64)},
+      logging: {saved: {history: "none", retention_days: 7, max_queue: 1000}, runtime: {history: "none", retention_days: 7, max_queue: 1000, applied: true}}}};
+  const p = await popupWith(STATE, undefined, {chrome: true, native: receipt});
+  assert.equal(p.$("semantic-item").hidden, false);
+  assert.equal(p.$("native-group").hidden, false);
+  assert.equal(p.sent.some(message => message.type === "native"), false);
+  userClick(p.$("native-check"));
+  await new Promise(resolve => setImmediate(resolve));
+  const messages = p.sent.filter(message => ["permission", "native"].includes(message.type));
+  assert.deepEqual(messages.map(message => message.type), ["permission", "native"]);
+  assert.equal(messages[1].host, "org.egress_guard.receipts");
+  assert.equal(messages[1].value.command, "status");
+  assert.match(p.text("native-note"), /Runtime history: none \(acknowledged\)/);
+  assert.match(p.text("native-note"), /Browser routing and device-wide coverage are not verified/);
+  const bad = await popupWith(STATE, undefined, {chrome: true, native: {...receipt, capabilities: {read_only: true, mutations: true}}});
+  userClick(bad.$("native-check"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(bad.text("native-note"), /invalid receipt/);
+  const mismatch = JSON.parse(JSON.stringify(receipt));
+  mismatch.status.logging.runtime.history = "full";
+  const old = await popupWith(STATE, undefined, {chrome: true, native: mismatch});
+  userClick(old.$("native-check")); await new Promise(resolve => setImmediate(resolve));
+  assert.match(old.text("native-note"), /Proxy not fully ready/);
+  assert.match(old.text("native-note"), /does not acknowledge saved settings/);
+  mismatch.status.logging.runtime.applied = "false";
+  const malformed = await popupWith(STATE, undefined, {chrome: true, native: mismatch});
+  userClick(malformed.$("native-check")); await new Promise(resolve => setImmediate(resolve));
+  assert.match(malformed.text("native-note"), /incomplete receipt/);
 });

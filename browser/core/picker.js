@@ -13,7 +13,7 @@
   /**
    * descriptor: {tag, id, classes[], attrs[{name, value}], ancestry[{tag, id, index}]}
    * `ancestry` runs from the element itself (index = its :nth-of-type position) upward and stops
-   * at the first ancestor with an id. Returns validated selector strings, most general first.
+    * at the first ancestor with an id. Returns validated selector strings, precise first.
    */
   function candidates(descriptor) {
     const out = [];
@@ -23,11 +23,13 @@
     const base = tag + classes.map((c) => `.${c}`).join("");
     const attrs = (descriptor.attrs || []).filter((a) => ATTR.test(a.name) && !a.name.startsWith("data-eg-"))
       .sort((a, b) => a.name.localeCompare(b.name));
-    for (const a of attrs) push(`${base}[${a.name}]`);
+    // The selected element is the positive example; other matches are not evidence of ads.
+    // Prefer its stable id/value over an attribute shared by every organic and sponsored card.
+    if (descriptor.id && IDENT.test(descriptor.id)) push(`#${descriptor.id}`);
     for (const a of attrs) {
       if (typeof a.value === "string" && a.value.length && a.value.length <= 60 && /^[A-Za-z0-9 _:./-]+$/.test(a.value)) push(`${base}[${a.name}="${a.value}"]`);
     }
-    if (descriptor.id && IDENT.test(descriptor.id)) push(`#${descriptor.id}`);
+    for (const a of attrs) push(`${base}[${a.name}]`);
     const chain = (descriptor.ancestry || []).slice(0, MAX_DEPTH + 1);
     const anchor = chain.findIndex((step, i) => i > 0 && step.id && IDENT.test(step.id));
     if (anchor > 0 && chain.slice(0, anchor).every((s) => TAG.test(s.tag || "") && Number.isInteger(s.index) && s.index > 0)) {

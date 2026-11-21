@@ -4,6 +4,10 @@
 (function (root) {
   "use strict";
   const B = root.browser || root.chrome;
+  // Chrome also exposes browser.*; a namespace is not a reliable platform test.
+  const IS_FIREFOX = B.runtime.getManifest
+    ? Boolean((B.runtime.getManifest().browser_specific_settings || {}).gecko)
+    : Boolean(root.browser && !root.chrome);
   const $ = (id) => document.getElementById(id);
   const FORM_TYPES = ["beacon", "ping", "xmlhttprequest", "image", "script", "sub_frame"];
   const EXCEPTION_MINUTES = 15;
@@ -394,11 +398,74 @@
   }
 
   // ---- render ------------------------------------------------------------------------------------------------------
+  function renderPolicy(state) {
+    const policy = state && state.policy;
+    const issue = Boolean(policy && policy.state !== "applied");
+    $("policy-issue").hidden = !issue;
+    if (issue) {
+      $("policy-note").textContent = policy.state === "pending"
+        ? "Saved changes are waiting to be applied. The controls show the last applied policy."
+        : "Chrome could not confirm the requested policy. Retry the update; protection may be incomplete.";
+      if (policy.error) $("policy-note").textContent += " " + String(policy.error).slice(0, 300);
+    }
+    const coverage = state && state.coverage;
+    const reduced = Boolean(coverage && (!coverage.complete || (coverage.stale || []).length));
+    $("coverage-note").hidden = !reduced;
+    if (reduced) {
+      const parts = [];
+      if ((coverage.missing || []).length) parts.push("Incomplete build: " + coverage.missing.join(", "));
+      if ((coverage.ineffective || []).length) parts.push("No compiled blocking rules for: " + coverage.ineffective.join(", "));
+      if (coverage.development) parts.push("Development build: production feed-size checks were skipped");
+      if (!coverage.complete && !parts.length) parts.push("Build completeness could not be verified");
+      if ((coverage.stale || []).length) parts.push("Old list snapshots: " + coverage.stale.join(", "));
+      $("coverage-note").textContent = parts.join(". ") + ". Refresh the lists and rebuild.";
+    }
+    return {issue, reduced};
+  }
+
+  async function checkNative() {
+    const button = $("native-check"), note = $("native-note");
+    button.disabled = true;
+    try {
+      if (!B.permissions || !B.runtime.sendNativeMessage) throw new Error("Native messaging is unavailable in this browser.");
+      const granted = await B.permissions.request({permissions: ["nativeMessaging"]});
+      if (!granted) throw new Error("Permission was not granted. Proxy status was not read.");
+      const value = await B.runtime.sendNativeMessage("org.egress_guard.receipts", {schema: 1, command: "status"});
+      if (!value || value.schema !== 1 || value.ok !== true || value.product !== "egress-guard" ||
+          !value.capabilities || value.capabilities.read_only !== true || value.capabilities.mutations !== false ||
+          !value.status || typeof value.status.proxy_ready !== "boolean") throw new Error("The local host returned an invalid receipt.");
+      const status = value.status, policy = status.policy, logging = status.logging;
+      if (!policy || typeof policy.applied !== "boolean" || typeof policy.complete !== "boolean" ||
+          typeof policy.pending !== "boolean" || typeof policy.degraded !== "boolean" ||
+          !/^[a-f0-9]{64}$/.test(policy.saved_revision) ||
+          !(policy.applied_revision === null || /^[a-f0-9]{64}$/.test(policy.applied_revision)) ||
+          !logging || !validLogging(logging.saved) ||
+          !(logging.runtime === null || validLogging(logging.runtime) && typeof logging.runtime.applied === "boolean")) throw new Error("The local host returned an incomplete receipt.");
+      const loggingApplied = Boolean(logging.runtime && logging.runtime.applied === true &&
+        ["history", "retention_days", "max_queue"].every(key => logging.runtime[key] === logging.saved[key]));
+      const ready = status.proxy_ready && policy.applied && policy.complete && policy.pending === false &&
+        policy.degraded === false && policy.applied_revision === policy.saved_revision && loggingApplied;
+      let text = ready ? "Proxy ready; its saved policy is applied." : "Proxy not fully ready; its policy, feeds or process need attention.";
+      text += " Saved history: " + logging.saved.history + ".";
+      if (logging.runtime) text += " Runtime history: " + logging.runtime.history + (loggingApplied ? " (acknowledged)." : " (does not acknowledge saved settings).");
+      else text += " No runtime logging acknowledgment.";
+      note.textContent = text + " Browser routing and device-wide coverage are not verified by this receipt.";
+    } catch (e) {
+      note.textContent = "Could not verify the local proxy. " + String(e && e.message || e).slice(0, 300) + " Register the read-only native host using the setup instructions.";
+    } finally { button.disabled = false; }
+  }
+  function validLogging(value) {
+    return value && ["none", "aggregate", "full"].includes(value.history) &&
+      Number.isInteger(value.retention_days) && value.retention_days >= 1 && value.retention_days <= 30 &&
+      Number.isInteger(value.max_queue) && value.max_queue >= 100 && value.max_queue <= 10000;
+  }
+
   async function render() {
     const state = await send({type: "popup-state"});
     lastState = state;
     const lists = (state && state.lists) || [];
     categories = (state && state.categories) || {};
+    const policyState = renderPolicy(state);
     renderLists(lists);
     $("rebuilt").hidden = !(state && state.rebuilt === true);
     if (!state || !state.site) {
@@ -408,7 +475,7 @@
       setStatus("neutral", "Not filtered", true);
       $("page-view").hidden = true;
       $("unsupported").hidden = false;
-      $("unsupported-title").textContent = root.browser ? "Browser pages can't be filtered" : "Chrome pages can't be filtered";
+      $("unsupported-title").textContent = IS_FIREFOX ? "Browser pages can't be filtered" : "Chrome pages can't be filtered";
       for (const id of ["blocked", "rules"]) $(`tab-${id}`).hidden = true;
       for (const id of ["pick", "restore"]) $(id).disabled = true;
       $("protection").hidden = true;
@@ -444,18 +511,23 @@
     $("paused").hidden = !sitePaused;
     $("paused-note").hidden = !sitePaused;
     if (sitePaused) $("paused-text").replaceChildren(document.createTextNode("Paused on this site until "), el("strong", clock(state.paused), "num"));
-    $("rebuilt").hidden = sitePaused || state.rebuilt !== true;
+    $("rebuilt").hidden = sitePaused || policyState.issue || state.rebuilt !== true;
     $("pause").hidden = sitePaused;
     for (const id of ["clean-toggle", "generic"]) $(id).disabled = sitePaused;
-    if (sitePaused) setStatus("reduced", "Paused");
-    else setStatus(state.rebuilt === true ? "reduced" : "protected", state.rebuilt === true ? "Reduced" : "Protected");
+    const contentIssue = Boolean(page && page.generic && (page.generic.error || page.generic.pending));
+    if (policyState.issue) setStatus("reduced", state.policy.state === "pending" ? "Pending" : "Degraded");
+    else if (sitePaused) setStatus("reduced", "Paused");
+    else if (IS_FIREFOX && typeof state.mode !== "string") setStatus("reduced", "Manual rules");
+    else setStatus(state.rebuilt === true || policyState.reduced || contentIssue ? "reduced" : "protected", state.rebuilt === true || policyState.reduced || contentIssue ? "Reduced" : "Protected");
 
     // Built-in ad-slot hiding (Chrome): on by default, switchable per site, takes effect at once on open tabs.
     const genericShown = Boolean(page && page.generic && page.generic.available && typeof state.generic === "boolean");
     $("generic-item").hidden = !genericShown;
     if (genericShown) {
       const slots = page.generic.slots;
-      $("generic-note").textContent = state.generic
+      $("generic-note").textContent = page.generic.error ? "Built-in ad-slot hiding could not be applied. " + String(page.generic.error).slice(0, 240)
+        : page.generic.pending ? "Built-in ad-slot hiding is waiting for the browser."
+        : state.generic
         ? (page.generic.on ? `${slots} ad slot${slots === 1 ? "" : "s"} hidden by built-in rules.` : "Built-in ad-slot hiding is paused for this page load.")
         : "Built-in ad-slot hiding is off for this site.";
       $("generic-label").textContent = state.generic ? "Show hidden ad slots" : "Hide ad slots on this site";
@@ -463,6 +535,8 @@
       genericOn = state.generic;
     }
     $("pick").disabled = !page;
+    $("semantic-item").hidden = IS_FIREFOX || !page;
+    $("semantic-review").disabled = !page || sitePaused;
     $("restore").disabled = !page;
     $("restore-label").textContent = paused ? "Resume hiding" : "Restore everything hidden here";
     fitVisible();
@@ -470,7 +544,8 @@
 
   async function act(message) {
     const reply = await send(message);
-    if (reply && !reply.error) await render();
+    if (reply) await render();
+    if (reply && reply.error) showError(reply.error);
     // Switching a site to No scripts or Strict clears its service workers and Cache Storage, for the origins the
     // extension can name; say which, and what it could not reach.
     if (reply && reply.cleared) {
@@ -521,6 +596,13 @@
       if (event.key === "Escape" && !$("add-rule").hidden) { event.preventDefault(); openForm(false); }
     });
     $("pick").addEventListener("click", async () => { await tabMessage({type: "start-picker"}); root.close(); });
+    $("semantic-review").addEventListener("click", async () => {
+      try { await B.tabs.create({url: B.runtime.getURL("semantic.html") + "?tab=" + tab.id}); root.close(); }
+      catch (e) { showError(String(e && e.message || e)); }
+    });
+    $("policy-retry").addEventListener("click", () => act({type: "retry-policy"}));
+    $("native-group").hidden = IS_FIREFOX || typeof B.runtime.sendNativeMessage !== "function";
+    $("native-check").addEventListener("click", checkNative);
     $("restore").addEventListener("click", restoreOrResume);
     $("pause").addEventListener("click", async () => { const r = await act({type: "pause-site"}); if (r && !r.error) $("resume").focus(); });
     $("resume").addEventListener("click", async () => { const r = await act({type: "resume-site"}); if (r && !r.error) $("pause").focus(); });

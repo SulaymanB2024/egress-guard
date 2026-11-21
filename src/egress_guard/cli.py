@@ -80,11 +80,25 @@ def main(argv=None) -> int:
     native.add_argument("operation", choices=("inspect", "restore"))
     native.add_argument("--service", help="Explicit network service, for example Wi-Fi")
     commands.add_parser("canary-import", help="Import one provider token as JSON from stdin; never put it in shell arguments")
+    bridge = commands.add_parser("native-host", help="Explicit read-only Chrome protection receipts")
+    bridge_commands = bridge.add_subparsers(dest="bridge_operation", required=True)
+    for operation in ("register", "unregister"):
+        setup = bridge_commands.add_parser(operation)
+        setup.add_argument("--extension-id", required=True, help="Exact Chrome extension ID; wildcards are refused")
+        setup.add_argument("--browser", choices=("chrome", "chromium"), default="chrome")
+    host = bridge_commands.add_parser("serve", help=argparse.SUPPRESS)
+    host.add_argument("origin", help="Origin supplied by Chrome when it starts the registered host")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
             initialize()
             print("Private configuration created. Run 'egress-guard refresh', then 'egress-guard start' on macOS.")
+        elif args.command == "native-host":
+            from .native_host import register, serve as serve_native, unregister
+            if args.bridge_operation == "serve":
+                return serve_native(args.origin)
+            operation = register if args.bridge_operation == "register" else unregister
+            print(json.dumps(operation(args.extension_id, args.browser), indent=2))
         elif args.command == "refresh":
             initialize()
             result = update_feeds(data_dir(), load_config())

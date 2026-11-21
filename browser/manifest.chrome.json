@@ -1,33 +1,87 @@
 {
   "manifest_version": 3,
   "name": "Egress Guard Companion",
-  "version": "0.3.1",
-  "description": "Blocks ads, trackers and malware with locally built lists, strips tracking parameters, and adds per-site rules. No remote code or extension networking.",
+  "version": "0.7.0",
+  "description": "Locally built ad, tracker and threat blocking, with reversible page hiding and optional on-device ad review.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkwoFe6kgodZ7HIcbFvIhyTZGEDBAYjFOcbhWzwKiwih+g7r2nlVsJ0liOeJNZh3W+ezChEhGnlbecHJYgjh+JdkiMAVEfUzOh/K0/j0wl4vyrKoG2oKFsivq1aZDJj5NDvon1wuI1ls5D5Oxt4GYEBhIK/3I1A75g7jCkGNEGeiYOdA304B8AQjslXiPmFnBPogCFjWxrqkSxob0ZuDEuZY9b0ZhBjSsU9o++tT4NBmR/qCIAv4n2Q2r+5qRqfwRL7xTb1uKZP9HLZfNma5ZCv0W5gpKvLId2+WhKMlR0NeZuPWkd5W0XWkeXRuG52jDM1nMMwSJmd9TRGv24vOKxQIDAQAB",
-  "minimum_chrome_version": "128",
-  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback", "storage", "alarms", "cookies", "contextMenus", "offscreen", "clipboardWrite", "scripting", "browsingData"],
-  "host_permissions": ["http://*/*", "https://*/*"],
-  "background": {"service_worker": "background.js"},
+  "minimum_chrome_version": "145",
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
+    "storage",
+    "alarms",
+    "cookies",
+    "contextMenus",
+    "offscreen",
+    "clipboardWrite",
+    "scripting",
+    "browsingData"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "declarative_net_request": {
     "rule_resources": []
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["page-gpc.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "page-gpc.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "match_origin_as_fallback": true,
       "world": "MAIN"
     },
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["core/selectors.js", "core/picker.js", "core/cosmetic.js", "content.js", "core/links.js", "core/params.js", "page-guard.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "core/selectors.js",
+        "core/picker.js",
+        "core/cosmetic-data.js",
+        "core/cosmetic.js",
+        "core/semantic.js",
+        "content.js",
+        "core/links.js",
+        "core/params.js",
+        "page-guard.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     }
   ],
-  "web_accessible_resources": [{"resources": ["warning.html", "unwrap.html", "surrogates/*.js"], "matches": ["<all_urls>"], "use_dynamic_url": true}],
-  "action": {"default_title": "Egress Guard", "default_popup": "popup.html"},
-  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self'; frame-ancestors 'none'"}
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "warning.html",
+        "unwrap.html",
+        "surrogates/*.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "use_dynamic_url": true
+    }
+  ],
+  "action": {
+    "default_title": "Egress Guard",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self'; frame-ancestors 'none'"
+  },
+  "optional_permissions": [
+    "nativeMessaging"
+  ]
 }

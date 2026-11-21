@@ -34,20 +34,20 @@
   }
 
   /** Normalize a request into {host, path, type, topHost, thirdParty} or null when out of scope. */
-  function describe({url, type, topUrl}) {
+  function describe({url, type, topUrl, tabId}) {
     let parsed;
     try { parsed = new URL(url); } catch { return null; }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
     const host = hosts.normalizeHost(parsed.hostname);
     if (!host) return null;
     const topHost = hosts.hostOfUrl(topUrl);
-    return {host, path: parsed.pathname || "/", type, topHost, thirdParty: topHost ? hosts.isThirdParty(host, topHost) : null};
+    return {host, path: parsed.pathname || "/", type, topHost, ...(tabId !== undefined ? {tabId} : {}), thirdParty: topHost ? hosts.isThirdParty(host, topHost) : null};
   }
 
   const live = (item, now) => item.expiresAt === undefined || item.expiresAt > now;
 
   function ruleMatches(rule, req) {
-    if (rule.kind !== "request" || !hosts.withinScope(req.topHost, rule.site)) return false;
+    if (rule.kind !== "request" || !hosts.inSiteScope(req.topHost, rule.site)) return false;
     if (rule.host !== req.host || !rule.types.includes(req.type) || !pathMatches(rule.path, req.path)) return false;
     if (rule.party === "first" && req.thirdParty) return false;
     if (rule.party === "third" && !req.thirdParty) return false;
@@ -55,12 +55,12 @@
   }
 
   function exceptionMatches(exc, req) {
-    return hosts.withinScope(req.topHost, exc.site) && exc.host === req.host && exc.type === req.type && exc.path === req.path;
+    return (exc.tabId === undefined || req.tabId === exc.tabId) && hosts.inSiteScope(req.topHost, exc.site) && exc.host === req.host && exc.type === req.type && exc.path === req.path;
   }
 
   /**
    * Decide one request. Order: out of scope -> allow; navigation -> allow; unknown top-level -> allow;
-   * live exception -> allow; allow rule -> allow; block rule -> block; otherwise allow.
+   * manual block -> block; live exception -> allow; allow rule -> allow; otherwise allow.
    * Returns {action, reason, id?, req?}.
    */
   function decide(request, rules, exceptions, now) {
@@ -68,13 +68,13 @@
     const req = describe(request);
     if (!req) return {action: "allow", reason: "out-of-scope"};
     if (!req.topHost) return {action: "allow", reason: "no-top-level-site", req};
-    const exc = exceptions.find((item) => live(item, now) && exceptionMatches(item, req));
-    if (exc) return {action: "allow", reason: "exception", id: exc.id, req};
     const matching = rules.filter((rule) => live(rule, now) && ruleMatches(rule, req));
-    const allow = matching.find((rule) => rule.action === "allow");
-    if (allow) return {action: "allow", reason: "allow-rule", id: allow.id, req};
     const block = matching.find((rule) => rule.action === "block");
     if (block) return {action: "block", reason: "block-rule", id: block.id, req};
+    const exc = exceptions.find((item) => live(item, now) && exceptionMatches(item, req));
+    if (exc) return {action: "allow", reason: "exception", id: exc.id, req};
+    const allow = matching.find((rule) => rule.action === "allow");
+    if (allow) return {action: "allow", reason: "allow-rule", id: allow.id, req};
     return {action: "allow", reason: "no-rule", req};
   }
 

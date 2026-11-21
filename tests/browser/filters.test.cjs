@@ -35,6 +35,9 @@ function matches(rule, req) {
   if (!types.includes(req.type)) return false;
   if (c.requestDomains && !covers(c.requestDomains, host)) return false;
   if (c.excludedRequestDomains && covers(c.excludedRequestDomains, host)) return false;
+  const top = req.top || req.initiator;
+  if (c.topDomains && !(top && covers(c.topDomains, top))) return false;
+  if (c.excludedTopDomains && top && covers(c.excludedTopDomains, top)) return false;
   if (c.initiatorDomains && !(req.initiator && covers(c.initiatorDomains, req.initiator))) return false;
   if (c.excludedInitiatorDomains && req.initiator && covers(c.excludedInitiatorDomains, req.initiator)) return false;
   if (c.tabIds && !c.tabIds.includes(req.tabId)) return false;
@@ -205,9 +208,9 @@ test("exception precedence: no list @@ reaches cookie stripping, bounce strippin
   assert.equal(outcome(all, {url: "https://news.example/a?utm_source=x", initiator: "news.example", type: "main_frame"}), "redirect", "parameters still stripped");
   assert.equal(outcome(all, {url: "https://www.google.com/url?q=https%3A%2F%2Fexample.org", initiator: "www.google.com", type: "main_frame"}), "redirect", "unwrapping still on");
   assert.ok(headerRules(all, {url: "https://news.example/", type: "main_frame"}).some((r) => r.action.responseHeaders && r.action.responseHeaders[0].header === "referrer-policy"));
-  // A timed exception and Relaxed still win over all of it.
+  // An ordinary resource exception keeps its cookie-removal pair; Relaxed is separate explicit consent.
   const exc = dnr.compileUserState([], [{id: "e", site: "news.example", host: "www.facebook.com", path: "/plugins/*", type: "sub_frame", expiresAt: Date.now() + 60000}], Date.now()).rules;
-  assert.ok(!strips([...all, ...exc], {url: "https://www.facebook.com/plugins/like.php", initiator: "news.example", type: "sub_frame"}), "timed exception lifts stripping");
+  assert.ok(strips([...all, ...exc], {url: "https://www.facebook.com/plugins/like.php", initiator: "news.example", type: "sub_frame"}), "timed exception keeps independent credential protection");
   const relaxed = dnr.compileModes({sites: {"news.example": "relaxed"}}).rules;
   assert.ok(!strips([...all, ...relaxed], {url: "https://www.facebook.com/plugins/like.php", initiator: "news.example", type: "sub_frame", frame: {url: "https://news.example/", type: "main_frame"}}), "Relaxed lifts stripping");
 });
@@ -566,7 +569,7 @@ test("privacy rules: Sec-GPC everywhere above every allow; third-party beacons; 
   assert.deepEqual(gpc[0].action.requestHeaders, [{header: "sec-gpc", operation: "set", value: "1"}]);
   assert.ok(gpc[0].condition.resourceTypes.includes("main_frame"));
   const exc = dnr.compileUserState([], [{id: "e", site: "a.example", host: "a.example", path: "/x", type: "script", expiresAt: Date.now() + 60000}], Date.now()).rules;
-  assert.equal(headerRules([...gpc, ...exc], {url: "https://a.example/x", initiator: "a.example", type: "script"}).length, 1, "an exception does not switch GPC off");
+  assert.equal(headerRules([...gpc, ...exc], {url: "https://a.example/x", initiator: "a.example", type: "script"}).filter((r) => r.action.requestHeaders.some((h) => h.header === "sec-gpc")).length, 1, "an exception does not switch GPC off");
   const b = [...beacons];
   assert.equal(outcome(b, {url: "https://collector.example/e", initiator: "news.example", type: "ping"}), "block");
   assert.equal(outcome(b, {url: "https://news.example/e", initiator: "www.news.example", type: "ping"}), "none", "first-party beacons are left to the filters");

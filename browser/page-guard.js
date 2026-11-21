@@ -174,7 +174,7 @@
     return true;
   }
 
-  function placeholder(provider, onLoad, sizeFrom) {
+  function placeholder(provider, onLoad, sizeFrom, current = () => true) {
     const box = document.createElement("div");
     box.setAttribute(PLACEHOLDER, provider.id);
     for (const [k, v] of HOST_STYLE) box.style.setProperty(k, v, "important");
@@ -213,14 +213,19 @@
       } catch { visibleSince = undefined; }
     }
     const load = (cookies, from) => async (event) => {
-      if (!clickAllowed(from, shadow, event, visibleSince)) {
+      if (!current() || !clickAllowed(from, shadow, event, visibleSince)) {
         note.textContent = "Not loaded: the button was covered or had just appeared. Click again.";
         note.hidden = false;
         return;
       }
       button.disabled = true; withCookies.disabled = true;
       const reply = await B.runtime.sendMessage({type: "load-embed", embed: provider.id, cookies}).catch(() => null);
-      if (reply && reply.ok) { box.remove(); onLoad(); } else { button.disabled = false; withCookies.disabled = false; }
+      if (reply && reply.ok && current()) {
+        try { await onLoad(); box.remove(); } catch {
+          note.textContent = "Not loaded: the original resource changed or could not be restored safely.";
+          note.hidden = false; button.disabled = false; withCookies.disabled = false;
+        }
+      } else { button.disabled = false; withCookies.disabled = false; }
     };
     button.addEventListener("click", load(false, button));
     withCookies.addEventListener("click", load(true, withCookies));
@@ -231,31 +236,82 @@
     return box;
   }
 
+  const heldFrames = new Map(), scripted = new Map(), loadedProviders = new Set();
+  let scriptedTimer = null;
+  function releaseFrame(record) {
+    if (record.frame.style.getPropertyValue("display") === "none" && record.frame.style.getPropertyPriority("display") === "important") {
+      if (record.display) record.frame.style.setProperty("display", record.display, record.priority);
+      else record.frame.style.removeProperty("display");
+    }
+    record.box.remove(); heldFrames.delete(record.frame); record.frame.removeAttribute("data-eg-held");
+  }
   function holdFrame(frame) {
-    if (frame.hasAttribute("data-eg-held")) return;
+    const old = heldFrames.get(frame);
+    if (old && frame.getAttribute("src") === old.src && frame.isConnected) return;
+    if (old) releaseFrame(old);
     const provider = providerOf(frame.getAttribute("src") || "");
-    if (!provider) return;
+    if (!provider || loadedProviders.has(provider.id) || heldFrames.size >= 200) return;
     const src = frame.getAttribute("src");
     frame.setAttribute("data-eg-held", "1");
-    const display = frame.style.display;
-    frame.style.display = "none";
+    const display = frame.style.getPropertyValue("display"), priority = frame.style.getPropertyPriority("display");
+    frame.style.setProperty("display", "none", "important");
     // A fresh copy navigates for certain; re-setting the same src on a frame that already failed may not.
-    frame.before(placeholder(provider, () => { const fresh = frame.cloneNode(false); fresh.style.display = display; fresh.setAttribute("src", src); frame.replaceWith(fresh); }, frame));
+    const current = () => frame.isConnected && frame.getAttribute("src") === src;
+    const box = placeholder(provider, () => {
+      if (!current()) throw new Error("stale frame");
+      const fresh = frame.cloneNode(false); fresh.removeAttribute("data-eg-held");
+      if (display) fresh.style.setProperty("display", display, priority); else fresh.style.removeProperty("display");
+      fresh.setAttribute("src", src); loadedProviders.add(provider.id); heldFrames.delete(frame); frame.replaceWith(fresh);
+    }, frame, current);
+    frame.before(box); heldFrames.set(frame, {frame, box, src, display, priority, provider});
   }
 
+  const SCRIPT_ATTRIBUTES = ["type", "integrity", "crossorigin", "referrerpolicy", "nonce", "nomodule", "defer", "fetchpriority", "blocking", "charset"];
+  function scriptSpec(script, provider) {
+    let src;
+    try { src = new URL(script.getAttribute("src") || "", document.baseURI || root.location.href).href; } catch { return null; }
+    if (!/^https?:/.test(src) || providerOf(src) !== provider) return null;
+    const type = (script.getAttribute("type") || "").trim().toLowerCase();
+    if (type && !["module", "text/javascript", "application/javascript", "text/ecmascript", "application/ecmascript"].includes(type)) return null;
+    const attrs = {};
+    for (const name of SCRIPT_ATTRIBUTES) if (script.hasAttribute(name)) attrs[name] = script.getAttribute(name);
+    // Browsers conceal a nonce through getAttribute, but preserve it through the nonce property.
+    if (typeof script.nonce === "string" && script.nonce) attrs.nonce = script.nonce;
+    const async = typeof script.async === "boolean" ? script.async : script.hasAttribute("async");
+    return {src, attrs, async};
+  }
+  function retryScript(old, spec) {
+    const fresh = document.createElement("script");
+    // A cloned script can retain HTML's already-started flag. A fresh element is required,
+    // with fetch/security attributes copied BEFORE src, and non-async scripts kept ordered.
+    for (const [name, value] of Object.entries(spec.attrs)) fresh.setAttribute(name, value);
+    if (spec.attrs.nonce && "nonce" in fresh) fresh.nonce = spec.attrs.nonce;
+    fresh.async = spec.async;
+    if (spec.async) fresh.setAttribute("async", "");
+    fresh.setAttribute("src", spec.src);
+    if (old.isConnected) { old.before(fresh); old.remove(); }
+    else throw new Error("script detached");
+  }
   function holdScripted() {
+    scriptedTimer = null;
+    for (const [id, record] of scripted) {
+      if (!record.blocks.some((n) => n.isConnected) || !record.current()) { record.box.remove(); scripted.delete(id); }
+    }
     for (const [id, selector] of Object.entries(SCRIPT_EMBEDS)) {
       const provider = embeds.find((e) => e.id === id);
-      if (!provider) continue;
-      const blocks = [...document.querySelectorAll(selector)].filter((n) => !n.hasAttribute("data-eg-held"));
+      if (!provider || loadedProviders.has(id) || scripted.has(id)) continue;
+      const blocks = [...document.querySelectorAll(selector)].slice(0, 100);
       if (!blocks.length) continue;
-      const scripts = [...document.querySelectorAll("script[src]")].filter((sc) => providerOf(sc.getAttribute("src")) === provider);
-      if (!scripts.length) continue;
-      for (const n of blocks) n.setAttribute("data-eg-held", "1");
+      const scripts = [...document.querySelectorAll("script[src]")].slice(0, 400).map((node) => ({node, spec: scriptSpec(node, provider)})).filter((s) => s.spec);
+      if (!scripts.length || scripts.length > 20) continue;
+      const current = () => blocks.some((n) => n.isConnected) && scripts.every(({node, spec}) => node.isConnected && JSON.stringify(scriptSpec(node, provider)) === JSON.stringify(spec));
       // One placeholder per provider: loading it re-adds the page's own provider scripts, which render every block.
-      blocks[0].before(placeholder(provider, () => {
-        for (const old of scripts) { const fresh = document.createElement("script"); fresh.src = old.getAttribute("src"); fresh.async = true; document.head.append(fresh); }
-      }, null));
+      const box = placeholder(provider, () => {
+        if (!current()) throw new Error("stale script contract");
+        loadedProviders.add(id); scripted.delete(id);
+        for (const {node, spec} of scripts) retryScript(node, spec);
+      }, null, current);
+      blocks[0].before(box); scripted.set(id, {box, blocks, current});
     }
   }
 
@@ -273,11 +329,23 @@
   function startStrict() {
     holdAll(document);
     new MutationObserver((mutations) => {
-      for (const m of mutations) for (const n of m.addedNodes) {
-        if (n.nodeType !== 1) continue;
-        if (n.tagName === "IFRAME") holdFrame(n); else if (n.tagName === "LINK") dropHints(n); else holdAll(n);
+      let changed = false;
+      for (const record of [...heldFrames.values()]) if (!record.frame.isConnected) releaseFrame(record);
+      for (const m of mutations) {
+        if (m.type === "attributes") {
+          if (m.target.tagName === "IFRAME") holdFrame(m.target);
+          else if (m.target.tagName === "LINK") dropHints(m.target);
+          changed = true;
+        }
+        for (const n of m.addedNodes || []) {
+          if (n.nodeType !== 1 || n.hasAttribute(PLACEHOLDER)) continue;
+          if (n.tagName === "IFRAME") holdFrame(n); else if (n.tagName === "LINK") dropHints(n); else holdAll(n);
+          changed = true;
+        }
+        if (m.removedNodes && m.removedNodes.length) changed = true;
       }
-    }).observe(document.documentElement, {childList: true, subtree: true});
+      if (changed && scriptedTimer === null) scriptedTimer = setTimeout(holdScripted, 150);
+    }).observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ["src", "class", "rel", "href", ...SCRIPT_ATTRIBUTES]});
     const later = () => holdScripted();
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", later, {once: true}); else later();
   }

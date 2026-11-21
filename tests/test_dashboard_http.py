@@ -94,6 +94,18 @@ class DashboardHttpTest(unittest.TestCase):
         self.assertFalse(result["ready"])
         self.assertEqual(result["identity"], "unavailable")
 
+    def test_dashboard_readiness_proves_identity_without_creating_a_login(self):
+        from egress_guard.health import dashboard_health
+        state = Path(self.temporary.name)
+        token = state / "dashboard-token"
+        token.write_text(self.key)
+        token.chmod(0o600)
+        self.assertTrue(dashboard_health(self.server.server_port, state)["ready"])
+        self.assertFalse(self.server.sessions)
+        self.assertFalse(self.server.bootstraps)
+        token.write_text("y" * 43)
+        self.assertFalse(dashboard_health(self.server.server_port, state)["ready"])
+
     def test_rebinding_and_cross_site_requests_are_refused(self):
         self.assertEqual(self.request("GET", "/", headers={"Host": "attacker.invalid"})[0], 403)
         self.assertEqual(self.request("GET", "/", headers={"Sec-Fetch-Site": "cross-site"})[0], 403)

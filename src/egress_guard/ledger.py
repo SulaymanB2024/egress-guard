@@ -58,6 +58,12 @@ class Ledger:
         self._ready = threading.Event()
         self._stop = threading.Event()
         self._admission = threading.Lock()
+        # Record admission never waits for SQLite. A separate barrier orders mode
+        # changes against commits; every queued event carries its admission generation.
+        self._transition = threading.Lock()
+        self._changed = threading.Condition(self._admission)
+        self._generation = 0
+        self._applied_generation = -1
         self._thread = threading.Thread(target=self._run, name="egress-guard-ledger", daemon=True)
         self._thread.start()
 
@@ -79,7 +85,8 @@ class Ledger:
             if self.history == "none":
                 return True
             try:
-                self._queue.put_nowait((int(time.time()), hostname, decision, source, transport))
+                self._queue.put_nowait((self._generation,
+                                       (int(time.time()), hostname, decision, source, transport)))
             except queue.Full:
                 # Count only; the dropped event itself is not kept anywhere.
                 with self._counter_lock:
@@ -88,13 +95,48 @@ class Ledger:
         return True
 
     def status(self) -> dict:
-        with self._counter_lock:
-            return {"history": self.history, "dropped": self._dropped,
-                    "decisions": sum(self._counts.values())}
+        with self._admission:
+            with self._counter_lock:
+                return {"history": self.history, "retention_days": self._retention_seconds // 86400,
+                        "max_queue": self._queue.maxsize,
+                        "applied": self._generation == self._applied_generation and self.ready(),
+                        "dropped": self._dropped, "decisions": sum(self._counts.values())}
+
+    def reconfigure(self, *, max_queue: int = MAX_QUEUE, retention_days: int = 7,
+                    history: str = "full", timeout: float = 2.0) -> bool:
+        """Apply a live privacy setting and wait for the writer's durable receipt.
+
+        Changing settings discards outstanding old-generation events, including a
+        batch already removed from the queue. In particular, switching to ``none``
+        stops admission before acknowledgment and cannot flush old rows afterward.
+        Existing committed rows are retained. A failed writer leaves ``applied`` false
+        and keeps the new (possibly more restrictive) admission setting in force.
+        """
+        if (type(max_queue) is not int or not 1 <= max_queue <= 10_000
+                or type(retention_days) is not int or not 1 <= retention_days <= 30
+                or history not in HISTORY_MODES):
+            raise ValueError("invalid ledger bounds")
+        with self._transition:
+            with self._changed:
+                if self._stop.is_set():
+                    return False
+                if (history, retention_days * 86400, max_queue) != (
+                        self.history, self._retention_seconds, self._queue.maxsize):
+                    self.history = history
+                    self._retention_seconds = retention_days * 86400
+                    self._generation += 1
+                    self._queue = queue.Queue(max_queue)
+                    self._ready.clear()
+                generation = self._generation
+        with self._changed:
+            self._changed.wait_for(lambda: self._stop.is_set() or (
+                self._applied_generation == generation and self._ready.is_set()), timeout=timeout)
+            return self._applied_generation == generation and self.ready()
 
     def close(self) -> None:
-        with self._admission:
+        with self._changed:
             self._stop.set()
+            self._changed.notify_all()
         self._thread.join(timeout=2)
 
     def _open(self) -> sqlite3.Connection:
@@ -102,38 +144,42 @@ class Ledger:
         connection = sqlite3.connect(self.path, timeout=0.25)
         try:
             connection.execute("PRAGMA journal_mode=WAL")
-            with connection:
-                connection.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-                connection.execute("INSERT OR REPLACE INTO meta VALUES ('history', ?)", (self.history,))
-                connection.execute("INSERT OR REPLACE INTO meta VALUES ('retention_days', ?)",
-                                   (str(self._retention_seconds // 86400),))
-                self._dropped_saved = -1
-                if self.history == "aggregate":
-                    connection.execute("""
-                        CREATE TABLE IF NOT EXISTS daily (
-                            day INTEGER NOT NULL, host TEXT NOT NULL, decision TEXT NOT NULL,
-                            source TEXT NOT NULL, count INTEGER NOT NULL,
-                            PRIMARY KEY (day, host, decision, source)
-                        )
-                    """)
-                self._record_created(connection)
-                if self.history != "full":
-                    return connection
-                connection.execute("""
-                    CREATE TABLE IF NOT EXISTS events (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        ts INTEGER NOT NULL,
-                        host TEXT NOT NULL,
-                        decision TEXT NOT NULL,
-                        source TEXT NOT NULL,
-                        transport TEXT NOT NULL
-                    )
-                """)
-                connection.execute("SELECT id, ts, host, decision, source, transport FROM events LIMIT 0")
+            self._configure(connection)
         except sqlite3.Error:
             connection.close()
             raise
         return connection
+
+    def _configure(self, connection: sqlite3.Connection) -> None:
+        # Only the writer calls this, under the transition barrier.
+        with connection:
+            connection.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            connection.execute("INSERT OR REPLACE INTO meta VALUES ('history', ?)", (self.history,))
+            connection.execute("INSERT OR REPLACE INTO meta VALUES ('retention_days', ?)",
+                               (str(self._retention_seconds // 86400),))
+            self._dropped_saved = -1
+            if self.history == "aggregate":
+                connection.execute("""
+                    CREATE TABLE IF NOT EXISTS daily (
+                        day INTEGER NOT NULL, host TEXT NOT NULL, decision TEXT NOT NULL,
+                        source TEXT NOT NULL, count INTEGER NOT NULL,
+                        PRIMARY KEY (day, host, decision, source)
+                    )
+                """)
+            self._record_created(connection)
+            if self.history != "full":
+                return
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER NOT NULL,
+                    host TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    transport TEXT NOT NULL
+                )
+            """)
+            connection.execute("SELECT id, ts, host, decision, source, transport FROM events LIMIT 0")
 
     def _record_created(self, connection: sqlite3.Connection) -> None:
         """Write the creation time once. A database that already holds rows keeps its oldest row's time."""
@@ -170,62 +216,81 @@ class Ledger:
                 connection.execute("INSERT OR REPLACE INTO meta VALUES ('dropped', ?)", (str(value),))
             self._dropped_saved = value
 
+    def _write_batch(self, connection: sqlite3.Connection, pending: list[tuple]) -> None:
+        if self.history == "aggregate":
+            with connection:
+                for ts, host, decision, source, _transport in pending:
+                    connection.execute(
+                        "INSERT INTO daily VALUES (?,?,?,?,1) ON CONFLICT(day,host,decision,source) "
+                        "DO UPDATE SET count = count + 1",
+                        (ts // 86400 * 86400, host if decision == "blocked" else "", decision, source),
+                    )
+                # Deterministic: oldest days go first, and within a day the smallest counts.
+                surplus = """SELECT rowid FROM daily
+                             ORDER BY day DESC, count DESC, host, decision, source LIMIT -1 OFFSET ?"""
+                touched = connection.execute(
+                    f"SELECT MAX(day) FROM daily WHERE rowid IN ({surplus})", (MAX_EVENTS,)).fetchone()[0]
+                if touched is not None:
+                    # Days up to this one lost rows, so the dashboard shows them as partial.
+                    connection.execute(
+                        f"DELETE FROM daily WHERE rowid IN ({surplus})", (MAX_EVENTS,))
+                    connection.execute(
+                        "INSERT INTO meta VALUES ('trimmed_through', ?) ON CONFLICT(key) DO UPDATE "
+                        "SET value = CAST(MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)",
+                        (str(touched),))
+        elif self.history == "full":
+            with connection:
+                connection.executemany(
+                    "INSERT INTO events(ts,host,decision,source,transport) VALUES (?,?,?,?,?)",
+                    pending,
+                )
+                connection.execute("""
+                    DELETE FROM events WHERE id <= (
+                        SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?
+                    )
+                """, (MAX_EVENTS,))
+
     def _run(self) -> None:
         connection = None
+        configured = -1
         pending: list[tuple] = []
         next_sweep = 0.0
         try:
             while not self._stop.is_set() or pending or not self._queue.empty():
                 try:
-                    if connection is None:
-                        connection = self._open()
-                    now = time.time()
-                    if now >= next_sweep:
-                        with connection:
-                            cutoff = int(now - self._retention_seconds)
-                            if self.history == "full":
-                                connection.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
-                            elif self.history == "aggregate":
-                                connection.execute("DELETE FROM daily WHERE day < ?", (cutoff // 86400 * 86400,))
-                        next_sweep = now + 60
-                    self._save_dropped(connection)
-                    self._ready.set()
-                    if not pending:
+                    # A wait for data never holds the transition or admission lock.
+                    if connection is not None and not pending:
                         pending = self._take_batch()
-                    if pending and self.history == "aggregate":
-                        with connection:
-                            for ts, host, decision, source, _transport in pending:
-                                connection.execute(
-                                    "INSERT INTO daily VALUES (?,?,?,?,1) ON CONFLICT(day,host,decision,source) "
-                                    "DO UPDATE SET count = count + 1",
-                                    (ts // 86400 * 86400, host if decision == "blocked" else "", decision, source),
-                                )
-                            # Deterministic: oldest days go first, and within a day the smallest counts.
-                            surplus = """SELECT rowid FROM daily
-                                         ORDER BY day DESC, count DESC, host, decision, source LIMIT -1 OFFSET ?"""
-                            touched = connection.execute(
-                                f"SELECT MAX(day) FROM daily WHERE rowid IN ({surplus})", (MAX_EVENTS,)).fetchone()[0]
-                            if touched is not None:
-                                # Days up to this one lost rows, so the dashboard shows them as partial.
-                                connection.execute(
-                                    f"DELETE FROM daily WHERE rowid IN ({surplus})", (MAX_EVENTS,))
-                                connection.execute(
-                                    "INSERT INTO meta VALUES ('trimmed_through', ?) ON CONFLICT(key) DO UPDATE "
-                                    "SET value = CAST(MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)",
-                                    (str(touched),))
+                    with self._transition:
+                        if connection is None:
+                            connection = self._open()
+                            configured = self._generation
+                            next_sweep = 0.0
+                        elif configured != self._generation:
+                            self._configure(connection)
+                            configured = self._generation
+                            next_sweep = 0.0
+                        # Discard even batches the writer had already dequeued when
+                        # a privacy-setting change was accepted.
+                        pending = [(generation, row) for generation, row in pending
+                                   if generation == configured]
+                        now = time.time()
+                        if now >= next_sweep:
+                            with connection:
+                                cutoff = int(now - self._retention_seconds)
+                                if self.history == "full":
+                                    connection.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+                                elif self.history == "aggregate":
+                                    connection.execute("DELETE FROM daily WHERE day < ?", (cutoff // 86400 * 86400,))
+                            next_sweep = now + 60
+                        self._save_dropped(connection)
+                        if pending and self.history != "none":
+                            self._write_batch(connection, [row for _generation, row in pending])
                         pending = []
-                    elif pending:
-                        with connection:
-                            connection.executemany(
-                                "INSERT INTO events(ts,host,decision,source,transport) VALUES (?,?,?,?,?)",
-                                pending,
-                            )
-                            connection.execute("""
-                                DELETE FROM events WHERE id <= (
-                                    SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?
-                                )
-                            """, (MAX_EVENTS,))
-                        pending = []
+                        with self._changed:
+                            self._applied_generation = configured
+                            self._ready.set()
+                            self._changed.notify_all()
                 except (OSError, sqlite3.Error):
                     self._ready.clear()
                     if connection is not None:
@@ -234,7 +299,9 @@ class Ledger:
                     if self._stop.wait(0.25):
                         break
         finally:
-            self._ready.clear()
+            with self._changed:
+                self._ready.clear()
+                self._changed.notify_all()
             if connection is not None:
                 connection.close()
 
