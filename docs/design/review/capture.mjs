@@ -33,6 +33,53 @@ const stub = `window.chrome={runtime:{sendMessage:async(m)=>m.type==="warning-in
 for (const w of [1440, 390]) jobs.push({kind: "page", before: true, url: pathToFileURL(path.join(repo, "browser/warning.html")).href + "?list=threats#https://login-verify.example-phish.test/account/session?continue=%2Fwallet", width: w, file: `warning-${w}`, init: stub});
 jobs.push({kind: "frames", before: true, url: pathToFileURL(path.join(here, "before-placeholder.html")).href, prefix: "before-placeholder"});
 
+// The real dashboard, served by the real server from src/egress_guard/web, when a capture harness is given:
+//   EG_DASHBOARD_HARNESS=docs/design/review/dashboard-harness.py EG_PYTHON=.venv/bin/python
+//   EGRESS_GUARD_DATA=<private temp dir> EGRESS_GUARD_CONFIG=<dir>/config.toml node docs/design/review/capture.mjs live
+// The harness must already be serving (`harness serve`); each capture writes <data>/scenario.json and takes a
+// fresh single-use URL from `harness url`. EG_DASHBOARD_OUT picks the output folder (default after/live).
+// Jobs: [file, status, ledger, widths, schemes, tab]
+const live = process.env.EG_DASHBOARD_HARNESS ? [
+  ["full", "protected", "full", [1440, 768, 390], ["light", "dark"], ""],
+  ["empty", "degraded", "empty", [1440, 390], ["light", "dark"], ""],
+  ["new", "protected", "empty", [1440, 390], ["light"], ""],
+  ["reduced", "reduced", "full", [1440, 390], ["light"], ""],
+  ["paused", "paused", "full", [1440], ["light"], ""],
+  ["degraded", "degraded", "full", [1440, 390], ["light"], ""],
+  ["aggregate", "protected", "aggregate", [1440, 390], ["light"], ""],
+  ["none", "protected", "none", [1440, 390], ["light"], ""],
+  ["tab-top", "protected", "full", [1440, 390], ["light"], "top"],
+  ["tab-threats", "protected", "full", [1440, 390], ["light", "dark"], "threats"],
+  ["week", "protected", "full", [1440], ["light"], "week"],
+] : [];
+const liveOut = process.env.EG_DASHBOARD_OUT || path.join(here, "after", "live");
+for (const [file, status, ledger, widths, liveSchemes, tab] of live) {
+  for (const w of widths) jobs.push({kind: "live", file: `live-${file}-${w}`, width: w, status, ledger, liveSchemes, tab});
+}
+const {execFileSync} = await import("node:child_process");
+const liveUrl = (status, ledger) => {
+  fs.writeFileSync(path.join(process.env.EGRESS_GUARD_DATA, "scenario.json"), JSON.stringify({status, ledger}));
+  return execFileSync(process.env.EG_PYTHON || "python3", ["-B", process.env.EG_DASHBOARD_HARNESS, "url"], {encoding: "utf8"}).trim();
+};
+
+// Overlap check for the live dashboard: two visible text boxes that intersect and are not nested.
+const OVERLAP = `(() => {
+  const els = [...document.body.querySelectorAll('*')].filter((el) => {
+    if (el.closest('[hidden], .sr-only, dialog:not([open])')) return false;
+    const cs = getComputedStyle(el); if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    return [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+  });
+  const boxes = els.map((el) => { const r = document.createRange(); r.selectNodeContents(el); return [el, r.getBoundingClientRect()]; });
+  const hits = [];
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const [a, p] = boxes[i], [b, q] = boxes[j];
+    if (a.contains(b) || b.contains(a) || !p.width || !q.width) continue;
+    if (p.left < q.right - 1 && q.left < p.right - 1 && p.top < q.bottom - 1 && q.top < p.bottom - 1)
+      hits.push(a.textContent.trim().slice(0, 30) + ' / ' + b.textContent.trim().slice(0, 30));
+  }
+  return hits.slice(0, 12);
+})()`;
+
 const filter = process.argv[2];
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "eg-design-"));
 const chrome = launch({profile, args: ["--allow-file-access-from-files", "--hide-scrollbars", "--disable-gpu"]});
@@ -66,7 +113,7 @@ const AUDIT = `(() => {
     const clipped = [], sizes = new Set(), off = new Set();
     for (const el of root.querySelectorAll('*')) {
       const cs = getComputedStyle(el);
-      if (cs.display === 'none' || cs.visibility === 'hidden' || el.closest('[hidden]')) continue;
+      if (cs.display === 'none' || cs.visibility === 'hidden' || el.closest('[hidden], .sr-only, dialog:not([open]), noscript')) continue;
       const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
       if (hasText) sizes.add(cs.fontSize + (cs.fontFamily.includes('mono') ? ' mono' : ''));
       if (hasText && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible') clipped.push(el.textContent.trim().slice(0, 50));
@@ -85,6 +132,25 @@ const auditLog = [];
 for (const job of jobs) {
   const tag = job.file || job.prefix;
   if (filter && !tag.includes(filter)) continue;
+  if (job.kind === "live") {
+    fs.mkdirSync(liveOut, {recursive: true});
+    for (const scheme of job.liveSchemes) {
+      const dpr = job.width <= 400 ? 2 : 1;
+      const {sessionId, targetId, ev} = await open(liveUrl(job.status, job.ledger), job.width, 900, scheme, dpr);
+      for (let i = 0; i < 50 && !(await ev(`document.body.dataset.ready === '1'`)); i++) await sleep(100);
+      if (job.tab === "week") await ev(`document.getElementById('range-week')?.click()`);
+      else if (job.tab) await ev(`document.querySelector('[role=tab][data-tab=${job.tab}]')?.click()`);
+      await sleep(400);
+      if (scheme === "light") auditLog.push({tag: job.file, result: await ev(AUDIT), overlap: await ev(OVERLAP)});
+      const h = Math.min(4000, await ev(`Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)`));
+      const {data} = await cdp("Page.captureScreenshot", {format: "jpeg", quality: 82, captureBeyondViewport: true,
+        clip: {x: 0, y: 0, width: job.width, height: h, scale: 0.75}}, sessionId);
+      fs.writeFileSync(path.join(liveOut, `${job.file}-${scheme}.jpg`), Buffer.from(data, "base64"));
+      await cdp("Target.closeTarget", {targetId});
+    }
+    console.log("ok", tag);
+    continue;
+  }
   for (const scheme of schemes) {
     if (job.kind === "frames") {
       const {sessionId, targetId, ev} = await open(job.url, 1600, 1200, scheme, 2);
