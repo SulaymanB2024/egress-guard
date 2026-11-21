@@ -51,6 +51,8 @@ const live = process.env.EG_DASHBOARD_HARNESS ? [
   ["tab-top", "protected", "full", [1440, 390], ["light"], "top"],
   ["tab-threats", "protected", "full", [1440, 390], ["light", "dark"], "threats"],
   ["week", "protected", "full", [1440], ["light"], "week"],
+  ["row-action", "protected", "full", [1440, 390], ["light"], "row"],
+  ["confirm", "protected", "full", [1440, 390], ["light"], "confirm"],
 ] : [];
 const liveOut = process.env.EG_DASHBOARD_OUT || path.join(here, "after", "live");
 for (const [file, status, ledger, widths, liveSchemes, tab] of live) {
@@ -64,18 +66,20 @@ const liveUrl = (status, ledger) => {
 
 // Overlap check for the live dashboard: two visible text boxes that intersect and are not nested.
 const OVERLAP = `(() => {
-  const els = [...document.body.querySelectorAll('*')].filter((el) => {
+  // With a modal open, only the modal is the view (the page behind it is inert).
+  const els = [...(document.querySelector('dialog[open]') || document.body).querySelectorAll('*')].filter((el) => {
     if (el.closest('[hidden], .sr-only, dialog:not([open])')) return false;
     const cs = getComputedStyle(el); if (cs.display === 'none' || cs.visibility === 'hidden') return false;
     return [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
   });
-  const boxes = els.map((el) => { const r = document.createRange(); r.selectNodeContents(el); return [el, r.getBoundingClientRect()]; });
+  // One rect per rendered line, so inline text that wraps is not mistaken for an overlap.
+  const boxes = els.map((el) => { const r = document.createRange(); r.selectNodeContents(el); return [el, [...r.getClientRects()].filter((x) => x.width && x.height)]; });
+  const meet = (p, q) => p.left < q.right - 1 && q.left < p.right - 1 && p.top < q.bottom - 1 && q.top < p.bottom - 1;
   const hits = [];
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
-    const [a, p] = boxes[i], [b, q] = boxes[j];
-    if (a.contains(b) || b.contains(a) || !p.width || !q.width) continue;
-    if (p.left < q.right - 1 && q.left < p.right - 1 && p.top < q.bottom - 1 && q.top < p.bottom - 1)
-      hits.push(a.textContent.trim().slice(0, 30) + ' / ' + b.textContent.trim().slice(0, 30));
+    const [a, ps] = boxes[i], [b, qs] = boxes[j];
+    if (a.contains(b) || b.contains(a)) continue;
+    if (ps.some((p) => qs.some((q) => meet(p, q)))) hits.push(a.textContent.trim().slice(0, 30) + ' / ' + b.textContent.trim().slice(0, 30));
   }
   return hits.slice(0, 12);
 })()`;
@@ -117,7 +121,7 @@ const AUDIT = `(() => {
       const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
       if (hasText) sizes.add(cs.fontSize + (cs.fontFamily.includes('mono') ? ' mono' : ''));
       if (hasText && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible') clipped.push(el.textContent.trim().slice(0, 50));
-      if (el.closest('.sheet > figure > figcaption') || el.matches('.lights i, .bars i, .days i, .dot, .mark, svg *, .switch, .sk')) continue;
+      if (el.closest('.sheet > figure > figcaption') || el.matches('.lights i, .bars i, .days i, .dot, .mark, svg *, .switch, .sk, dialog')) continue;
       for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap']) {
         const v = parseFloat(cs[p]); if (!isNaN(v) && !scale.has(Math.abs(Math.round(v))) && Math.abs(v - Math.round(v)) < .01) off.add(p + ':' + v + ' ' + (el.className || el.tagName));
       }
@@ -139,12 +143,17 @@ for (const job of jobs) {
       const {sessionId, targetId, ev} = await open(liveUrl(job.status, job.ledger), job.width, 900, scheme, dpr);
       for (let i = 0; i < 50 && !(await ev(`document.body.dataset.ready === '1'`)); i++) await sleep(100);
       if (job.tab === "week") await ev(`document.getElementById('range-week')?.click()`);
-      else if (job.tab) await ev(`document.querySelector('[role=tab][data-tab=${job.tab}]')?.click()`);
+      else if (job.tab === "row" || job.tab === "confirm") {
+        // "row": focus the row blocked by the user's own rule (its "Unblock…" is the widest trailing action).
+        // "confirm": open Block… on an allowed row, which checks /api/domain and then opens the dialog.
+        await ev(`(() => { const row = [...document.querySelectorAll('#activity-rows .row')].find((r) => r.getAttribute('aria-label').includes(${job.tab === "confirm" ? "'app.example-maps.test'" : "'Your block rule'"})); row.focus(); if (${job.tab === "confirm"}) row.querySelector('.act button').click(); })()`);
+        await sleep(600);
+      } else if (job.tab) await ev(`document.querySelector('[role=tab][data-tab=${job.tab}]')?.click()`);
       await sleep(400);
       if (scheme === "light") auditLog.push({tag: job.file, result: await ev(AUDIT), overlap: await ev(OVERLAP)});
       const h = Math.min(4000, await ev(`Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)`));
       const {data} = await cdp("Page.captureScreenshot", {format: "jpeg", quality: 82, captureBeyondViewport: true,
-        clip: {x: 0, y: 0, width: job.width, height: h, scale: 0.75}}, sessionId);
+        clip: {x: 0, y: 0, width: job.width, height: h, scale: job.width <= 400 ? 0.6 : 0.75}}, sessionId);
       fs.writeFileSync(path.join(liveOut, `${job.file}-${scheme}.jpg`), Buffer.from(data, "base64"));
       await cdp("Target.closeTarget", {targetId});
     }
