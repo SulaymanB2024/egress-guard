@@ -115,7 +115,12 @@ small set gets. The first-party set covers the common slot conventions; see
 the real-site results below for what it leaves.
 
 **Warning page.** A navigation to a threat-listed site never reaches it. The
-page shows the host, the full address, the list and its date. **Go back** is
+page shows the host, the full address, the list and its date. Like the
+scanner interstitial it is a decision page (`docs/design/DESIGN.md`): the
+headline at display size, the hostname second (mono, title size, wrapping
+only between labels), the column at one third of the viewport height on
+desktop, and the state carried only by the red status line and a 2 px rule
+above it. **Go back** is
 the one filled button and has the focus. **Continue anyway…** (quiet) reveals
 a confirmation with the consequence and **Open <host> once** (Escape closes
 it again), which adds two session `allow` rules for that tab and that host only:
@@ -373,9 +378,9 @@ a local page (`unwrap.html`, reachable only by the DNR redirect: it is
 web-accessible by its per-session dynamic address alone, refuses to render
 inside a frame and never navigates by itself). It shows the destination host
 in a monospace face under the question "Open this link through <scanner>?",
-the full address below it and, for an internationalized name, one
-"Look-alike letters" callout with the Unicode form it may imitate (the `xn--`
-form is what opens). **Continue through <scanner>** has the focus:
+the full address below it and, for an internationalized name, a status line
+in the reduced state ("Mail scanner link with look-alike letters") and one
+sentence with the Unicode form it may imitate (the `xn--` form is what opens). **Continue through <scanner>** has the focus:
 the worker adds a session rule that lets the next navigation to that scanner
 host in that tab pass once, so the scanner gets its own address, signature
 and parameters untouched. **Open directly** (its accessible name and tooltip

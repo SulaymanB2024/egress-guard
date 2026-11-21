@@ -32,7 +32,7 @@ Five, each with the test that decides it.
 ## 2. Layout
 
 ### Spacing scale
-`4 · 8 · 12 · 16 · 24 · 32 · 48 · 64` px (pt on macOS), tokens `--s1`…`--s8`. Every padding, margin and gap is one of these. Allowed exceptions, each named: 1px hairlines; 2px segmented-control track inset; a value derived from a grid column so that two edges coincide (for example the scorecard evidence indent = state column 128 + gap 24). The audit lists any other value.
+`4 · 8 · 12 · 16 · 24 · 32 · 48 · 64` px (pt on macOS), tokens `--s1`…`--s8`. Every padding, margin and gap is one of these. Allowed exceptions, each named: 1px hairlines; 2px segmented-control track inset; a value derived from a grid column so that two edges coincide (for example the scorecard evidence indent = state column 128 + gap 24); the decision pages' optical top offset, derived from the viewport height (see "Decision pages", marked `data-optical`). The audit lists any other value.
 
 Vertical rhythm inside a block uses 4/8; between blocks uses 24/32; between sections 48.
 
@@ -59,7 +59,7 @@ One scale, five sizes, two weights (400 and 600). Use the role classes (`.t-disp
 
 | Role | Web (system UI stack) | macOS (SF Pro) | Used for |
 |---|---|---|---|
-| Display | 48 / 48, 600, tabular | 44 / 44, semibold | The one focal number per view. Never words. |
+| Display | 48 / 48, 600, tabular | 44 / 44, semibold | The one focal number per view. Never words, except the headline of a decision page (see "Decision pages"). |
 | Headline | 24 / 30, 600 | 22 / 28, semibold | Page or state headline; secondary metric values on wide views. |
 | Title | 16 / 22, 600 | 15 / 20, semibold | Section titles; metric values in compact rows; empty-state titles. |
 | Body | 14 / 20, 400 or 600 | 13 / 17 | Everything else. |
@@ -122,7 +122,7 @@ Rules:
 
 - Three grounds only: paper (page), raised (controls; the Mac popover), sunken (tracks, placeholders). No card surfaces for content; content sits on paper.
 - Shadow: only on things that float above the page (Mac popover, toast). `--shadow-pop`.
-- A line is allowed for: (a) hairline between rows of one list (`.list`), inset to the text edges; (b) the bottom of a tab bar or toolbar; (c) the boundary of a control (`--edge`); (d) one rule between the focal block and the drill-down on the dashboard and Mac Overview. Nothing else.
+- A line is allowed for: (a) hairline between rows of one list (`.list`), inset to the text edges; (b) the bottom of a tab bar or toolbar; (c) the boundary of a control (`--edge`); (d) one rule between the focal block and the drill-down on the dashboard and Mac Overview; (e) the 2px state rule above a decision page's status line. Nothing else.
 - Radius: 6 for controls and callouts, 10 for surfaces (placeholder, popover 12 per macOS).
 
 ---
@@ -220,18 +220,26 @@ Rules:
 - Header (48): brand mark · site host (mono, truncates by section 8) · status dot and word.
 - Tabs (36): **This page · Blocked n · Rules n · Settings**.
 - This page: focal metric (requests blocked on this page, display) → metric row of exactly three facts (links cleaned, cookies removed, elements hidden) → "Protection on this site" with **Pause** as a quiet trailing button and the four-level segmented control. Natural height ≈ 410, so it fits 520 with room for the reduced callout.
+- Paused (Pause sets the site to Relaxed with no hiding or cleaning for 15 minutes): the header reads **Paused** in the reduced state; one callout "Paused on this site until HH:MM" with **Resume** as the filled (safe) button, and one muted line under it, "Malware and phishing blocking stays on."; the level control shows the level that will be restored, disabled.
 - Blocked: grouped by reason (group title + count), one row per request: URL (host ink, path muted) and type. **"Allow 15 min" lives in the row's trailing action, shown only on hover, focus or selection**, so it is never repeated at rest.
 - Rules: rules for this site (Add… in the heading), temporary exceptions with time left, and page tools as action rows (Block an element…, Show hidden ad slots, Restore everything hidden here).
 - Settings: default level for other sites, the mail-scanner switch, and list provenance (list name and update date).
 - Empty states: zero blocked shows `0` (not a special screen); a browser page shows "Chrome pages can't be filtered"; Blocked and Rules each have an empty state.
 *Why:* the current popup stacks eight equal sections to ~2,000 px. One number, three facts and one control is what a user opens the popup for; everything else is occasional and reached by name.
 
+### Decision pages (threat warning, scanner interstitial, unwrap failure)
+Stopping someone before a threat-listed site is the most consequential moment in the product, so these pages carry the most weight of any view.
+- **Headline is the answer, at display size** (48/48, 600, balanced wrapping). At ≤ 480 px a sentence at display size is too large for the 358 px column, so it steps down to headline (24/30); this is the only place display carries words.
+- **The hostname is the second-largest thing:** mono at the title size (16/22, 600), not 0.93em, breaking only between labels (each label with its dot is one box; a label wider than the column wraps inside it rather than clip). The full URL follows in caption, muted, wrapping anywhere.
+- **Vertical placement:** on desktop the column's top edge sits at one third of the viewport height (`max(48px, 33.333vh − bar)`, the named viewport-derived spacing exception), so the decision sits at the optical centre rather than under the brand mark. At ≤ 480 px the column is top-aligned on the standard margin (32 below the bar).
+- **One state element:** state is carried by the status line in the state colour (dot + word) and one structural element only, a 2px rule in the same colour above the status line, spanning the column. Neutral pages (scanner link, unwrap failure) use the muted state for both. No tinted panels, no icons, no coloured headings; the Continue confirmation is plain text and a secondary button.
+
 ### Threat warning page
-**Decision:** one decision per page. State line (threat) → headline → host (title, mono) and full URL → list and update date → one fact sentence → **Go back** (primary, focused) and **Continue anyway…** (quiet). Continue reveals a callout with the consequence and a secondary "Open <host> once".
+**Decision:** one decision per page. State line (threat) → headline → host (title, mono) and full URL → list and update date → one fact sentence → **Go back** (primary, focused) and **Continue anyway…** (quiet). Continue reveals the consequence sentence and a secondary "Open <host> once" (plain, untinted; Escape closes it).
 *Why:* the safe action must be the obvious one; the risky one takes two deliberate clicks and names the host it opens.
 
 ### Scanner-link interstitial
-**Decision:** the question is the headline ("Open this link through Microsoft Defender?"). Destination host and URL, then **Continue through Defender** (primary) and **Open directly** (secondary). The fine print about popup settings is removed (it is in Settings). IDN destinations add one reduced-state callout naming the look-alike. The unreadable-tracker variant is the same page with **Go back** primary and **Copy link** quiet.
+**Decision:** the question is the headline ("Open this link through Microsoft Defender?"). Destination host and URL, then **Continue through Defender** (primary) and **Open directly** (secondary). The fine print about popup settings is removed (it is in Settings). An IDN destination turns the status line and its rule to the reduced state ("Mail scanner link with look-alike letters") and adds one sentence naming the look-alike; no callout. The unreadable-tracker variant is the same page with **Go back** primary and **Copy link** quiet.
 
 ### Click-to-load placeholder
 **Decision:** fills the embed's own box on a sunken ground; "Held by Egress Guard" (caption) → provider and kind as title ("YouTube video") → **Load video** (primary) and **Load signed in** (quiet). A refused click adds one line in the unprotected colour and nothing else moves. No dashed border, no paragraph.

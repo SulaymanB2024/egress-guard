@@ -1,8 +1,8 @@
 /* Scanner interstitial and unwrap failure: builds on ui.css and warning.css (docs/design/mockups/interstitial.html). */
 .kind { font-weight: var(--w-regular); }
-.scan .callout { margin-top: var(--s5); }
-.scan .callout .host { white-space: nowrap; }
-.dest .h.full { font-weight: var(--w-regular); }
+.scan[data-state="reduced"] .kind { font-weight: var(--w-strong); }
+#scan-idn .host { white-space: nowrap; }
+.dest .h.full { font-size: var(--t-body); line-height: var(--lh-body); font-weight: var(--w-regular); overflow-wrap: anywhere; }
 .dest .unknown { font-family: var(--font-sans); color: var(--muted); }
 .reason { margin-top: var(--s1); }
 @media (max-width: 480px) { .actions .btn { width: 100%; } }

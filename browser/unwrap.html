@@ -12,15 +12,15 @@
 <body>
 <header class="bar"><span class="mark" aria-hidden="true"></span>Egress Guard</header>
 
-<main class="page scan" aria-labelledby="scan-title" id="scan" hidden>
-  <p class="kind" id="scan-eyebrow">Mail scanner link</p>
-  <h1 id="scan-title" class="t-headline">Open this link through your mail scanner?</h1>
+<main class="page scan" data-state="neutral" data-optical aria-labelledby="scan-title" id="scan" hidden>
+  <p class="kind"><span class="dot" id="scan-dot" aria-hidden="true" hidden></span><span id="scan-eyebrow">Mail scanner link</span></p>
+  <h1 id="scan-title" class="t-display">Open this link through your mail scanner?</h1>
   <div class="dest">
     <p class="label">It leads to</p>
-    <p class="h t-title"><span class="host" id="scan-host">…</span></p>
+    <p class="h"><span class="host" id="scan-host">…</span></p>
     <p class="url t-caption"><span class="host" id="scan-url"></span></p>
   </div>
-  <div class="callout" data-state="reduced" id="scan-idn" hidden></div>
+  <p class="said" id="scan-idn" hidden></p>
   <p class="said" id="scan-body" hidden></p>
   <div class="actions">
     <button id="through" class="btn primary lg" type="button">Continue through the scanner</button>
@@ -29,9 +29,9 @@
   <p id="scan-error" class="inline-error" role="alert" hidden></p>
 </main>
 
-<main class="page unwrap" aria-labelledby="title" id="card" hidden>
+<main class="page unwrap" data-state="neutral" data-optical aria-labelledby="title" id="card" hidden>
   <p class="kind">Link tracker skipped</p>
-  <h1 id="title" class="t-headline">This link's destination couldn't be read</h1>
+  <h1 id="title" class="t-display">This link's destination couldn't be read</h1>
   <div class="dest">
     <p class="label">The link was</p>
     <p class="h full"><span class="host" id="url"></span></p>

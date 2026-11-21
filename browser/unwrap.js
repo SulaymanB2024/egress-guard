@@ -48,6 +48,12 @@
     return {url: next, threat: reply.threat};
   }
 
+  /** A hostname as one box per label (dot included), so it wraps only between labels. */
+  function byLabel(node, host) {
+    const labels = host.split(".");
+    node.replaceChildren(...labels.map((label, i) => Object.assign(document.createElement("span"), {className: "lbl", textContent: i < labels.length - 1 ? `${label}.` : label})));
+  }
+
   function scanError(message) { $("scan-error").textContent = message; $("scan-error").hidden = !message; }
 
   function interstitial(scan, original) {
@@ -58,12 +64,15 @@
     $("scan-title").textContent = `Open this link through ${name}?`;
     $("through").textContent = `Continue through ${SHORT[scan.scanner.id] || "the scanner"}`;
     if (scan.host) {
-      $("scan-host").textContent = scan.host;
+      byLabel($("scan-host"), scan.host);
       const unicode = links.unicodeHost(scan.host);
       if (unicode && unicode !== scan.host) {
+        // A look-alike name: the status line carries the reduced state; one sentence says what it imitates.
+        $("scan").setAttribute("data-state", "reduced");
+        $("scan-dot").hidden = false;
+        $("scan-eyebrow").textContent = "Mail scanner link with look-alike letters";
         $("scan-idn").hidden = false;
-        $("scan-idn").replaceChildren(Object.assign(document.createElement("strong"), {textContent: "Look-alike letters.", className: "state-text"}),
-          document.createTextNode(" This name displays as "), Object.assign(document.createElement("b"), {textContent: unicode, className: "host"}),
+        $("scan-idn").replaceChildren(document.createTextNode("This name displays as "), Object.assign(document.createElement("b"), {textContent: unicode, className: "host"}),
           document.createTextNode(" but opens the address above."));
       }
     } else {

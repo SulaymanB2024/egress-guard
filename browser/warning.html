@@ -9,11 +9,11 @@
 </head>
 <body>
 <header class="bar"><span class="mark" aria-hidden="true"></span>Egress Guard</header>
-<main class="page" data-state="threat" aria-labelledby="title">
+<main class="page" data-state="threat" data-optical aria-labelledby="title">
   <p class="kind"><span class="dot" aria-hidden="true"></span>Blocked before loading</p>
-  <h1 id="title" class="t-headline">This site is on a malware and phishing list</h1>
+  <h1 id="title" class="t-display">This site is on a malware and phishing list</h1>
   <div class="dest">
-    <p class="h t-title"><span class="host" id="host">…</span></p>
+    <p class="h"><span class="host" id="host">…</span></p>
     <p class="url t-caption"><span class="host" id="url"></span></p>
   </div>
   <dl class="facts">
@@ -25,7 +25,7 @@
     <button id="back" class="btn primary lg" type="button" autofocus>Go back</button>
     <button id="reveal" class="btn quiet" type="button" aria-expanded="false" aria-controls="confirm">Continue anyway…</button>
   </div>
-  <div id="confirm" class="confirm callout" hidden>
+  <div id="confirm" class="confirm" hidden>
     <p>Opens this site once, in this tab, for up to <span id="minutes">10</span> minutes. Ads and trackers stay blocked.</p>
     <button id="continue" class="btn" type="button">Open this site once</button>
   </div>
