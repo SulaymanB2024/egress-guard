@@ -1,5 +1,5 @@
 /* Egress Guard extension UI: the design system's tokens and base components, then the few shared additions
-   every extension surface needs. The block from ":root {" down to the end of the copied component set is
+   every extension surface needs. The block from the first root block down to the end of the copied component set is
    docs/design/tokens.css byte for byte (tests/browser/ui-tokens.test.cjs fails if they drift): change it there and
    copy it here, never here alone. Rules: docs/design/DESIGN.md. */
 

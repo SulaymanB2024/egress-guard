@@ -42,7 +42,7 @@ export const BASE = {
 export const PAGE = {site: "publisher.example", paused: false, reason: "", hidden: 2, shown: 0, protectedRules: [], overbroadRules: [],
   generic: {available: true, on: true, wanted: true, slots: 2}};
 
-const LONG_HOST = "accounts.internal-billing-portal.eu-west-2.cdn.example-enterprise.co.uk";   // 70 characters
+const LONG_HOST = "accounts.internal-billing-portal.eu-west1.cdn.example-enterprise.co.uk";   // 70 characters
 const IDN_HOST = "xn--pypal-4ve.com";
 const many = (n) => Array.from({length: n}, (_, i) => ({host: `ads${i}.tracker-network-${i}.example`, path: `/v${i}/pixel/${"a".repeat(i % 7 + 3)}/collect.gif`, type: i % 3 ? "image" : "script", list: i % 4 ? "trackers" : "cname", count: 1 + (i % 3)}));
 
