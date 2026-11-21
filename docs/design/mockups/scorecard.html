@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: KPI scorecard</title>
+<link rel="stylesheet" href="../tokens.css">
+<style>
+  .wrap { max-width: 1216px; margin: 0 auto; padding: 0 var(--s6) var(--s7); }
+  .bar { height: 56px; display: flex; align-items: center; gap: var(--s2); }
+  .bar .name { font-weight: var(--w-strong); }
+  .bar .sp { flex: 1; }
+  .bar .updated { color: var(--muted); }
+  .summary { display: flex; align-items: flex-end; gap: var(--s5); margin-top: var(--s6); flex-wrap: wrap; }
+  .summary .label { font-size: var(--t-body); line-height: var(--lh-body); color: var(--ink); }
+  .summary .names { color: var(--ink); padding-bottom: 2px; max-width: 72ch; }
+  .summary .rest { color: var(--muted); }
+  .group { margin-top: var(--s7); }
+  .group > h2 { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: var(--s2); border-bottom: 1px solid var(--line); }
+  .group > h2 .muted { font-size: var(--t-body); font-weight: var(--w-regular); }
+  /* KPI row: state | name | value | target | 7-day strip. Edges at 0, 128, -472, -360, -112 (from the right). */
+  .kpi { border-bottom: 1px solid var(--line); }
+  .kpi > summary { display: grid; grid-template-columns: 128px minmax(0, 1fr) 128px 232px 112px; column-gap: var(--s5); align-items: center; min-height: 48px; cursor: pointer; list-style: none; }
+  .kpi > summary::-webkit-details-marker { display: none; }
+  .kpi .st { display: flex; align-items: center; gap: var(--s2); color: var(--state); font-weight: var(--w-strong); white-space: nowrap; }
+  .kpi .nm { font-weight: var(--w-strong); }
+  .kpi .val { text-align: right; font-size: var(--t-title); line-height: var(--lh-title); font-weight: var(--w-strong); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .kpi .tgt { color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .kpi .bars { --bars-h: 24px; }
+  .kpi .bars i:last-child { background: var(--ink); }
+  .kpi .ev { padding: 0 0 var(--s4) calc(128px + var(--s5)); max-width: calc(128px + var(--s5) + 72ch); display: flex; flex-direction: column; gap: var(--s2); }
+  .kpi .ev .host { color: var(--ink); }
+  .kpi .ev .muted { font-size: var(--t-caption); line-height: var(--lh-caption); }
+  .lists { margin-top: var(--s7); }
+  .lists .tabs { margin-bottom: var(--s2); }
+  .lists .row { grid-template-columns: minmax(0, 1fr) auto; min-height: 36px; padding: 0; max-width: 560px; }
+  .foot { margin-top: var(--s6); color: var(--muted); max-width: 72ch; }
+  @media (max-width: 720px) {
+    .wrap { padding: 0 var(--s4) var(--s6); }
+    .bar .updated { display: none; }
+    .kpi > summary { grid-template-columns: minmax(0, 1fr) auto 56px; grid-template-rows: auto auto; row-gap: 2px; padding: var(--s2) 0; column-gap: var(--s3); }
+    .kpi .nm { grid-column: 1; grid-row: 1; }
+    .kpi .val { grid-column: 2; grid-row: 1; }
+    .kpi .bars { grid-column: 3; grid-row: 1 / span 2; --bars-h: 28px; }
+    .kpi .st { grid-column: 1; grid-row: 2; font-size: var(--t-caption); line-height: var(--lh-caption); }
+    .kpi .tgt { grid-column: 2; grid-row: 2; font-size: var(--t-caption); line-height: var(--lh-caption); text-align: right; }
+    .kpi .ev { padding-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar"><span class="mark" aria-hidden="true"></span><span class="name">Scorecard</span><span class="muted">· This Mac</span><span class="sp"></span><span class="updated t-caption num">Sampled Nov 20, 22:35</span></header>
+
+  <section class="summary" data-state="unprotected">
+    <div class="metric"><span class="value t-display">4</span><span class="label">of 11 off target</span></div>
+    <p class="names">Threat stops, Bypass exposure, IP exposure, Resource cost<br><span class="rest">5 on target · 1 to watch · 1 for information</span></p>
+  </section>
+
+  <section class="group" aria-labelledby="g1">
+    <h2 class="t-title" id="g1">Security <span class="muted num">3 of 5 on target</span></h2>
+    <details class="kpi" data-state="protected"><summary><span class="st"><span class="dot"></span>On target</span><span class="nm">Protection uptime</span><span class="val">100%</span><span class="tgt">target ≥ 99.9%, 7 days</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
+    <details class="kpi" data-state="unprotected" open><summary><span class="st"><span class="dot"></span>Off target</span><span class="nm">Threat stops</span><span class="val">109</span><span class="tgt">target 0 got through · 4 did</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:20%"></i><i style="--h:12%"></i><i style="--h:100%"></i></span></summary>
+      <div class="ev">
+        <p>81 refused by the proxy, 28 by DNS. 176 in 7 days.</p>
+        <p>Got through today: <span class="host">www.eyeplastics.com</span> 14, <span class="host">astoundz.com</span> 13, <span class="host">www.xyz.rent</span> 12, <span class="host">www.flow.page</span> 1</p>
+        <p class="muted">Backfilled from history and sampled every 5 minutes.</p>
+      </div>
+    </details>
+    <details class="kpi" data-state="protected"><summary><span class="st"><span class="dot"></span>On target</span><span class="nm">Feed freshness</span><span class="val">13 h</span><span class="tgt">target &lt; 24 h, no failures</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:54%"></i></span></summary></details>
+    <details class="kpi" data-state="unprotected"><summary><span class="st"><span class="dot"></span>Off target</span><span class="nm">Bypass exposure</span><span class="val">34,590</span><span class="tgt">target falling · 33 DoH hosts</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:82%"></i><i style="--h:100%"></i></span></summary></details>
+    <details class="kpi" data-state="reduced"><summary><span class="st"><span class="dot"></span>Watch</span><span class="nm">Coverage</span><span class="val">1 of 1</span><span class="tgt">services · 13 of 13 profiles</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
+  </section>
+
+  <section class="group" aria-labelledby="g2">
+    <h2 class="t-title" id="g2">Anonymity <span class="muted num">3 of 4 on target</span></h2>
+    <details class="kpi" data-state="protected"><summary><span class="st"><span class="dot"></span>On target</span><span class="nm">Tracker exposure</span><span class="val">99.55%</span><span class="tgt">target ≥ 99% of listed blocked</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
+    <details class="kpi" data-state="neutral"><summary><span class="st"><span class="dot hollow"></span>Information</span><span class="nm">Third-party spread</span><span class="val">6,918</span><span class="tgt">domains · top 10 own 21.8%</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
+    <details class="kpi" data-state="protected"><summary><span class="st"><span class="dot"></span>On target</span><span class="nm">DNS privacy</span><span class="val">100%</span><span class="tgt">target 100% encrypted</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
+    <details class="kpi" data-state="unprotected"><summary><span class="st"><span class="dot"></span>Off target</span><span class="nm">IP exposure</span><span class="val">100% direct</span><span class="tgt">target 0% direct</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
+    <details class="kpi" data-state="protected"><summary><span class="st"><span class="dot"></span>On target</span><span class="nm">Overrides</span><span class="val">4</span><span class="tgt">allowed · none new this week</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
+  </section>
+
+  <section class="group" aria-labelledby="g3">
+    <h2 class="t-title" id="g3">Efficiency <span class="muted num">0 of 1 on target</span></h2>
+    <details class="kpi" data-state="unprotected"><summary><span class="st"><span class="dot"></span>Off target</span><span class="nm">Resource cost</span><span class="val">5.0% CPU</span><span class="tgt">target &lt; 8% · DNS p95 16 ms</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:30%"></i><i style="--h:62%"></i><i style="--h:100%"></i><i style="--h:84%"></i></span></summary></details>
+  </section>
+
+  <section class="lists">
+    <nav class="tabs" aria-label="Today's lists">
+      <a href="#" aria-current="page">Trackers that got through <span class="count">9</span></a>
+      <a href="#">Threats blocked <span class="count">13</span></a>
+      <a href="#">Feed age <span class="count">16</span></a>
+    </nav>
+    <ul class="list">
+      <li class="row"><span class="host line1">metrics.icloud.com</span><span class="trail">41</span></li>
+      <li class="row"><span class="host line1">xp.apple.com</span><span class="trail">40</span></li>
+      <li class="row"><span class="host line1">analytics.google.com</span><span class="trail">22</span></li>
+      <li class="row"><span class="host line1">0.rim.sweetradish.biz</span><span class="trail">4</span></li>
+      <li class="row"><span class="host line1">analyticsdata.googleapis.com</span><span class="trail">2</span></li>
+      <li class="row"><span class="host line1">api.consentjs.datagrail.io</span><span class="trail">2</span></li>
+    </ul>
+  </section>
+
+  <p class="foot t-caption">Computed on this Mac from the guard ledger, the DNS filter's log and local probes. Nothing is sent anywhere.</p>
+</div>
+</body>
+</html>

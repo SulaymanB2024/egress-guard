@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: scanner-link interstitial</title>
+<link rel="stylesheet" href="../tokens.css">
+<style>
+  .bar { display: flex; align-items: center; gap: var(--s2); height: 48px; padding: 0 var(--s5); font-weight: var(--w-strong); }
+  .page { max-width: 560px; margin: 0 auto; padding: var(--s8) var(--s5) var(--s7); display: flex; flex-direction: column; }
+  .kind { display: flex; align-items: center; gap: var(--s2); color: var(--muted); }
+  h1 { margin-top: var(--s3); }
+  .dest { margin-top: var(--s5); }
+  .dest .label { color: var(--muted); }
+  .dest .h { margin-top: var(--s1); font-size: var(--t-title); line-height: var(--lh-title); font-weight: var(--w-strong); overflow-wrap: anywhere; }
+  .dest .url { margin-top: var(--s1); color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); overflow-wrap: anywhere; }
+  .callout { margin-top: var(--s5); }
+  .callout .strong { color: var(--state); }
+  .actions { margin-top: var(--s6); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+  @media (max-width: 480px) { .bar { padding: 0 var(--s4); } .page { padding: var(--s6) var(--s4); } .actions .btn { width: 100%; } }
+</style>
+</head>
+<body>
+<header class="bar"><span class="mark" aria-hidden="true"></span>Egress Guard</header>
+
+<main class="page" id="scan" aria-labelledby="t">
+  <p class="kind">Mail scanner link</p>
+  <h1 id="t" class="t-headline">Open this link through Microsoft Defender?</h1>
+  <div class="dest">
+    <p class="label">It leads to</p>
+    <p class="h host" id="host">calendar.partner-workspace.example.com</p>
+    <p class="url host" id="url">https://calendar.partner-workspace.example.com/invite/accept?event=8f2c91d0-quarterly-review&amp;tz=America%2FChicago</p>
+  </div>
+  <div class="callout" data-state="reduced" id="idn" hidden>
+    <p><span class="strong">Look-alike letters.</span> This name displays as <b>pаypal.com</b> but opens the address above.</p>
+  </div>
+  <div class="actions">
+    <button class="btn primary lg" autofocus>Continue through Defender</button>
+    <button class="btn lg">Open directly</button>
+  </div>
+</main>
+
+<main class="page" id="unread" aria-labelledby="t2" hidden>
+  <p class="kind">Link tracker skipped</p>
+  <h1 id="t2" class="t-headline">This link's destination couldn't be read</h1>
+  <div class="dest">
+    <p class="label">The link was</p>
+    <p class="url host" style="font-size:var(--t-body);line-height:var(--lh-body);color:var(--ink)">https://click.mail.example-retailer.com/ls/click?upn=u001.Zm9vYmFyLWVuY29kZWQtcGF5bG9hZC10aGF0LWNhbm5vdC1iZS1kZWNvZGVk</p>
+  </div>
+  <p style="margin-top:var(--s5)">Egress Guard did not contact the tracker.</p>
+  <div class="actions">
+    <button class="btn primary lg" autofocus>Go back</button>
+    <button class="btn quiet">Copy link</button>
+  </div>
+</main>
+<script>
+  const h = location.hash;
+  if (h === "#idn") {
+    document.getElementById("idn").hidden = false;
+    document.getElementById("host").textContent = "xn--pypal-4ve.com";
+    document.getElementById("url").textContent = "https://xn--pypal-4ve.com/signin?session=expired";
+  }
+  if (h === "#unread") { document.getElementById("scan").hidden = true; document.getElementById("unread").hidden = false; }
+</script>
+</body>
+</html>
