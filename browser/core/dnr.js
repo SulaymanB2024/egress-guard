@@ -197,7 +197,7 @@
     "afterpay.com", "shop.app", "pay.google.com", "apple-pay-gateway.apple.com",
     // sign-in
     "accounts.google.com", "apis.google.com", "appleid.apple.com", "appleid.cdn-apple.com", "login.microsoftonline.com",
-    "login.live.com", "auth0.com", "okta.com", "oktacdn.com", "clerk.com", "clerk.accounts.dev", "github.com", "githubassets.com",
+    "login.live.com", "msftauth.net", "msauth.net", "lgincdnmsftuswe2.azureedge.net", "lgincdn.azureedge.net", "ssl.gstatic.com", "auth0.com", "okta.com", "oktacdn.com", "clerk.com", "clerk.accounts.dev", "github.com", "githubassets.com",
     // captcha and bot checks (blocking them locks the user out)
     "recaptcha.net", "hcaptcha.com", "challenges.cloudflare.com", "arkoselabs.com", "funcaptcha.com",
     // public script CDNs (they host libraries, not trackers)

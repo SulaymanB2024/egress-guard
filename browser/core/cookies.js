@@ -6,7 +6,7 @@
  * login, a cart, a consent choice or a preference, so removing them changes what trackers can link, not what the site
  * does. Scripts that set them again get a fresh, unlinked value each time.
  *   remove   deleted at once.
- *   session  rewritten without an expiry (gone when Chrome closes): ids some sign-in flows also read (Microsoft MUID).
+ *   session  rewritten without an expiry (gone when Chrome closes). No pattern uses it today (see MUID below).
  * Reviewed against the vendors' own cookie documentation; consent-manager cookies (OptanonConsent, CookieConsent,
  * euconsent-v2, _iub_cs, …) are never touched, and neither is anything not matched here. */
 (function (root) {
@@ -20,7 +20,8 @@
     {re: /^IDE$|^test_cookie$|^DSID$/, vendor: "DoubleClick"}, {re: /^FPID$|^FPLC$|^FPGCLAW$|^FPAU$/, vendor: "Google first-party tagging"},
     // Meta, Microsoft, TikTok, Snap, Pinterest, Reddit, LinkedIn, X, Quora
     {re: /^_fbp$|^_fbc$/, vendor: "Meta"}, {re: /^_uetsid$|^_uetvid$|^_uetmsclkid$/, vendor: "Microsoft Advertising"},
-    {re: /^MUID$/, vendor: "Microsoft", action: "session"},
+    // Not MUID: cutting Microsoft's MUID to a session cookie made Bing search render no results (real-site run,
+    // 2026-11-21), and Microsoft sign-in reads it too. Bing's own tracking is blocked by URL instead.
     {re: /^_ttp$|^_tt_enable_cookie$|^ttcsid(_.+)?$/, vendor: "TikTok"}, {re: /^_scid(_r)?$|^_sctr$|^_screload$/, vendor: "Snap"},
     {re: /^_pin_unauth$|^_pinterest_ct_ua$|^_pinterest_ct_rt$|^_epik$|^_derived_epik$/, vendor: "Pinterest"},
     {re: /^_rdt_uuid$|^_rdt_cid$|^_rdt_em$/, vendor: "Reddit"}, {re: /^li_fat_id$|^_li_dcdm_c$|^li_sugr$/, vendor: "LinkedIn"},

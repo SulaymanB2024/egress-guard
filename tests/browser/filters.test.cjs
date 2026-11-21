@@ -306,7 +306,7 @@ test("tracking cookies: analytics, ad and click-id cookies are removed; logins, 
   for (const name of ["_ga", "_ga_ABC123XYZ", "_gid", "_gat_UA-1", "_gcl_au", "_gcl_aw", "_gac_UA-1", "_fbp", "_fbc", "_uetsid", "_uetvid", "_uetmsclkid", "_ttp", "_scid",
     "_pin_unauth", "_hjSessionUser_123", "_hjid", "ajs_anonymous_id", "ajs_user_id", "mp_0123abcd_mixpanel", "amplitude_id_abc", "_clck", "_clsk", "li_fat_id",
     "IDE", "test_cookie", "_rdt_uuid", "_pk_id.1.abcd", "hubspotutk", "__hstc", "_epik", "__utma"]) assert.equal(cookies.classify(name), "remove", name);
-  assert.equal(cookies.classify("MUID"), "session");
+  assert.equal(cookies.classify("MUID"), null, "left alone: session-limiting it broke Bing search");
   for (const name of ["sessionid", "session", "csrftoken", "XSRF-TOKEN", "cart", "user_session", "_gh_sess", "OptanonConsent", "euconsent-v2", "CookieConsent", "theme",
     "prefs", "SID", "HSID", "__Secure-3PSID", "_gaz", "ga", "_g", "lang", "_shopify_y", "", null]) assert.equal(cookies.classify(name), null, String(name));
 });

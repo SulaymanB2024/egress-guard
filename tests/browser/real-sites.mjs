@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
-import {build, loadLists, defaultFeedsDir} from "../../scripts/build-browser.mjs";
+import {build, loadLists, loadFilters, defaultFeedsDir, defaultFiltersDir} from "../../scripts/build-browser.mjs";
 import {launch, attachWorker, waitFor, sleep, DEFAULT_CHROME} from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -40,7 +40,33 @@ export const SITES = [
   {id: "paypal-signin", kind: "sign-in", url: "https://www.paypal.com/signin"},
   {id: "stripe-checkout", kind: "checkout", url: "https://checkout.stripe.dev/preview"},
   {id: "shopify-store", kind: "checkout", url: "https://www.allbirds.com/cart"},
+  // Server-side tagging and self-hosted analytics on the site's own domain.
+  {id: "stape", kind: "sGTM", url: "https://stape.io/"},
+  {id: "simoahava", kind: "sGTM", url: "https://www.simoahava.com/"},
+  {id: "plausible", kind: "self-hosted", url: "https://plausible.io/"},
+  {id: "posthog", kind: "self-hosted", url: "https://posthog.com/"},
+  {id: "matomo", kind: "self-hosted", url: "https://matomo.org/"},
 ];
+const require = createRequire(import.meta.url);
+const cookieRules = require("../../browser/core/cookies.js");
+const linkRules = require("../../browser/core/links.js");
+const paramRules = require("../../browser/core/params.js");
+// v0.4.0's parameter list, to compare link cleaning before and after.
+const OLD_PARAMS = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "utm_name", "utm_cid", "utm_reader", "utm_referrer",
+  "utm_social", "utm_social-type", "utm_brand", "utm_place", "utm_pubreferrer", "utm_swu", "fbclid", "gclid", "gclsrc", "dclid", "gbraid", "wbraid", "msclkid",
+  "yclid", "twclid", "ttclid", "igshid", "li_fat_id", "mc_eid", "oly_anon_id", "oly_enc_id", "vero_id", "rb_clickid", "s_cid", "wickedid", "epik", "_openstat", "srsltid"]);
+function linkStats(hrefs) {
+  let before = 0, after = 0, unwrapped = 0;
+  for (const href of hrefs) {
+    let u; try { u = new URL(href); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol)) continue;
+    if ([...u.searchParams.keys()].some((k) => OLD_PARAMS.has(k))) before++;
+    let dest = href;
+    if (linkRules.wrapperOf(dest)) { const r = linkRules.unwrap(dest); if (r.url) { dest = r.url; unwrapped++; } }
+    if (dest !== href || paramRules.clean(dest).removed.length) after++;
+  }
+  return {before, after, unwrapped, total: hrefs.length};
+}
 
 // Same generic selectors the extension hides (browser/core/cosmetic.js), plus label text, to count visible ad slots.
 const AD_PROBE = `(() => {
@@ -72,13 +98,15 @@ const CSS_COST = `(() => {
 })()`;
 
 async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle, generic}) {
-  const profile = fs.mkdtempSync(path.join(root, ".cache", `real-${mode}-`));
-  const browser = launch({bin: chromeBin, profile, args: ["--no-proxy-server", "--window-size=1280,900", "--lang=en-US"]});
-  const {cdp, on, evaluate} = browser;
   const out = {};
-  try {
-    let sw = null;
-    if (mode === "extension") {
+  let profile, browser, cdp, on, evaluate, sw;
+  // A wedged headless Chrome (it happens on a few heavy pages) is restarted with a fresh profile and the run goes on.
+  async function start() {
+    profile = fs.mkdtempSync(path.join(root, ".cache", `real-${mode}-`));
+    browser = launch({bin: chromeBin, profile, args: ["--no-proxy-server", "--window-size=1280,900", "--lang=en-US"]});
+    ({cdp, on, evaluate} = browser);
+    sw = null;
+    if (mode !== "control") {
       const loaded = await cdp("Extensions.loadUnpacked", {path: ext});
       if (loaded.id !== extensionId) throw new Error(`unexpected extension id ${loaded.id}`);
       sw = await attachWorker(cdp, extensionId);
@@ -89,9 +117,33 @@ async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle,
       if (!(await waitFor(async () => (await evaluate(sw.sessionId, "chrome.declarativeNetRequest.getEnabledRulesets()")).includes("trackers"), 120000, 1000))) {
         throw new Error("rulesets were not enabled");
       }
+      if (mode === "strict") await evaluate(sw.sessionId, `__EGBackground.handle({type: "set-default-mode", mode: "strict"}, {id: chrome.runtime.id, url: chrome.runtime.getURL("popup.html")})`);
+      // --popup '<json message>' (repeatable in a JSON array): popup actions to apply before the visits, for diagnosis.
+      for (const message of JSON.parse(opt("--popup", "[]"))) {
+        await evaluate(sw.sessionId, `__EGBackground.handle(${JSON.stringify(message)}, {id: chrome.runtime.id, url: chrome.runtime.getURL("popup.html")})`);
+      }
     }
+  }
+  async function stop() { await browser.close(); fs.rmSync(profile, {recursive: true, force: true}); }
+  await start();
+  try {
     for (const site of sites) {
       const rec = {jsErrors: 0, consoleErrors: 0, netErrors: 0, blockedByClient: 0, requests: 0, errorSamples: []};
+      try { await visit(site, rec); } catch (error) {
+        rec.harnessError = String(error.message || error);
+        console.log(`${mode.padEnd(9)} ${site.id.padEnd(16)} harness error (${rec.harnessError}); restarting Chrome`);
+        out[site.id] = rec;
+        await stop().catch(() => {});
+        await start();
+      }
+    }
+  } finally {
+    await stop().catch(() => {});
+  }
+  return out;
+
+  async function visit(site, rec) {
+    {
       const {targetId} = await cdp("Target.createTarget", {url: "about:blank"});
       const session = (await cdp("Target.attachToTarget", {targetId, flatten: true})).sessionId;
       const mine = (fn) => (params, sid) => { if (sid === session) fn(params); };
@@ -116,6 +168,9 @@ async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle,
         const page = await evaluate(session, `({url: location.href, title: document.title.slice(0, 80), text: (document.body && document.body.innerText || "").length})`);
         Object.assign(rec, page, await evaluate(session, AD_PROBE));
         if (mode === "extension") rec.css = await evaluate(session, CSS_COST);
+        rec.links = linkStats(await evaluate(session, "[...document.querySelectorAll('a[href]')].slice(0, 3000).map((a) => a.href)"));
+        const {cookies} = await cdp("Network.getCookies", {}, session);
+        rec.trackerCookies = cookies.filter((c) => cookieRules.classify(c.name)).map((c) => c.name);
       } catch (error) { rec.probeError = String(error.message || error); }
       if (shots) {
         try {
@@ -130,7 +185,10 @@ async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle,
           const log = await __EGBackground.tabLog(tab.id);
           const by = {};
           for (const x of log.items) by[x.list] = (by[x.list] || 0) + x.count;
+          by.linksCleaned = __EGBackground.counts.links.get(tab.id) || 0;
+          by.cookiesRemoved = [...__EGBackground.counts.cookies.values()].reduce((a, b) => a + b, 0);
           by.hosts = [...new Set(log.items.map((x) => x.host))].slice(0, 60);
+          by.items = log.items.filter((x) => x.list !== "trackers" && x.list !== "cname").slice(0, 80).map((x) => x.list + " " + x.type + " " + x.host + x.path);
           return by;
         })`).catch((e) => ({error: String(e.message || e)}));
       }
@@ -139,14 +197,27 @@ async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle,
       console.log(`${mode.padEnd(9)} ${site.id.padEnd(16)} text ${String(rec.text ?? "-").padStart(6)}  js ${rec.jsErrors + rec.consoleErrors}  ` +
         `blocked ${rec.blockedByClient}  slots ${rec.slots ?? "-"}/${rec.labels ?? "-"}${rec.blocked ? `  ${JSON.stringify({...rec.blocked, hosts: undefined})}` : ""}${rec.navError ? `  nav ${rec.navError}` : ""}`);
     }
-  } finally {
-    await browser.close();
-    fs.rmSync(profile, {recursive: true, force: true});
   }
-  return out;
 }
 
-function table(sites, control, ext) {
+function table(sites, control, ext, strict = {}) {
+  const cats = ["trackers", "cname", "threats", "fp-trackers", "easyprivacy", "easylist", "replay", "beacons", "links", "surrogates", "user"];
+  const lines = ["| Site | Kind | Blocked by category (ext) | Links with tracking: v0.4 / now | Tracker cookies control → ext | JS errors control → ext → strict | Text control → ext → strict | Strict blocked | Verdict (ext / strict) |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"];
+  const js = (r) => (r.jsErrors || 0) + (r.consoleErrors || 0);
+  const verdict = (c, e) => e.navError ? `nav error` : !c.text ? "control failed" : e.text / c.text < 0.8 ? "CHECK: text dropped" : "renders";
+  for (const s of sites) {
+    const c = control[s.id] || {}, e = ext[s.id] || {}, t = strict[s.id] || {};
+    const b = e.blocked || {};
+    const byCat = cats.filter((k) => b[k]).map((k) => `${k} ${b[k]}`).join(", ") || "0";
+    const l = c.links || {};
+    lines.push(`| ${s.id} | ${s.kind} | ${byCat} | ${l.before ?? "-"} / ${l.after ?? "-"} | ${(c.trackerCookies || []).length} → ${(e.trackerCookies || []).length} | ${js(c)} → ${js(e)} → ${t.text === undefined ? "-" : js(t)} | ` +
+      `${c.text ?? "-"} → ${e.text ?? "-"} → ${t.text ?? "-"} | ${(t.blocked || {}).strict || 0} | ${verdict(c, e)} / ${t.text === undefined ? "-" : verdict(c, t)} |`);
+  }
+  return lines.join("\n");
+}
+
+function tableOld(sites, control, ext) {
   const lines = ["| Site | Kind | Blocked (trackers / CNAME / threats / user) | JS errors control → ext | Text control → ext | Ad slots + labels control → ext | Verdict |",
     "| --- | --- | --- | --- | --- | --- | --- |"];
   for (const s of sites) {
@@ -175,7 +246,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const work = fs.mkdtempSync(path.join(root, ".cache", "real-build-"));
   try {
     const lists = loadLists(feeds, {log: (m) => console.log(`note: ${m}`)});
-    const built = build({out: path.join(work, "dist"), lists});
+    const filters = await loadFilters(defaultFiltersDir(), {offline: true, log: (m) => console.log(`note: ${m}`)});
+    const built = build({out: path.join(work, "dist"), lists, filters});
     const ext = path.join(work, "dist", "chrome");
     const {GENERIC_SELECTORS} = createRequire(import.meta.url)("../../browser/core/cosmetic.js");
     console.log(`built: ${Object.entries(built.lists).map(([k, v]) => `${k} ${v.domains}`).join(", ")}; ${sites.length} sites; output ${outDir}`);
@@ -183,7 +255,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const results = {};
     for (const mode of modes) results[mode] = await runMode(mode, ctx);
     fs.writeFileSync(path.join(outDir, "results.json"), JSON.stringify({when: new Date().toISOString(), sites, results}, null, 2));
-    const md = table(sites, results.control || {}, results.extension || {});
+    const md = table(sites, results.control || {}, results.extension || {}, results.strict || {});
     fs.writeFileSync(path.join(outDir, "results.md"), md + "\n");
     console.log(`\n${md}\n\nresults: ${path.join(outDir, "results.json")}\nscreenshots: ${shots}`);
   } finally {
