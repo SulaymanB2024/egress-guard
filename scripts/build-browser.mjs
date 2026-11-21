@@ -92,8 +92,10 @@ export function checkFilterBody(spec, body) {
   const text = body.toString("utf8");
   if (spec.kind === "domains") {
     const names = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#") && !l.startsWith("!"));
-    const bad = names.find((n) => !dnsName(n));
-    if (bad !== undefined) throw new Error(`${spec.name} contains an invalid hostname: ${JSON.stringify(bad.slice(0, 80))}`);
+    // A few entries (underscored labels such as "mkt_vis.example") are not host names Chrome rules accept; they are
+    // left out when the list is used. More than 1% of them means the file is not what it should be.
+    const bad = names.filter((n) => !dnsName(n));
+    if (bad.length > names.length / 100) throw new Error(`${spec.name} has ${bad.length} invalid hostnames, e.g. ${JSON.stringify(bad[0].slice(0, 80))}`);
     if (names.length < spec.minimum) throw new Error(`${spec.name} has ${names.length} names, fewer than the minimum of ${spec.minimum}`);
     return {filters: names.length, names};
   }

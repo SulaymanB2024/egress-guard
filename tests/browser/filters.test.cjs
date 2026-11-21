@@ -377,6 +377,11 @@ test("site modes: No scripts blocks every script of the site and adds script-src
   assert.equal(outcome(rules, {url: "https://m.stripe.network/inner.js", initiator: "js.stripe.com", type: "script"}), "none", "functional providers' own frames are not held to Strict");
   for (const r of rules) assert.ok(r.priority === dnr.PRIORITY.mode || r.priority === dnr.PRIORITY.relax);
   assert.deepEqual(dnr.compileModes({sites: {"co.uk": "noscript", "x.example": "bogus"}}).rules, [], "invalid sites and modes compile to nothing");
+  // Allow host under a Strict default applies on that site only.
+  const repaired = dnr.compileModes({defaultMode: "strict", allowHosts: {"tomsguide.com": ["vanilla.futurecdn.net"]}}).rules;
+  assert.equal(outcome(repaired, {url: "https://vanilla.futurecdn.net/main.js", initiator: "www.tomsguide.com", type: "script"}), "none");
+  assert.equal(outcome(repaired, {url: "https://vanilla.futurecdn.net/main.js", initiator: "other.example", type: "script"}), "block");
+  assert.equal(outcome(repaired, {url: "https://ads.vendor.example/x.js", initiator: "www.tomsguide.com", type: "script"}), "block");
 });
 
 test("click-to-load: a held embed loads for one tab after a click; the session rule beats Strict only", () => {

@@ -261,9 +261,14 @@
 
     // Strict: one set for the sites switched to Strict, one for "everything else" when Strict is the default.
     const strictSets = [];
-    if (by.strict.length) strictSets.push({initiatorDomains: by.strict});
+    // Under a Strict default, a site with hosts you allowed (and no level of its own) gets its own Strict rules, so
+    // that its allowances apply there and nowhere else.
+    const strictSites = defaultMode === "strict"
+      ? [...new Set([...by.strict, ...Object.keys(allowHosts).filter((s) => hosts.siteOf(s) === s && !sites[s])])].sort()
+      : by.strict;
+    if (strictSites.length) strictSets.push({initiatorDomains: strictSites});
     if (defaultMode === "strict") {
-      const excluded = [...by.relaxed, ...by.standard, ...by.strict, ...by.noscript, ...FUNCTIONAL_HOSTS.filter((h) => hosts.siteOf(h) === h)];
+      const excluded = [...by.relaxed, ...by.standard, ...strictSites, ...by.noscript, ...FUNCTIONAL_HOSTS.filter((h) => hosts.siteOf(h) === h)];
       strictSets.push({excludedInitiatorDomains: [...new Set(excluded)].sort()});
     }
     for (const scope of [...strictSets, ...(by.noscript.length ? [{initiatorDomains: by.noscript, noscript: true}] : [])]) {
