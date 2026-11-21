@@ -41,13 +41,19 @@ function outcome(all, req) {
   return hit ? hit.action.type : "none";
 }
 
-test("priority ladder: exceptions > user rules > lists > continue-once > threats > site modes > URL filters > params", () => {
+test("priority ladder: exceptions > user rules > lists > continue-once > threats > Relaxed > cleaning > site modes > hand filters > list filters", () => {
   const p = dnr.PRIORITY;
-  assert.ok(p.exception > p.userAllow && p.userAllow > p.userBlock && p.userBlock > p.list && p.list > p.continue && p.continue > p.threat && p.threat > p.params);
+  assert.ok(p.exception > p.userAllow && p.userAllow > p.userBlock && p.userBlock > p.list && p.list > p.continue && p.continue > p.threat && p.threat > p.relax);
   assert.ok(p.gpc > p.exception, "no allow rule can switch Sec-GPC off");
   assert.ok(p.surrogate > p.list && p.surrogate < p.userBlock, "a stub beats the list block, your own block beats the stub");
-  assert.ok(p.threat > p.relax && p.relax > p.mode && p.mode > p.filterImportant && p.filterImportant > p.filterAllow && p.filterAllow > p.filter && p.filter > p.params,
-    "nothing a filter list or a site mode allows reaches the threat list");
+  assert.ok(p.relax > p.embedCookies && p.embedCookies > p.scannerPass && p.scannerPass > p.scanner && p.scanner > p.modeHeaders && p.modeHeaders > p.clean,
+    "Relaxed lifts cleaning; a scanner pass lifts only the scanner redirect and cleaning");
+  assert.ok(p.clean > p.embed && p.embed > p.mode && p.mode > p.hand, "a loaded embed lifts Strict's blocks, not its cookie stripping");
+  assert.ok(p.hand > p.filterImportant && p.filterImportant > p.easyprivacyAllow && p.easyprivacyAllow > p.easyprivacy && p.easyprivacy > p.easylistAllow && p.easylistAllow > p.easylist,
+    "each list's exceptions sit directly above its own blocks; hand-written filters and every cleaning rule sit above all list exceptions");
+  assert.deepEqual(dnr.FILTER_PRIORITY.easylist, {block: p.easylist, allow: p.easylistAllow});
+  assert.deepEqual(dnr.FILTER_PRIORITY.easyprivacy, {block: p.easyprivacy, allow: p.easyprivacyAllow});
+  assert.equal(new Set(Object.values(p)).size, Object.keys(p).length, "one tier per priority");
 });
 
 test("list compiler chunks requestDomains, minimizes subdomains and never blocks navigation for ads/trackers", () => {
@@ -192,13 +198,18 @@ test("an exception shown as \"other\" does not also allow WebSocket, WebTranspor
 test("tracking parameter stripping: exact names, navigations only, only when one is present", () => {
   const all = dnr.compileParams();
   const scopedCount = dnr.SCOPED_PARAMS.reduce((n, s) => n + s.params.length * 2, 0);
-  assert.equal(all.length, dnr.TRACKING_PARAMS.length * 2 + scopedCount + 1, "one path rule (Amazon /ref=)");
+  assert.equal(all.length, dnr.TRACKING_PARAMS.length * 2 + scopedCount + 2, "one path rule (Amazon /ref=) and one unsubscribe-page allow");
   assert.equal(new Set(all.map((r) => r.id)).size, all.length);
   assert.equal(new Set(dnr.TRACKING_PARAMS).size, dnr.TRACKING_PARAMS.length, "no duplicate names");
-  const out = all.filter((r) => !r.condition.requestDomains && !r.condition.regexFilter);
+  const preserve = all.filter((r) => r.action.type === "allow");
+  assert.equal(preserve.length, 1);
+  assert.equal(preserve[0].priority, dnr.PRIORITY.clean, "an allow at the redirect's own priority beats it");
+  const redirects = all.filter((r) => r.action.type === "redirect");
+  const out = redirects.filter((r) => !r.condition.requestDomains && !r.condition.regexFilter);
   const removed = out[0].action.redirect.transform.queryTransform.removeParams;
-  for (const rule of all) {
-    assert.equal(rule.priority, dnr.PRIORITY.params);
+  for (const rule of redirects) {
+    assert.equal(rule.priority, dnr.PRIORITY.clean);
+    assert.ok(rule.condition.excludedRequestDomains.includes("accounts.google.com") && rule.condition.excludedRequestDomains.includes("ads.google.com"), "sign-in and consoles excluded");
     if (rule.action.redirect.regexSubstitution) { assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]); continue; }
     assert.deepEqual(rule.condition.resourceTypes, ["main_frame", "sub_frame"]);
     assert.equal(rule.condition.regexFilter, undefined, "no regex: Chrome caps compiled regex size");
