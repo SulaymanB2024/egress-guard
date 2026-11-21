@@ -135,7 +135,7 @@ class EgressGuard:
         if self.policy is None or not self.policy.enforceable():
             self._deny(flow, 503, "Egress Guard policy unavailable.")
             return False
-        decision = self.policy.decision(host)
+        decision = self.policy.decision(host, flow.request.port)
         if decision["decision"] == "blocked":
             self._event(host, "blocked", decision["source"], transport)
             self._deny(flow, 403, "Blocked by Egress Guard.")

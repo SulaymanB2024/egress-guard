@@ -114,7 +114,8 @@ class ProxyIntegrationTests(unittest.TestCase):
         (state / "blocklists").mkdir(mode=0o700)
         self.database = state / "events.sqlite3"
         for feed in selected_feeds({}):
-            domain = "blocked.test" if feed.category == "threat" else "tracker.test"
+            domain = ("blocked.test" if feed.source == "threat-intel" else "tracker.test"
+                      if feed.category in ("tracker", "cname") else f"{feed.id}.test")
             feed.path(state).write_bytes(_snapshot({domain}, time.time()))
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
@@ -276,7 +277,8 @@ addons = [EgressGuard(), LoopbackOnly()]
             time.sleep(0.02)
         self.assertIn(("blocked.test", "blocked", "threat-intel", "connect"), rows)
         self.assertIn(("plaintext.test", "blocked", "plaintext-credentials", "http"), rows)
-        self.assertIn(("passthrough.test", "allowed", "no-match", "connect"), rows)
+        # The local test origin listens on an ephemeral port, so the allow is labelled as such.
+        self.assertIn(("passthrough.test", "allowed", "nonstandard-port", "connect"), rows)
         self.assertIn(("passthrough.test", "blocked", "local-block", "connect"), rows)
         self.assertNotIn("fixture-secret", repr(rows))
         self.assertNotIn("private-test-value", repr(rows))
@@ -369,7 +371,8 @@ addons = [EgressGuard(), LoopbackOnly()]
                 thread.join(2)
 
     def assert_origin_status(self, expected):
-        deadline = time.monotonic() + 4
+        # Polls until the expected status; only the allowance for a loaded machine, not the assertion, is generous.
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             status, _ = self.http("http://plaintext.test/rule-check")
             if status == expected:

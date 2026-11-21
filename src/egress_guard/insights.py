@@ -20,6 +20,7 @@ import time
 from urllib.parse import quote
 
 from .ledger import HISTORY_MODES, MAX_EVENTS
+from .policy import CATEGORIES as POLICY_CATEGORIES
 
 # Block sources mapped to the categories the dashboard shows. Unknown or future sources fall back
 # to "other" so a new ledger value never breaks the page.
@@ -27,15 +28,23 @@ CATEGORIES = {
     "threats": "Malware and phishing",
     "ads": "Ads and trackers",
     "cname": "Cloaked trackers (CNAME)",
+    "doh": "Encrypted DNS servers",
     "manual": "Your block rules",
     "other": "Other protections",
 }
-SOURCE_CATEGORY = {
-    "threat-intel": "threats", "malware": "threats", "phishing": "threats",
-    "tracker-feed": "ads", "tracker": "ads", "ads": "ads",
-    "cname-feed": "cname", "cname-cloak": "cname",
-    "local-block": "manual",
+# Dashboard category for each policy category (``policy.CATEGORIES`` maps every ledger source to one).
+# Look-alike domains count as threats. Anything not listed here shows as "other".
+_POLICY_TO_DASHBOARD = {
+    "threat": "threats", "malware": "threats", "phishing": "threats", "lookalike": "threats",
+    "ads-trackers": "ads", "cname-cloak": "cname", "doh": "doh", "manual": "manual",
 }
+SOURCE_CATEGORY = {
+    source: _POLICY_TO_DASHBOARD.get(kind, "other") for source, kind in POLICY_CATEGORIES.items()
+}
+# Older ledgers may hold these shorter source names.
+SOURCE_CATEGORY.update({
+    "malware": "threats", "phishing": "threats", "tracker": "ads", "ads": "ads", "cname-cloak": "cname",
+})
 TOP_LIMIT = 8
 THREAT_LIMIT = 5
 DAYS = 7
@@ -54,10 +63,6 @@ def _empty_totals() -> dict:
     return {"blocked": 0, "allowed": 0}
 
 
-def _local_midnight(moment: datetime) -> datetime:
-    return moment.replace(hour=0, minute=0, second=0, microsecond=0)
-
-
 def _base(history: str, now: float) -> dict:
     return {
         "history": history, "generated_at": _iso(now), "day_basis": "local", "dropped": 0,
@@ -66,6 +71,7 @@ def _base(history: str, now: float) -> dict:
         "hourly": None, "daily": None,
         "categories": None, "top_blocked": None, "threats": None,
         "categories_list": [{"id": key, "label": label} for key, label in CATEGORIES.items()],
+        "source_categories": dict(SOURCE_CATEGORY),
     }
 
 
@@ -87,54 +93,97 @@ def read_insights(path: Path, now: float | None = None) -> dict:
         result = _base(history, now)
         result["dropped"] = int(meta["dropped"]) if str(meta.get("dropped", "")).isdigit() else 0
         if history == "full":
-            result.update(_full(connection, now) if "events" in tables else _zero_full(now))
+            result.update(_full(connection, now, meta) if "events" in tables else _zero_full(now))
         elif history == "aggregate":
-            result.update(_aggregate(connection, now) if "daily" in tables else _zero_aggregate(now))
+            result.update(_aggregate(connection, now, meta) if "daily" in tables else _zero_aggregate(now))
         return result
+
+
+def _local_midnight_ts(day) -> float:
+    """Start of the local calendar ``day``, using the zone rules in force on that date."""
+    return datetime(day.year, day.month, day.day).astimezone().timestamp()
 
 
 def _windows(now: float):
     local_now = datetime.fromtimestamp(now).astimezone()
-    today = _local_midnight(local_now)
-    days = [today - timedelta(days=offset) for offset in range(DAYS - 1, -1, -1)]
-    hour = local_now.replace(minute=0, second=0, microsecond=0)
-    hours = [hour - timedelta(hours=offset) for offset in range(23, -1, -1)]
-    return local_now, today, days, hours
+    today_date = local_now.date()
+    dates = [today_date - timedelta(days=offset) for offset in range(DAYS - 1, -1, -1)]
+    days = [_local_midnight_ts(day) for day in dates]
+    hour = int(local_now.replace(minute=0, second=0, microsecond=0).timestamp())
+    # Hour buckets are absolute 3600 s spans, so a 23 or 25 hour day never double counts or drops one.
+    hours = [hour - offset * 3600 for offset in range(23, -1, -1)]
+    return local_now, dates, days, hours
+
+
+def _same_time_yesterday(local_now: datetime, yesterday_start: float) -> float:
+    """Yesterday at the same wall-clock time as ``local_now`` (not 24 elapsed hours earlier)."""
+    day = local_now.date() - timedelta(days=1)
+    wall = datetime(day.year, day.month, day.day, local_now.hour, local_now.minute, local_now.second)
+    return max(yesterday_start, wall.astimezone().timestamp())
+
+
+def _number(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
+
+
+def _floor(meta: dict, oldest, now: float, capped: bool) -> float | None:
+    """Earliest time the ledger can vouch for, or None when that is unknown."""
+    created = _number(meta.get("created"))
+    if created is None:
+        created = oldest  # Ledgers made before the creation time was recorded.
+    elif oldest is not None:
+        created = min(created, oldest)
+    if created is None:
+        return None
+    floor = float(created)
+    retention = _number(meta.get("retention_days"))
+    if retention and retention > 0:
+        floor = max(floor, now - retention * 86400)
+    if capped and oldest is not None:
+        floor = max(floor, oldest)
+    return floor
 
 
 def _zero_full(now: float) -> dict:
-    _, today, days, hours = _windows(now)
+    _, dates, days, hours = _windows(now)
     return {
-        "today": {**_empty_totals(), "start": _iso(today.timestamp())},
+        "today": {**_empty_totals(), "start": _iso(days[-1])},
         "yesterday": {**_empty_totals(), "complete": False},
         "same_time_yesterday": {**_empty_totals(), "complete": False},
-        "hourly": [{"start": _iso(h.timestamp()), **_empty_totals()} for h in hours],
-        "daily": [{"start": _iso(d.timestamp()), "day": d.date().isoformat(), **_empty_totals(), "complete": False}
-                  for d in days],
+        "hourly": [{"start": _iso(h), **_empty_totals(), "complete": False} for h in hours],
+        "daily": [{"start": _iso(ts), "day": date.isoformat(), **_empty_totals(), "complete": False}
+                  for ts, date in zip(days, dates)],
         "categories": {"today": _categories({}), "week": _categories({})},
         "top_blocked": {"today": [], "week": []},
         "threats": {"today": 0, "week": 0, "recent": []},
     }
 
 
-def _full(connection: sqlite3.Connection, now: float) -> dict:
-    local_now, today, days, hours = _windows(now)
+def _full(connection: sqlite3.Connection, now: float, meta: dict) -> dict:
+    local_now, dates, days, hours = _windows(now)
     result = _zero_full(now)
-    week_start = int(days[0].timestamp())
-    today_start = int(today.timestamp())
-    yesterday_start = int((today - timedelta(days=1)).timestamp())
-    elapsed = int(now) - today_start
+    week_start = int(days[0])
+    today_start = int(days[-1])
+    yesterday_start = int(days[-2])
+    same_time_end = int(_same_time_yesterday(local_now, yesterday_start))
 
     oldest, newest, rows = connection.execute("SELECT MIN(ts), MAX(ts), COUNT(*) FROM events").fetchone()
     capped = rows >= MAX_EVENTS
     result["coverage"] = {"oldest": _iso(oldest) if oldest else None, "newest": _iso(newest) if newest else None,
                           "rows": rows, "row_cap": MAX_EVENTS, "capped": capped}
-    # A day is complete only when the retained rows reach back past its start.
-    reaches = (lambda start: oldest is not None and oldest <= start) if capped else (lambda start: True)
+    # A period is complete only when the ledger existed, kept history that long, and (when capped)
+    # still holds rows reaching back to its start.
+    floor = _floor(meta, oldest, now, capped)
+    reaches = lambda start: floor is not None and floor <= start
 
     # Hourly buckets, aligned to the local hour, cover the whole week; days are sums of hours.
-    origin = int(hours[0].timestamp()) - (DAYS - 1) * 86400
-    origin = min(origin, week_start)
+    # Align the origin to the hour grid and put it at or before the start of the week.
+    gap = max(0, hours[0] - week_start)
+    origin = hours[0] - (gap + 3599) // 3600 * 3600
     buckets: dict[int, dict] = {}
     category_today: dict[str, int] = {}
     category_week: dict[str, int] = {}
@@ -161,19 +210,18 @@ def _full(connection: sqlite3.Connection, now: float) -> dict:
         return values
 
     hourly = []
-    for hour in hours:
-        start = int(hour.timestamp())
-        hourly.append({"start": _iso(start), **buckets.get(start, _empty_totals())})
+    for start in hours:
+        hourly.append({"start": _iso(start), **buckets.get(start, _empty_totals()), "complete": reaches(start)})
     daily = []
     for index, day in enumerate(days):
-        start = int(day.timestamp())
-        end = int(days[index + 1].timestamp()) if index + 1 < len(days) else int(now) + 3600
-        daily.append({"start": _iso(start), "day": day.date().isoformat(), **total(start, end),
-                      "complete": reaches(start) and start >= week_start})
+        start = int(day)
+        end = int(days[index + 1]) if index + 1 < len(days) else int(now) + 3600
+        daily.append({"start": _iso(start), "day": dates[index].isoformat(), **total(start, end),
+                      "complete": reaches(start)})
     # Same-time-yesterday is exact rather than hour-bucketed.
     same_time = dict(connection.execute(
         "SELECT decision, COUNT(*) FROM events WHERE ts >= ? AND ts < ? GROUP BY decision",
-        (yesterday_start, yesterday_start + elapsed)).fetchall())
+        (yesterday_start, same_time_end)).fetchall())
     today_totals = dict(connection.execute(
         "SELECT decision, COUNT(*) FROM events WHERE ts >= ? GROUP BY decision", (today_start,)).fetchall())
 
@@ -223,16 +271,16 @@ def _zero_aggregate(now: float) -> dict:
     return {
         "day_basis": "utc",
         "today": {**_empty_totals(), "start": _iso(days[-1])},
-        "yesterday": {**_empty_totals(), "complete": True},
+        "yesterday": {**_empty_totals(), "complete": False},
         "daily": [{"start": _iso(day), "day": datetime.fromtimestamp(day, timezone.utc).date().isoformat(),
-                   **_empty_totals(), "complete": True} for day in days],
+                   **_empty_totals(), "complete": False} for day in days],
         "categories": {"today": _categories({}), "week": _categories({})},
         "top_blocked": {"today": [], "week": []},
         "threats": {"today": 0, "week": 0, "recent": []},
     }
 
 
-def _aggregate(connection: sqlite3.Connection, now: float) -> dict:
+def _aggregate(connection: sqlite3.Connection, now: float, meta: dict) -> dict:
     days = _utc_days(now)
     result = _zero_aggregate(now)
     by_day: dict[int, dict] = {}
@@ -271,7 +319,9 @@ def _aggregate(connection: sqlite3.Connection, now: float) -> dict:
         ranked = sorted(merged.values(), key=lambda item: (-item["count"], item["host"]))[:TOP_LIMIT]
         return [{**item, "last": _iso(item["last"])} for item in ranked]
 
-    complete = lambda day: not result["coverage"]["capped"] or (oldest is not None and oldest <= day)
+    floor = _floor(meta, oldest, now, result["coverage"]["capped"])
+    trimmed = _number(meta.get("trimmed_through"))
+    complete = lambda day: floor is not None and floor <= day and (trimmed is None or day > trimmed)
     result.update({
         "today": {**by_day.get(days[-1], _empty_totals()), "start": _iso(days[-1])},
         "yesterday": {**by_day.get(days[-2], _empty_totals()), "complete": complete(days[-2])},

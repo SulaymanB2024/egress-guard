@@ -5,12 +5,15 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import http.client
+import ipaddress
 import json
 import re
 import sqlite3
 import time
 import urllib.error
 import urllib.request
+from array import array
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,8 +22,11 @@ from egress_guard.http_deadline import DeadlineHTTPHandler, DeadlineHTTPSHandler
 
 HAGEZI = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/"
 ADGUARD = "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/"
-MAX_FEED_BYTES = 32 * 1024 * 1024
-MAX_ENTRIES = 1_000_000
+PHISHING_ARMY = "https://phishing.army/download/phishing-army-domains.txt"
+URLHAUS_FILTER = "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-domains.txt"
+# HaGeZi's full threat feed passes 1.2 million names; leave room for growth.
+MAX_FEED_BYTES = 64 * 1024 * 1024
+MAX_ENTRIES = 3_000_000
 STALE_SECONDS = 48 * 60 * 60
 MAX_CLOCK_SKEW = 24 * 60 * 60
 RESPONSE_SECONDS = 60
@@ -41,13 +47,97 @@ def dns_name(value: object, *, dotted: bool = False) -> str | None:
     return name
 
 
+def ip_literal(value: object) -> str | None:
+    """Return the compressed text of an IP literal, or None for anything else."""
+    if not isinstance(value, str) or "%" in value:
+        return None
+    try:
+        return ipaddress.ip_address(value).compressed
+    except ValueError:
+        return None
+
+
+class HostSet:
+    """A compact, read-only, exact membership set of ASCII hostnames.
+
+    Names are kept as the sorted, newline-separated snapshot text itself, cut into blocks of
+    about 2 KiB at line boundaries. Only each block's first name and start offset are separate
+    objects, so memory is about the text size, instead of roughly 150 bytes per name for a `set`
+    of `str`, and loading creates no per-name objects. A lookup is a C-level bisect over the
+    block index plus a C-level find within one block. Verified snapshots are written sorted.
+    """
+
+    __slots__ = ("_blob", "_starts", "_index", "_count")
+    STRIDE = 2048
+
+    def __init__(self, blob: bytes = b"") -> None:
+        # `blob` must be sorted, de-duplicated, newline-terminated ASCII names.
+        self._blob = blob
+        self._starts = array("I")
+        self._index: list[bytes] = []
+        self._count = blob.count(b"\n")
+        position, size = 0, len(blob)
+        while position < size:
+            self._starts.append(position)
+            self._index.append(blob[position:blob.index(b"\n", position)])
+            boundary = blob.find(b"\n", position + self.STRIDE)
+            if boundary < 0:
+                break
+            position = boundary + 1
+
+    @classmethod
+    def from_names(cls, names) -> HostSet:
+        return cls("".join(name + "\n" for name in sorted(set(names))).encode("ascii"))
+
+    @staticmethod
+    def probes(names: list[str]) -> list[tuple[bytes, bytes, bytes]]:
+        """Encode candidate names once for `first`; each must be ASCII without newlines."""
+        return [(target, target + b"\n", b"\n" + target + b"\n")
+                for target in (name.encode("ascii") for name in names)]
+
+    def first(self, probes: list[tuple[bytes, bytes, bytes]]) -> int | None:
+        """Index of the first probe whose name is in the set, or None."""
+        index, blob, starts = self._index, self._blob, self._starts
+        blocks, size = len(starts), len(blob)
+        for position, (target, line, needle) in enumerate(probes):
+            block = bisect_right(index, target) - 1
+            if block < 0:
+                continue
+            start = starts[block]
+            stop = starts[block + 1] if block + 1 < blocks else size
+            if (blob.startswith(line) if start == 0 else False) or blob.find(needle, start - 1 if start else 0,
+                                                                             stop) >= 0:
+                return position
+        return None
+
+    def __contains__(self, name: object) -> bool:
+        if not isinstance(name, str) or not name.isascii() or "\n" in name:
+            return False
+        return self.first(self.probes([name])) is not None
+
+    def __len__(self) -> int:
+        return self._count
+
+    def clear(self) -> None:
+        self._blob, self._starts, self._index, self._count = b"", array("I"), [], 0
+
+
 @dataclass(frozen=True)
 class Feed:
+    """One fixed upstream list.
+
+    `category` is the policy group (`tracker`, `threat`, `cname` or `doh`). `source` is the
+    ledger reason recorded when this feed decides a block, and `kind` the user-facing category.
+    An `ips` feed may also list IP literals, which match only IP-literal request targets.
+    """
     id: str
     name: str
     url: str
     minimum: int
     category: str
+    source: str = ""
+    kind: str = ""
+    ips: bool = False
 
     @property
     def exact(self) -> bool:
@@ -58,20 +148,29 @@ class Feed:
 
 
 TRACKERS = {
-    tier: Feed(f"hagezi-{tier}", label, HAGEZI + f"{tier}-onlydomains.txt", minimum, "tracker")
+    tier: Feed(f"hagezi-{tier}", label, HAGEZI + f"{tier}-onlydomains.txt", minimum, "tracker",
+               "tracker-feed", "ads-trackers")
     for tier, label, minimum in (
         ("pro", "HaGeZi Multi PRO", 20_000),
         ("pro.plus", "HaGeZi Multi PRO++", 50_000),
         ("ultimate", "HaGeZi Multi Ultimate", 50_000),
     )
 }
-THREATS = Feed(
-    "hagezi-threat-intel",
-    "HaGeZi Threat Intelligence (Medium)",
-    HAGEZI + "tif.medium-onlydomains.txt",
-    100_000,
-    "threat",
-)
+# The medium tier keeps the feed id used before 0.4, so an existing cache stays valid.
+THREAT_TIERS = {
+    "full": Feed("hagezi-threat-intel-full", "HaGeZi Threat Intelligence (Full)",
+                 HAGEZI + "tif-onlydomains.txt", 500_000, "threat", "threat-intel", "threat"),
+    "medium": Feed("hagezi-threat-intel", "HaGeZi Threat Intelligence (Medium)",
+                   HAGEZI + "tif.medium-onlydomains.txt", 100_000, "threat", "threat-intel", "threat"),
+}
+THREATS = THREAT_TIERS["medium"]
+PHISHING = Feed("phishing-army", "Phishing Army", PHISHING_ARMY, 20_000, "threat", "phishing-feed", "phishing")
+# URLhaus malware-distribution hosts and IPs, republished by malware-filter without the popular
+# domains (Tranco, Umbrella and Cloudflare Radar top lists) whose compromised pages URLhaus also lists.
+MALWARE = Feed("urlhaus-filter", "URLhaus malware hosts (malware-filter)", URLHAUS_FILTER, 1_000, "threat",
+               "malware-feed", "malware", ips=True)
+DOH = Feed("hagezi-doh", "HaGeZi encrypted DNS servers", HAGEZI + "doh-onlydomains.txt", 1_000, "doh",
+           "doh-feed", "doh")
 CNAME_FEEDS = tuple(
     Feed(
         f"adguard-cname-{category}",
@@ -79,20 +178,29 @@ CNAME_FEEDS = tuple(
         ADGUARD + f"combined_disguised_{category}_justdomains.txt",
         minimum,
         "cname",
+        "cname-feed",
+        "cname-cloak",
     )
     for category, minimum in (("ads", 1_000), ("trackers", 20_000))
 )
+ALL_FEEDS = (*TRACKERS.values(), *THREAT_TIERS.values(), MALWARE, PHISHING, DOH, *CNAME_FEEDS)
 
 
 def selected_feeds(config: dict) -> tuple[Feed, ...]:
+    """Enabled feeds. Threat feeds run most specific first; that order names the block source."""
     block = config.get("block", {})
     tier = block.get("list_tier", "pro.plus")
     if not isinstance(tier, str) or tier not in TRACKERS:
         raise ValueError("unsupported HaGeZi tracker tier")
-    return (TRACKERS[tier], THREATS, *CNAME_FEEDS) if block.get("cname_protection", True) else (
-        TRACKERS[tier],
-        THREATS,
-    )
+    threat_tier = block.get("threat_tier", "full")
+    if not isinstance(threat_tier, str) or threat_tier not in THREAT_TIERS:
+        raise ValueError("unsupported HaGeZi threat tier")
+    selected = [TRACKERS[tier], MALWARE, PHISHING, THREAT_TIERS[threat_tier]]
+    if block.get("block_encrypted_dns", True):
+        selected.append(DOH)
+    if block.get("cname_protection", True):
+        selected.extend(CNAME_FEEDS)
+    return tuple(selected)
 
 
 def _published_at(text: str) -> float | None:
@@ -101,9 +209,10 @@ def _published_at(text: str) -> float | None:
             if line.startswith("# Last modified: "):
                 stamp = dt.datetime.strptime(line.removeprefix("# Last modified: ").strip(), "%d %b %Y %H:%M UTC")
                 return stamp.replace(tzinfo=dt.timezone.utc).timestamp()
-            if line.startswith("# TimeUpdated: "):
-                stamp = dt.datetime.fromisoformat(line.removeprefix("# TimeUpdated: ").strip())
-                return stamp.timestamp() if stamp.tzinfo else None
+            for prefix in ("# TimeUpdated: ", "# Generated: ", "# Updated: "):
+                if line.startswith(prefix):
+                    stamp = dt.datetime.fromisoformat(line.removeprefix(prefix).strip())
+                    return stamp.timestamp() if stamp.tzinfo else None
         except ValueError:
             return None
     return None
@@ -128,7 +237,7 @@ def _parse_feed(data: bytes, feed: Feed) -> tuple[set[str], float | None]:
             continue
         if feed.exact and line.startswith("*."):
             continue
-        if name := dns_name(line, dotted=True):
+        if name := dns_name(line, dotted=True) or (feed.ips and ip_literal(line)):
             names.add(name)
         else:
             skipped += 1
@@ -217,6 +326,7 @@ def _row(state: Path, feed: Feed) -> dict:
         "name": feed.name,
         "url": feed.url,
         "category": feed.category,
+        "kind": feed.kind,
         "entries": entries,
         "updated_at": updated if _valid_clock(updated, now) else None,
         "published_at": published if _valid_clock(published, now) else None,
@@ -232,42 +342,60 @@ def feed_status(state: Path, config: dict | None = None) -> list[dict]:
 
 @dataclass(frozen=True)
 class CachedFeed:
-    """One verified snapshot: its domains and the metadata covered by its digest check."""
-    names: set[str]
+    """One verified snapshot: its domains and the metadata covered by its digest check.
+
+    `names` supports membership tests only; snapshots loaded from disk use a compact `HostSet`.
+    """
+    names: HostSet | set[str]
     sha256: str
     published_at: float | None
     updated_at: float | None
 
 
-def load_cached_feed(state: Path, feed: Feed) -> CachedFeed | None:
-    """Return a verified snapshot, or None when it is missing, unreadable or corrupt."""
+def _verified(state: Path, feed: Feed) -> tuple[bytes, dict, str] | None:
     path = feed.path(state)
     try:
+        # Read the metadata line and the body separately, so the body is never copied.
         with path.open("rb") as file:
-            data = file.read(MAX_FEED_BYTES + 1)
-        meta, newline, contents = data.partition(b"\n")
-        if len(data) > MAX_FEED_BYTES or not newline or not meta.startswith(b"# "):
+            meta = file.readline(4097)
+            contents = file.read(MAX_FEED_BYTES + 1)
+        if (len(meta) + len(contents) > MAX_FEED_BYTES or not meta.endswith(b"\n")
+                or not meta.startswith(b"# ")):
             return None
+        meta = meta[:-1]
         metadata = json.loads(meta[2:])
         if not isinstance(metadata, dict):
             return None
         digest = hashlib.sha256(contents).hexdigest()
         if digest != metadata.get("sha256"):
             return None
-        names = set(contents.decode("ascii").splitlines())
-        if len(names) < feed.minimum or len(names) != metadata.get("entries"):
+        # `_snapshot` writes names sorted, de-duplicated and newline-terminated, and the digest
+        # covers that text, so the newline count is the entry count and the order is searchable.
+        count = contents.count(b"\n")
+        if (not contents.isascii() or (contents and not contents.endswith(b"\n"))
+                or count < feed.minimum or count != metadata.get("entries")):
             return None
     except (OSError, ValueError, RecursionError):
         return None
+    return contents, metadata, digest
+
+
+def load_cached_feed(state: Path, feed: Feed) -> CachedFeed | None:
+    """Return a verified snapshot, or None when it is missing, unreadable or corrupt."""
+    verified = _verified(state, feed)
+    if verified is None:
+        return None
+    contents, metadata, digest = verified
     now = time.time()
     published, updated = metadata.get("published_at"), metadata.get("updated_at")
-    return CachedFeed(names, digest, published if _valid_clock(published, now) else None,
+    return CachedFeed(HostSet(contents), digest, published if _valid_clock(published, now) else None,
                       updated if _valid_clock(updated, now) else None)
 
 
 def read_cached_feed(state: Path, feed: Feed) -> set[str]:
-    snapshot = load_cached_feed(state, feed)
-    return set(snapshot.names) if snapshot else set()
+    """A verified snapshot's names as text, for measurement and tests; empty when unusable."""
+    verified = _verified(state, feed)
+    return set(verified[0].decode("ascii").splitlines()) if verified else set()
 
 
 def _refresh(state: Path, config: dict) -> dict:
