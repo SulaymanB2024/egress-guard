@@ -25,6 +25,7 @@ const isListed = (host) => THREATS.some((d) => host === d || host.endsWith(`.${d
 
 async function worker({stored = fixture, packed = false} = {}) {
   const clock = {now: START};
+  const reloads = [];
   const local = {egressGuard: stored && JSON.parse(JSON.stringify(stored))};
   const session = {};
   const area = (obj) => ({
@@ -37,9 +38,10 @@ async function worker({stored = fixture, packed = false} = {}) {
   const tabMessages = [];
   const chrome = {
     // With use_dynamic_url, getURL returns the per-session origin; the extension's own pages still run at EXT.
-    runtime: {id: ID, getURL: (p) => `chrome-extension://4f9e0c2a-dynamic-session/${p}`, onMessage: event()},
+    runtime: {id: ID, getURL: (p) => `chrome-extension://4f9e0c2a-dynamic-session/${p}`, onMessage: event(),
+      getManifest: () => ({...manifest, ...(packed ? {update_url: "https://clients2.google.com/service/update2/crx"} : {})}), reload: () => { reloads.push(clock.now); }},
     storage: {local: area(local), session: area(session)},
-    alarms: {create: (name, info) => alarms.set(name, info), clear: async (name) => alarms.delete(name), onAlarm: event()},
+    alarms: {create: (name, info) => alarms.set(name, info), clear: async (name) => alarms.delete(name), get: async (name) => alarms.get(name), onAlarm: event()},
     tabs: {onUpdated: event(), onRemoved: event(), sendMessage: async (tabId, msg) => { tabMessages.push({tabId, msg}); }, query: async () => [{id: 1, url: "https://publisher.example/article"}]},
     action: {setBadgeBackgroundColor: async () => {}},
     declarativeNetRequest: {
@@ -57,14 +59,16 @@ async function worker({stored = fixture, packed = false} = {}) {
   const fetched = [];
   if (packed) { delete chrome.declarativeNetRequest.onRuleMatchedDebug; delete chrome.declarativeNetRequest.testMatchOutcome; }
   // Only the worker's own packaged ruleset may be fetched (the CSP allows connect-src 'self' and nothing else).
+  const disk = {build: "0".repeat(32)};
   const fetch = async (url) => {
     fetched.push(url);
+    if (url === `${EXT}rules/build.json`) return {ok: true, json: async () => ({...disk})};
     if (url !== `${EXT}rules/threats.json`) throw new Error(`unexpected fetch ${url}`);
     return {ok: true, json: async () => [{id: 1, priority: 2, action: {type: "block"}, condition: {requestDomains: THREATS}}]};
   };
   class FakeDate extends Date { static now() { return clock.now; } }
   const ctx = vm.createContext({chrome, console, URL, Date: FakeDate, crypto: globalThis.crypto, setTimeout, clearTimeout, fetch});
-  ctx.EGLists = {lists: {trackers: {label: "Ads and trackers", name: "HaGeZi Multi PRO++", domains: 4}, threats: {label: "Malware and phishing", name: "HaGeZi Threat Intelligence (Medium)", domains: 2}}};
+  ctx.EGLists = {build: "0".repeat(32), lists: {trackers: {label: "Ads and trackers", name: "HaGeZi Multi PRO++", domains: 4}, threats: {label: "Malware and phishing", name: "HaGeZi Threat Intelligence (Medium)", domains: 2}}};
   for (const file of WORKER) vm.runInContext(read(`browser/${file}`), ctx, {filename: file});
   await ctx.__EGBackground.ready;
   const send = (msg, sender) => new Promise((resolve) => { assert.equal(chrome.runtime.onMessage.fns[0](msg, {id: ID, ...sender}, (r) => resolve(JSON.parse(JSON.stringify(r)))), true); });
@@ -77,7 +81,7 @@ async function worker({stored = fixture, packed = false} = {}) {
   // What the warning page sends: the address it is showing.
   const cont = (blocked = "https://login.bad.example/x?y=1", tabId = 4, shown = blocked, frameId = 0) => warning({type: "continue-once", url: shown}, blocked, tabId, frameId);
   const matched = (tabId, url, type, rulesetId, ruleId = 1) => chrome.declarativeNetRequest.onRuleMatchedDebug.fire({request: {tabId, url, type}, rule: {ruleId, rulesetId}});
-  return {ctx, chrome, clock, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground,
+  return {disk, reloads, ctx, chrome, clock, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground,
     dynamic: () => dynamicRules, sessionRules: () => sessionRules};
 }
 
@@ -269,6 +273,28 @@ test("packed build: popup gets per-list counts from getMatchedRules and says it 
   assert.equal((await w.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/a"})).feedback, "badge");
   const unpacked = await worker();
   assert.equal((await unpacked.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/a"})).feedback, "debug");
+});
+
+test("a rebuilt unpacked extension reloads itself on the hourly check; not while a continue is active; never packed", async () => {
+  const w = await worker();
+  await settle();
+  assert.equal(w.alarms.get("eg-rebuilt").periodInMinutes, 60);
+  const tick = async () => { await w.chrome.alarms.onAlarm.fire({name: "eg-rebuilt"}); await settle(); };
+  await tick();
+  assert.equal(w.reloads.length, 0, "same build on disk: nothing happens");
+  w.disk.build = "f".repeat(32);
+  await w.cont();
+  assert.equal(await w.api.reloadIfRebuilt(), "deferred", "a continue-once session would be lost");
+  await w.chrome.tabs.onUpdated.fire(4, {status: "loading", url: "https://news.example/"}, {});
+  await settle();
+  await tick();
+  assert.equal(w.reloads.length, 1, "newer build on disk: reload");
+  w.disk.build = "<script>";
+  assert.equal(await w.api.reloadIfRebuilt(), "unreadable");
+  const packed = await worker({packed: true});
+  packed.disk.build = "f".repeat(32);
+  assert.equal(await packed.api.reloadIfRebuilt(), "packed");
+  assert.equal(packed.reloads.length, 0);
 });
 
 test("blocked log keeps at most 256 characters of a path", async () => {

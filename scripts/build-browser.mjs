@@ -262,8 +262,17 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, chun
     chromeManifest.declarative_net_request.rule_resources = [...resources,
       ...chromeManifest.declarative_net_request.rule_resources.filter((r) => !dnr.LIST_KINDS[r.id])];
     fs.writeFileSync(path.join(chrome, "rules", "params.json"), JSON.stringify(dnr.compileParams()));
+    // Build identity: a hash of every ruleset and of the list metadata. An unpacked extension reads its own folder
+    // live, so the running worker compares this with rules/build.json on disk and reloads itself after a rebuild.
+    const hash = crypto.createHash("sha256");
+    for (const r of resources) hash.update(fs.readFileSync(path.join(chrome, r.path)));
+    hash.update(JSON.stringify(meta));
+    for (const f of [...SHARED, ...CHROME_ONLY, "background-chrome.js", "manifest.chrome.json"]) hash.update(fs.readFileSync(path.join(SRC, f)));
+    const buildId = hash.digest("hex").slice(0, 32);
+    fs.writeFileSync(path.join(chrome, "rules", "build.json"), JSON.stringify({build: buildId, built_at: Math.floor(Date.now() / 1000)}));
+    summary.build = buildId;
     const worker = [...CHROME_WORKER.map((f) => `// ---- ${f}\n${fs.readFileSync(path.join(SRC, f), "utf8")}`),
-      `// ---- lists (generated)\nglobalThis.EGLists = Object.freeze(${JSON.stringify({extensionId: id, lists: meta})});\n`,
+      `// ---- lists (generated)\nglobalThis.EGLists = Object.freeze(${JSON.stringify({extensionId: id, build: buildId, lists: meta})});\n`,
       `// ---- background-chrome.js\n${fs.readFileSync(path.join(SRC, "background-chrome.js"), "utf8")}`].join("\n");
     fs.writeFileSync(path.join(chrome, "background.js"), worker);
     fs.writeFileSync(path.join(chrome, "manifest.json"), JSON.stringify(chromeManifest, null, 2) + "\n");

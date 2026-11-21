@@ -57,6 +57,20 @@ const AD_PROBE = `(() => {
   return {slots, labels};
 })()`;
 
+// Style-recalc cost of the built-in ad-slot stylesheet: forced full recalcs (a root custom property change) with the
+// sheet enabled and disabled, median of 7 each, plus the element count.
+const CSS_COST = `(() => {
+  const sheet = [...document.querySelectorAll("style[data-eg-page-ui]")][0];
+  if (!sheet) return null;
+  const root = document.documentElement;
+  const recalc = (i) => { root.style.setProperty("--eg-probe", String(i)); const t = performance.now(); void document.body.offsetHeight; getComputedStyle(document.body).color; return performance.now() - t; };
+  const median = (a) => a.sort((x, y) => x - y)[a.length >> 1];
+  const on = [], off = [];
+  for (let i = 0; i < 7; i++) { sheet.disabled = true; recalc(i * 2); off.push(recalc(i * 2 + 1000)); sheet.disabled = false; recalc(i * 2 + 1); on.push(recalc(i * 2 + 2000)); }
+  root.style.removeProperty("--eg-probe");
+  return {onMs: +median(on).toFixed(2), offMs: +median(off).toFixed(2), elements: document.getElementsByTagName("*").length};
+})()`;
+
 async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle, generic}) {
   const profile = fs.mkdtempSync(path.join(root, ".cache", `real-${mode}-`));
   const browser = launch({bin: chromeBin, profile, args: ["--no-proxy-server", "--window-size=1280,900", "--lang=en-US"]});
@@ -71,6 +85,10 @@ async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle,
       if (!sw) throw new Error("service worker did not start");
       await waitFor(async () => (await evaluate(sw.sessionId, "typeof __EGBackground")) === "object", 60000);
       await evaluate(sw.sessionId, "__EGBackground.ready.then(() => true)");
+      // Chrome enables the static rulesets a moment after the worker starts when the lists are large.
+      if (!(await waitFor(async () => (await evaluate(sw.sessionId, "chrome.declarativeNetRequest.getEnabledRulesets()")).includes("trackers"), 120000, 1000))) {
+        throw new Error("rulesets were not enabled");
+      }
     }
     for (const site of sites) {
       const rec = {jsErrors: 0, consoleErrors: 0, netErrors: 0, blockedByClient: 0, requests: 0, errorSamples: []};
@@ -97,6 +115,7 @@ async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle,
         await evaluate(session, `globalThis.__egGeneric = ${JSON.stringify(generic)}; true`);
         const page = await evaluate(session, `({url: location.href, title: document.title.slice(0, 80), text: (document.body && document.body.innerText || "").length})`);
         Object.assign(rec, page, await evaluate(session, AD_PROBE));
+        if (mode === "extension") rec.css = await evaluate(session, CSS_COST);
       } catch (error) { rec.probeError = String(error.message || error); }
       if (shots) {
         try {

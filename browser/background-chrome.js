@@ -221,7 +221,31 @@
     C.storage.session.remove([`log:${tabId}`, `nav:${tabId}`]).catch(() => {});
     dropContinues((c) => c.tabId === tabId).catch(() => {});
   });
+  // ---- picking up a rebuilt extension with no user action ------------------------------------
+  // An unpacked extension's files are read from its folder live. When `node scripts/build-browser.mjs` rewrites that
+  // folder (for example from the same daily job that refreshes the proxy's lists), rules/build.json changes; the
+  // worker notices on its next check and calls runtime.reload(), which re-reads the manifest and re-indexes the
+  // rulesets. No network: the only read is the extension's own file (connect-src 'self'). Packed builds have an
+  // update_url or a store and never change on disk, so they skip this. A reload ends "continue once" exceptions, so
+  // it waits while one is active.
+  const REFRESH_ALARM = "eg-rebuilt";
+  const REFRESH_MINUTES = 60;
+  async function reloadIfRebuilt() {
+    if (!LISTS.build || (C.runtime.getManifest && C.runtime.getManifest().update_url)) return "packed";
+    let onDisk;
+    try { onDisk = await fetch(OWN + "rules/build.json", {cache: "no-store"}).then((r) => r.json()); } catch { return "unreadable"; }
+    if (!onDisk || typeof onDisk.build !== "string" || !/^[0-9a-f]{32}$/.test(onDisk.build)) return "unreadable";
+    if (onDisk.build === LISTS.build) return "current";
+    if ((await continues()).length) return "deferred";
+    C.runtime.reload();
+    return "reloading";
+  }
+  C.alarms.get(REFRESH_ALARM).then((existing) => {
+    if (!existing) C.alarms.create(REFRESH_ALARM, {delayInMinutes: 1, periodInMinutes: REFRESH_MINUTES});
+  }).catch(() => {});
+
   C.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === REFRESH_ALARM) { await reloadIfRebuilt(); return; }
     if (alarm.name !== ALARM) return;
     await ready;
     const now = Date.now();
@@ -355,5 +379,5 @@
     handle(message, sender).then(sendResponse, (error) => sendResponse({error: String(error && error.message || error)}));
     return true;
   });
-  root.__EGBackground = Object.freeze({store, ready, handle, sync, onMatched, tabLog, continues, get sources() { return sources; }});
+  root.__EGBackground = Object.freeze({store, ready, handle, sync, onMatched, tabLog, continues, reloadIfRebuilt, get sources() { return sources; }});
 })(globalThis);
