@@ -278,7 +278,7 @@
         add(null, PRIORITY.mode, {type: "modifyHeaders", requestHeaders: [{header: "cookie", operation: "remove"}], responseHeaders: [{header: "set-cookie", operation: "remove"}]},
           {...scopeWho, domainType: "thirdParty", excludedRequestDomains, resourceTypes: ["sub_frame", "stylesheet", "script", "image", "font", "object", "xmlhttprequest", "ping", "media", "other"]});
         add(null, PRIORITY.mode, {type: "modifyHeaders", requestHeaders: [{header: "referer", operation: "remove"}]},
-          {...scopeWho, domainType: "thirdParty", excludedRequestDomains: [...excludedRequestDomains, "youtube.com", "youtube-nocookie.com"], resourceTypes: ["sub_frame"]});
+          {...scopeWho, domainType: "thirdParty", excludedRequestDomains: [...FUNCTIONAL_HOSTS, "youtube.com", "youtube-nocookie.com"].sort(), resourceTypes: ["sub_frame"]});
       }
     }
     if (by.noscript.length) {

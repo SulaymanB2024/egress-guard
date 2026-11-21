@@ -5,7 +5,7 @@
   "description": "Blocks ads, trackers and malware with locally built lists, strips tracking parameters, and adds per-site rules. No remote code or extension networking.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkwoFe6kgodZ7HIcbFvIhyTZGEDBAYjFOcbhWzwKiwih+g7r2nlVsJ0liOeJNZh3W+ezChEhGnlbecHJYgjh+JdkiMAVEfUzOh/K0/j0wl4vyrKoG2oKFsivq1aZDJj5NDvon1wuI1ls5D5Oxt4GYEBhIK/3I1A75g7jCkGNEGeiYOdA304B8AQjslXiPmFnBPogCFjWxrqkSxob0ZuDEuZY9b0ZhBjSsU9o++tT4NBmR/qCIAv4n2Q2r+5qRqfwRL7xTb1uKZP9HLZfNma5ZCv0W5gpKvLId2+WhKMlR0NeZuPWkd5W0XWkeXRuG52jDM1nMMwSJmd9TRGv24vOKxQIDAQAB",
   "minimum_chrome_version": "128",
-  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback", "storage", "alarms", "cookies", "contextMenus", "offscreen", "clipboardWrite"],
+  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback", "storage", "alarms", "cookies", "contextMenus", "offscreen", "clipboardWrite", "scripting"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": {"service_worker": "background.js"},
   "declarative_net_request": {

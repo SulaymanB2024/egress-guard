@@ -301,7 +301,7 @@ function chromeExtensionId(manifest) {
 const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/params.js", "core/dnr.js", "core/cosmetic.js",
   "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const SURROGATE_FILES = [...new Set(dnr.SURROGATES.map((s) => `surrogates/${s.file}`))];
-const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", ...SURROGATE_FILES];
+const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.js", "page-gpc.js", "page-guard.js", "page-noise.js", "page-noise-key.js", "offscreen.html", "offscreen.js", "core/cookies.js", ...SURROGATE_FILES];
 const CHROME_WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js"];
 export const GUARANTEED_STATIC_RULES = 30000;   // Chrome's GUARANTEED_MINIMUM_STATIC_RULES
 export const MAX_STATIC_REGEX_RULES = 1000;     // Chrome's MAX_NUMBER_OF_REGEX_RULES

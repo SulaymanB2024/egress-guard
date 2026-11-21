@@ -34,6 +34,12 @@
   <label class="default-mode">Default for other sites
     <select id="default-mode"><option value="standard">Standard</option><option value="strict">Strict</option></select>
   </label>
+  <details class="experimental">
+    <summary>Experimental</summary>
+    <label class="check"><input type="checkbox" id="noise"> Fingerprint noise on all sites</label>
+    <label class="check"><input type="checkbox" id="noise-site"> …including this site</label>
+    <p class="note">Adds small per-site, per-session noise to canvas, WebGL and audio readouts. Detectable, and can break drawing apps or some captchas. Off by default.</p>
+  </details>
 </section>
 
 <section class="block" aria-labelledby="list-h">

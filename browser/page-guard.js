@@ -91,7 +91,103 @@
     return false;
   }
   B.runtime.onMessage.addListener(onMessage);
-  B.runtime.sendMessage({type: "guard-config"}).then((reply) => { if (reply && reply.clean === false) enabled = false; }).catch(() => {});
 
-  root.__EGPageGuard = Object.freeze({status: () => ({enabled, cleaned, pingsRemoved}), cleanHref});
+  // ---- Strict and No scripts: click-to-load embeds, no third-party connection hints -------------------------
+  let embeds = [];
+  const PLACEHOLDER = "data-eg-embed";
+  const SCRIPT_EMBEDS = {x: "blockquote.twitter-tweet, blockquote.twitter-video, a.twitter-timeline", instagram: "blockquote.instagram-media",
+    tiktok: "blockquote.tiktok-embed", facebook: "div.fb-post, div.fb-video, div.fb-comments, div.fb-page", disqus: "#disqus_thread"};
+  const hostOf = (u) => { try { return new URL(u, root.location.href).hostname; } catch { return ""; } };
+  const providerOf = (u) => { const h = hostOf(u); return embeds.find((e) => e.domains.some((d) => h === d || h.endsWith(`.${d}`))) || null; };
+
+  function placeholder(provider, onLoad, sizeFrom) {
+    const box = document.createElement("div");
+    box.setAttribute(PLACEHOLDER, provider.id);
+    const shadow = box.attachShadow({mode: "closed"});
+    const style = document.createElement("style");
+    style.textContent = `:host{all:initial;display:block;margin:8px 0}
+      .b{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px;box-sizing:border-box;min-height:120px;padding:16px;border:1px dashed #8a948c;border-radius:8px;background:#f4f4f0;color:#1b1f1d;font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+      .t{font-weight:650}.n{color:#4d5650;font-size:12.5px}
+      button{font:inherit;font-weight:600;border:1px solid #2f6f58;border-radius:6px;padding:6px 12px;color:#fff;background:#19382e;cursor:pointer}
+      button:focus-visible{outline:3px solid #2f6f58;outline-offset:2px}
+      @media (prefers-color-scheme:dark){.b{background:#1d2421;color:#e8ece9;border-color:#5b665f}.n{color:#a9b3ad}}`;
+    const wrap = document.createElement("div");
+    wrap.className = "b";
+    if (sizeFrom) {
+      const w = parseInt(sizeFrom.getAttribute("width"), 10), h = parseInt(sizeFrom.getAttribute("height"), 10);
+      if (w > 0) wrap.style.maxWidth = `${Math.min(w, 2000)}px`;
+      if (h > 0) wrap.style.minHeight = `${Math.min(h, 2000)}px`;
+    }
+    const title = document.createElement("span"); title.className = "t"; title.textContent = `${provider.name} content held`;
+    const note = document.createElement("span"); note.className = "n"; note.textContent = `Loading it lets ${provider.name} see this visit. Held by Egress Guard (Strict).`;
+    const button = document.createElement("button"); button.type = "button"; button.textContent = `Load from ${provider.name}`;
+    button.addEventListener("click", async (event) => {
+      if (!event.isTrusted) return;   // only a real click
+      button.disabled = true;
+      const reply = await B.runtime.sendMessage({type: "load-embed", embed: provider.id}).catch(() => null);
+      if (reply && reply.ok) { box.remove(); onLoad(); } else button.disabled = false;
+    });
+    wrap.append(title, note, button);
+    shadow.append(style, wrap);
+    return box;
+  }
+
+  function holdFrame(frame) {
+    if (frame.hasAttribute("data-eg-held")) return;
+    const provider = providerOf(frame.getAttribute("src") || "");
+    if (!provider) return;
+    const src = frame.getAttribute("src");
+    frame.setAttribute("data-eg-held", "1");
+    const display = frame.style.display;
+    frame.style.display = "none";
+    // A fresh copy navigates for certain; re-setting the same src on a frame that already failed may not.
+    frame.before(placeholder(provider, () => { const fresh = frame.cloneNode(false); fresh.style.display = display; fresh.setAttribute("src", src); frame.replaceWith(fresh); }, frame));
+  }
+
+  function holdScripted() {
+    for (const [id, selector] of Object.entries(SCRIPT_EMBEDS)) {
+      const provider = embeds.find((e) => e.id === id);
+      if (!provider) continue;
+      const blocks = [...document.querySelectorAll(selector)].filter((n) => !n.hasAttribute("data-eg-held"));
+      if (!blocks.length) continue;
+      const scripts = [...document.querySelectorAll("script[src]")].filter((sc) => providerOf(sc.getAttribute("src")) === provider);
+      if (!scripts.length) continue;
+      for (const n of blocks) n.setAttribute("data-eg-held", "1");
+      // One placeholder per provider: loading it re-adds the page's own provider scripts, which render every block.
+      blocks[0].before(placeholder(provider, () => {
+        for (const old of scripts) { const fresh = document.createElement("script"); fresh.src = old.getAttribute("src"); fresh.async = true; document.head.append(fresh); }
+      }, null));
+    }
+  }
+
+  function dropHints(node) {
+    if (node.tagName !== "LINK") return;
+    const rel = (node.getAttribute("rel") || "").toLowerCase();
+    if (!/\b(preconnect|dns-prefetch|prefetch|prerender)\b/.test(rel)) return;
+    if (hostOf(node.getAttribute("href") || "") !== root.location.hostname) node.remove();
+  }
+
+  function holdAll(root0) {
+    for (const f of root0.querySelectorAll ? root0.querySelectorAll("iframe[src]") : []) holdFrame(f);
+    for (const l of root0.querySelectorAll ? root0.querySelectorAll("link[rel]") : []) dropHints(l);
+  }
+  function startStrict() {
+    holdAll(document);
+    new MutationObserver((mutations) => {
+      for (const m of mutations) for (const n of m.addedNodes) {
+        if (n.nodeType !== 1) continue;
+        if (n.tagName === "IFRAME") holdFrame(n); else if (n.tagName === "LINK") dropHints(n); else holdAll(n);
+      }
+    }).observe(document.documentElement, {childList: true, subtree: true});
+    const later = () => holdScripted();
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", later, {once: true}); else later();
+  }
+
+  B.runtime.sendMessage({type: "guard-config"}).then((reply) => {
+    if (!reply) return;
+    if (reply.clean === false) enabled = false;
+    if ((reply.mode === "strict" || reply.mode === "noscript") && Array.isArray(reply.embeds)) { embeds = reply.embeds; startStrict(); }
+  }).catch(() => {});
+
+  root.__EGPageGuard = Object.freeze({status: () => ({enabled, cleaned, pingsRemoved, held: document.querySelectorAll(`[${PLACEHOLDER}]`).length}), cleanHref});
 })(globalThis);

@@ -89,7 +89,7 @@ test("manifest (Chrome): MV3 service worker, DNR rulesets, minimal permissions, 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.background.service_worker, "background.js");
   // cookies: tracking cookies removed as they are set; contextMenus + offscreen + clipboardWrite: "Copy clean link".
-  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "clipboardWrite", "contextMenus", "cookies", "declarativeNetRequest", "declarativeNetRequestFeedback", "offscreen", "storage"]);
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "clipboardWrite", "contextMenus", "cookies", "declarativeNetRequest", "declarativeNetRequestFeedback", "offscreen", "scripting", "storage"]);
   assert.deepEqual(manifest.host_permissions, ["http://*/*", "https://*/*"]);
   // Rulesets are written by the build (scripts/build-browser.mjs); the source manifest lists none.
   assert.deepEqual(manifest.declarative_net_request.rule_resources, []);

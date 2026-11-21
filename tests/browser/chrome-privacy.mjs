@@ -70,8 +70,11 @@ dataLayer.push({event: "x", eventCallback: function () { document.body.dataset.g
 googletag.cmd.push(function () { googletag.defineSlot("/1/x", [300, 250], "ad").addService(googletag.pubads()); googletag.enableServices(); document.body.dataset.gpt = "1"; });
 </script>`,
   "/embeds": () => `<!doctype html><title>embeds</title><p id="t">article with a video</p>
-<iframe id="yt" width="560" height="315" src="http://www.youtube.com/embed/fixture" title="video"></iframe>
-<script src="http://cdn-assets.test:${port}/lib.js"></script><script src="/static/own.js"></script>`,
+<iframe id="yt" width="560" height="315" src="http://disqus.com:${port}/embed/comments/?f=fixture" title="comments"></iframe>
+<script src="http://cdn-assets.test:${port}/lib.js"></script><script src="/static/own.js"></script><script>window.inline = 1;</script>
+<link rel="preconnect" href="http://cdn-assets.test:${port}"><link rel="dns-prefetch" href="//tracker-fixture.test">`,
+  "/frameref": () => `<!doctype html><title>frames</title><iframe id="f" src="http://cdn-assets.test:${port}/framepage"></iframe>`,
+  "/framepage": () => `<!doctype html><title>frame</title><script>new Image().src = "/report?r=" + encodeURIComponent(document.referrer);</script>`,
   "/cookies": () => `<!doctype html><title>cookies</title><script>document.cookie = "_ga=GA1.1.123.456; max-age=63072000; path=/"; document.cookie = "_fbp=fb.1.2.3; max-age=7776000; path=/"; document.cookie = "prefs=dark; max-age=63072000; path=/";</script>`,
   "/clicks": () => `<!doctype html><title>clicks</title><body>
 <a id="tracked" href="http://clean-fixture.test:${port}/dest?utm_source=x&id=3">tracked</a>
@@ -94,7 +97,7 @@ const server = http.createServer((req, res) => {
     const extra = url.pathname === "/refpage" ? {"referrer-policy": "unsafe-url"} : {};
     return send(200, "text/html; charset=utf-8", pages[url.pathname](), extra);
   }
-  if (host === "www.youtube.com") return send(200, "text/html; charset=utf-8", `<!doctype html><p id="player">player</p>`);
+  if (host === "www.youtube.com" || host === "disqus.com") return send(200, "text/html; charset=utf-8", `<!doctype html><p id="player">player</p>`);
   if (url.pathname === "/set3p.gif") return send(200, "image/gif", GIF, {"set-cookie": "tp=1; Path=/; Max-Age=600"});
   if (/\.js$/.test(url.pathname)) return send(200, "text/javascript", `window.loaded = (window.loaded || []).concat(${JSON.stringify(url.pathname)});`);
   if (/\.(gif|png)$/.test(url.pathname) || req.method === "POST") return send(200, "image/gif", GIF);
@@ -102,7 +105,7 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 port = server.address().port;
-const FIXTURE_HOSTS = ["publisher.example", "www.publisher.example", "tracker-fixture.test", "clean-fixture.test", "cdn-assets.test", "www.youtube.com"];
+const FIXTURE_HOSTS = ["publisher.example", "www.publisher.example", "tracker-fixture.test", "clean-fixture.test", "cdn-assets.test", "www.youtube.com", "disqus.com"];
 const P = (p) => `http://publisher.example:${port}${p}`;
 const hitPaths = () => hits.map((h) => `${h.host}${h.path}`);
 
@@ -288,6 +291,68 @@ try {
   const kept = await evaluate(page, "document.cookie");
   check("brake: with cleaning off for the site, its links keep their parameters and its cookies stay", braked && braked.query === "?utm_source=a&id=2" && /_ga=/.test(kept), `${braked && braked.query} | ${kept}`);
   await popupAct(cleanTab, `http://clean-fixture.test:${port}/cookies`, {type: "set-clean", on: true});
+
+  // 7. Site modes: Strict, click-to-load, the one-click repair, No scripts.
+  await popupAct(tabId, P("/embeds"), {type: "set-mode", mode: "strict"});
+  hits.length = 0;
+  await navigate(page, P("/embeds"));
+  await sleep(800);
+  const strictLoaded = await evaluate(page, "window.loaded || []");
+  check("strict: a third-party script is blocked, the site's own script and inline code run", !strictLoaded.includes("/lib.js") && strictLoaded.includes("/static/own.js") && (await evaluate(page, "window.inline")) === 1, strictLoaded.join(","));
+  check("strict: the YouTube frame is held behind a placeholder and Disqus is not contacted", (await evaluate(page, "document.querySelectorAll('[data-eg-embed=disqus]').length")) === 1 && !hits.some((h) => h.host === "disqus.com"));
+  check("strict: third-party connection hints are removed", (await evaluate(page, "document.querySelectorAll('link[rel=preconnect], link[rel=dns-prefetch]').length")) === 0);
+  const strictState = await popupState(tabId, P("/embeds"));
+  check("strict: the popup attributes the block to Strict mode", strictState.blocked.some((b) => b.list === "strict" && b.host === "cdn-assets.test"), JSON.stringify(strictState.blocked.map((b) => `${b.list}:${b.host}`)));
+  // Click the placeholder's button (inside a closed shadow root) with a real mouse event.
+  const {root: domRoot} = await cdp("DOM.getDocument", {depth: -1, pierce: true}, page);
+  const findButton = (node) => { if (node.nodeName === "BUTTON") return node; for (const c of [...(node.children || []), ...(node.shadowRoots || [])]) { const f = findButton(c); if (f) return f; } return null; };
+  const button = findButton(domRoot);
+  const quad = button && (await cdp("DOM.getBoxModel", {backendNodeId: button.backendNodeId}, page)).model.content;
+  if (quad) for (const type of ["mousePressed", "mouseReleased"]) await cdp("Input.dispatchMouseEvent", {type, x: (quad[0] + quad[4]) / 2, y: (quad[1] + quad[5]) / 2, button: "left", clickCount: 1}, page);
+  const embedded = await waitFor(() => hits.some((h) => h.host === "disqus.com" && h.path === "/embed/comments/"), 6000);
+  check("click-to-load: one real click loads the held embed for this page", embedded && (await evaluate(page, "getComputedStyle(document.getElementById('yt')).display")) !== "none",
+    JSON.stringify({button: Boolean(quad), held: await evaluate(page, "document.querySelectorAll('[data-eg-embed]').length"), frames: await evaluate(page, "[...document.querySelectorAll('iframe')].map((f) => f.src + ' ' + f.style.display)"),
+      session: await swEval("chrome.declarativeNetRequest.getSessionRules()"),
+      outcome: await swEval(`chrome.declarativeNetRequest.testMatchOutcome({url: "http://www.youtube.com:${port}/embed/fixture", type: "sub_frame", initiator: "http://publisher.example:${port}", tabId: ${tabId}}).then((r) => r.matchedRules)`).catch((e) => String(e))}));
+  const sessionEmbeds = await swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => r.filter((x) => x.id >= 300000 && x.id < 400000).length)");
+  await navigate(page, P("/embeds"));
+  await sleep(500);
+  const afterNav = await swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => r.filter((x) => x.id >= 300000 && x.id < 400000).length)");
+  check("click-to-load: the allowance ends when the tab navigates", sessionEmbeds === 1 && afterNav === 0, `${sessionEmbeds} -> ${afterNav}`);
+  await popupAct(tabId, P("/embeds"), {type: "strict-allow", host: "cdn-assets.test"});
+  await navigate(page, P("/embeds"));
+  await sleep(600);
+  check("strict: Allow host (the one-click repair) lets that host's script load on this site", (await evaluate(page, "window.loaded || []")).includes("/lib.js"));
+  // 9b: third-party frames get no Referer under Strict, and their document.referrer is empty.
+  hits.length = 0;
+  await navigate(page, P("/frameref?secret=1"));
+  await waitFor(() => hits.some((h) => h.path === "/report"), 5000);
+  const frameHit = hits.find((h) => h.path === "/framepage");
+  const report = hits.find((h) => h.path === "/report");
+  check("strict: a third-party frame's request carries no Referer (its server never learns the embedding page)", frameHit && frameHit.referer === null, String(frameHit && frameHit.referer));
+  // Known limit, reported not asserted: Chrome still gives the frame's own script the embedder's origin
+  // (document.referrer, and location.ancestorOrigins, which no extension can override).
+  console.log(`note: inside the frame, document.referrer was ${report ? decodeURIComponent(report.query.slice(3)) || "(empty)" : "(no report)"}`);
+  await popupAct(tabId, P("/embeds"), {type: "strict-unallow", host: "cdn-assets.test"});
+  await popupAct(tabId, P("/embeds"), {type: "set-mode", mode: "noscript"});
+  await navigate(page, P("/embeds"));
+  await sleep(600);
+  check("no scripts: the site's own script and inline code do not run", ((await evaluate(page, "window.loaded || []")).length === 0) && (await evaluate(page, "window.inline")) === undefined);
+  await popupAct(tabId, P("/embeds"), {type: "set-mode", mode: "default"});
+
+  // 9: experimental fingerprint noise, off by default; stable within a site and session, different across sites.
+  const hashOn = async (url) => { await navigate(page, url); return evaluate(page, "canvasHash()"); };
+  const raw1 = await hashOn(P("/noise"));
+  const raw2 = await hashOn(`http://clean-fixture.test:${port}/noise`);
+  check("noise: off by default (both sites read the true canvas)", raw1 === raw2, `${raw1} ${raw2}`);
+  await popupAct(tabId, P("/noise"), {type: "set-noise", on: true});
+  const a1 = await hashOn(P("/noise"));
+  const a2 = await hashOn(P("/noise"));
+  const b1 = await hashOn(`http://clean-fixture.test:${port}/noise`);
+  check("noise: stable within a site and session, different across sites, never the true value", a1 === a2 && a1 !== b1 && a1 !== raw1 && b1 !== raw1, `${a1} ${a2} ${b1} raw ${raw1}`);
+  await popupAct(tabId, P("/noise"), {type: "set-noise", on: false});
+  const off = await hashOn(P("/noise"));
+  check("noise: switching it off restores the true value", off === raw1, `${off}`);
 
   if (shots) {
     fs.mkdirSync(shots, {recursive: true});

@@ -117,6 +117,10 @@
     const info = MODES.find((m) => m[0] === current);
     $("mode-note").textContent = `${info ? info[2] : ""}${state.siteMode ? "" : " (the default for every site)"}`;
     $("default-mode").value = state.defaultMode === "strict" ? "strict" : "standard";
+    const noise = state.noise || {on: false, site: true};
+    $("noise").checked = noise.on;
+    $("noise-site").checked = noise.on && noise.site;
+    $("noise-site").disabled = !noise.on;
     const allowed = $("strict-allowed");
     allowed.hidden = !(state.strictAllowed && state.strictAllowed.length);
     allowed.replaceChildren(...(state.strictAllowed || []).map((h) => row({verb: "Allowed", text: h, tags: [["third party under Strict", ""]]},
@@ -282,6 +286,8 @@
     });
     $("generic").addEventListener("click", () => act({type: "set-generic", on: !genericOn}));
     $("default-mode").addEventListener("change", (event) => act({type: "set-default-mode", mode: event.target.value}));
+    $("noise").addEventListener("change", (event) => act({type: "set-noise", on: event.target.checked}));
+    $("noise-site").addEventListener("change", (event) => act({type: "set-noise", site: true, on: event.target.checked}));
     $("add-rule").addEventListener("submit", async (event) => {
       event.preventDefault();
       const types = [...$("rule-types").querySelectorAll('input[name="types"]')].filter((b) => b.checked).map((b) => b.value);

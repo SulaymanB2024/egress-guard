@@ -49,6 +49,9 @@ h2 { font-size: 13px; font-weight: 680; letter-spacing: -.01em; margin-bottom: 6
 .default-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
 .default-mode select { font: 12px inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--white); }
 #strict-allowed { margin-top: 4px; }
+.experimental { margin-top: 8px; }
+.experimental summary { font-size: 12px; }
+.experimental .check { display: flex; align-items: center; gap: 6px; color: var(--ink); margin-top: 6px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 details { margin-top: 8px; }
 summary { cursor: pointer; color: var(--accent); font-weight: 620; }

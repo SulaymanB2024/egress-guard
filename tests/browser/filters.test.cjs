@@ -301,6 +301,34 @@ test("link cleaner and DNR rules agree: every name the page cleaner removes has 
   assert.equal(out, "https://www.amazon.com/dp/B000?k=v");
 });
 
+test("tracking cookies: analytics, ad and click-id cookies are removed; logins, carts, consent and preferences are not", () => {
+  const cookies = require("../../browser/core/cookies.js");
+  for (const name of ["_ga", "_ga_ABC123XYZ", "_gid", "_gat_UA-1", "_gcl_au", "_gcl_aw", "_gac_UA-1", "_fbp", "_fbc", "_uetsid", "_uetvid", "_uetmsclkid", "_ttp", "_scid",
+    "_pin_unauth", "_hjSessionUser_123", "_hjid", "ajs_anonymous_id", "ajs_user_id", "mp_0123abcd_mixpanel", "amplitude_id_abc", "_clck", "_clsk", "li_fat_id",
+    "IDE", "test_cookie", "_rdt_uuid", "_pk_id.1.abcd", "hubspotutk", "__hstc", "_epik", "__utma"]) assert.equal(cookies.classify(name), "remove", name);
+  assert.equal(cookies.classify("MUID"), "session");
+  for (const name of ["sessionid", "session", "csrftoken", "XSRF-TOKEN", "cart", "user_session", "_gh_sess", "OptanonConsent", "euconsent-v2", "CookieConsent", "theme",
+    "prefs", "SID", "HSID", "__Secure-3PSID", "_gaz", "ga", "_g", "lang", "_shopify_y", "", null]) assert.equal(cookies.classify(name), null, String(name));
+});
+
+test("cookie and bounce rules: third-party tracker hosts and opaque redirectors lose cookies; the per-site brake lifts only cleaning", () => {
+  const {cookies, bounce} = dnr.compilePrivacy({trackerDomains: ["metrics.vendor.example"], bounceDomains: ["click.shop.example"]});
+  const brake = dnr.compileModes({cleanOff: ["braked.example"]}).rules;
+  const filters = compileText("/collect?v=");
+  const all = [...cookies, ...bounce, ...brake, ...filters, ...dnr.compileParams(), ...dnr.compileLinks(UNWRAP)];
+  const strips = (req) => headerRules(all, req).some((r) => r.action.requestHeaders && r.action.requestHeaders[0].header === "cookie");
+  assert.ok(strips({url: "https://www.facebook.com/plugins/like.php", initiator: "news.example", type: "sub_frame"}));
+  assert.ok(strips({url: "https://metrics.vendor.example/p.js", initiator: "news.example", type: "script"}));
+  assert.ok(!strips({url: "https://www.facebook.com/x", initiator: "www.facebook.com", type: "xmlhttprequest"}), "first party keeps its cookies");
+  assert.ok(!strips({url: "https://accounts.google.com/gsi/iframe", initiator: "news.example", type: "sub_frame"}), "sign-in keeps its cookies");
+  assert.ok(strips({url: "https://t.co/AbC", type: "main_frame"}), "bounce: t.co");
+  assert.ok(strips({url: "https://click.shop.example/aff?id=1", type: "main_frame"}), "bounce: disguised click-through");
+  assert.ok(!strips({url: "https://www.facebook.com/plugins/like.php", initiator: "braked.example", type: "sub_frame"}), "brake: cookies kept on that site");
+  assert.equal(outcome(all, {url: "https://braked.example/a?utm_source=x", type: "main_frame"}), "allow", "brake: no parameter stripping on navigations to it");
+  assert.equal(outcome(all, {url: "https://braked.example/collect?v=1", initiator: "braked.example", type: "ping"}), "block", "brake: URL filters still apply");
+  assert.equal(outcome(all, {url: "https://other.example/a?utm_source=x", type: "main_frame"}), "redirect");
+});
+
 // ---- privacy signals ----
 test("privacy rules: Sec-GPC everywhere above every allow; third-party beacons; Referrer-Policy only tightened", () => {
   const {gpc, referrer, beacons} = dnr.compilePrivacy();

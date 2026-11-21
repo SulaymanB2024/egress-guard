@@ -41,10 +41,13 @@
   // load and on every change; compiled into dynamic rules by dnr.compileModes.
   const MODES_KEY = "egressGuardModes";
   const MAX_MODE_SITES = 2000, MAX_ALLOWED_HOSTS = 50;
-  let modes = {defaultMode: "standard", sites: {}, allowHosts: {}, cleanOff: []};
+  let modes = {defaultMode: "standard", sites: {}, allowHosts: {}, cleanOff: [], noise: false, noiseOff: []};
   let modeKinds = {};               // dynamic rule id -> popup category (or null)
   function cleanModes(value) {
-    const out = {defaultMode: value && value.defaultMode === "strict" ? "strict" : "standard", sites: {}, allowHosts: {}, cleanOff: []};
+    const out = {defaultMode: value && value.defaultMode === "strict" ? "strict" : "standard", sites: {}, allowHosts: {}, cleanOff: [], noise: false, noiseOff: []};
+    out.noise = Boolean(value && value.noise === true);
+    const noiseOff = value && Array.isArray(value.noiseOff) ? value.noiseOff : [];
+    out.noiseOff = [...new Set(noiseOff.filter((s) => hosts.siteOf(s) === s))].slice(0, MAX_MODE_SITES).sort();
     const off = value && Array.isArray(value.cleanOff) ? value.cleanOff : [];
     out.cleanOff = [...new Set(off.filter((s) => hosts.siteOf(s) === s))].slice(0, MAX_MODE_SITES).sort();
     const sites = value && typeof value.sites === "object" && value.sites ? value.sites : {};
@@ -63,6 +66,46 @@
   async function saveModes() { await C.storage.local.set({[MODES_KEY]: modes}); }
   const modeFor = (site) => (site && modes.sites[site]) || modes.defaultMode;
   const cleaningOn = (site) => !(site && modes.cleanOff.includes(site));
+
+  // ---- experimental fingerprint noise: page-noise.js is registered only while it is switched on ----------------
+  const NOISE_ID = "eg-noise";
+  async function syncNoise() {
+    if (!C.scripting || !C.scripting.registerContentScripts) return;
+    const ids = [NOISE_ID, `${NOISE_ID}-key`];
+    const existing = await C.scripting.getRegisteredContentScripts({ids}).catch(() => []);
+    if (existing.length) await C.scripting.unregisterContentScripts({ids: existing.map((x) => x.id)});
+    if (!modes.noise) return;
+    const excludeMatches = modes.noiseOff.flatMap((s) => [`*://${s}/*`, `*://*.${s}/*`]);
+    const common = {matches: ["http://*/*", "https://*/*"], ...(excludeMatches.length ? {excludeMatches} : {}), runAt: "document_start", allFrames: true, persistAcrossSessions: true};
+    await C.scripting.registerContentScripts([{id: `${NOISE_ID}-key`, js: ["core/hosts.js", "page-noise-key.js"], ...common},
+      {id: NOISE_ID, js: ["page-noise.js"], world: "MAIN", ...common}]);
+  }
+
+  // ---- click-to-load embeds: a session allow for one provider in one tab, ended when the tab navigates ----------
+  const EMBED_BASE = 300000;
+  function loadEmbed(embedId, tabId) {
+    return serial(async () => {
+      const list = (await C.storage.session.get("embeds")).embeds || [];
+      const prior = list.find((e) => e.tabId === tabId && e.embed === embedId);
+      if (prior) return prior;
+      const used = new Set(list.map((e) => e.id));
+      let id = EMBED_BASE;
+      while (used.has(id)) id++;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [id], addRules: [dnr.embedRule(id, embedId, tabId)]});
+      const entry = {id, tabId, embed: embedId};
+      await C.storage.session.set({embeds: [...list, entry]});
+      return entry;
+    });
+  }
+  function dropEmbeds(tabId) {
+    return serial(async () => {
+      const list = (await C.storage.session.get("embeds")).embeds || [];
+      const gone = list.filter((e) => e.tabId === tabId);
+      if (!gone.length) return;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.map((e) => e.id)});
+      await C.storage.session.set({embeds: list.filter((e) => e.tabId !== tabId)});
+    });
+  }
 
   // ---- link and cookie cleaning counts (per tab for links, per site for cookies; session storage) ----------
   const counts = {links: new Map(), cookies: new Map()};
@@ -130,7 +173,7 @@
     C.contextMenus.onClicked.addListener((info) => { if (info.menuItemId === MENU) copyClean(info.linkUrl).catch(() => {}); });
   }
 
-  const ready = Promise.all([store.load(), loadGenericOff(), loadModes()]).then(async () => {
+  const ready = Promise.all([store.load(), loadGenericOff(), loadModes().then(() => syncNoise().catch(() => {}))]).then(async () => {
     for (const msg of store.rejected) console.warn("Egress Guard dropped a stored entry:", msg);
     await sync();
   });
@@ -319,6 +362,8 @@
 
   C.tabs.onUpdated.addListener((tabId, info, tab) => {
     if (info.status === "loading") resetTab(tabId, (tab && tab.url) || info.url).catch(() => {});
+    // A loaded embed is for that page only.
+    if (info.status === "loading") dropEmbeds(tabId).catch(() => {});
     if (typeof info.url === "string" && !info.url.startsWith(OWN)) {
       // A "continue once" exception ends when the tab leaves the host it was granted for.
       const host = hosts.hostOfUrl(info.url);
@@ -331,6 +376,7 @@
     counts.links.delete(tabId);
     C.storage.session.remove([`log:${tabId}`, `nav:${tabId}`]).catch(() => {});
     dropContinues((c) => c.tabId === tabId).catch(() => {});
+    dropEmbeds(tabId).catch(() => {});
   });
   // ---- noticing a rebuilt extension folder ---------------------------------------------------
   // An unpacked extension's files are read from its folder live. When `node scripts/build-browser.mjs` rewrites that
@@ -403,8 +449,17 @@
         await store.removeRule(rule.id); await afterChange();
         return {ok: true};
       }
-      case "guard-config":
-        return {clean: Boolean(pageHost) && cleaningOn(hosts.siteOf(pageHost))};
+      case "guard-config": {
+        if (!pageHost) return {clean: false};
+        const mode = modeFor(hosts.siteOf(pageHost));
+        return {clean: cleaningOn(hosts.siteOf(pageHost)), mode, embeds: mode === "strict" || mode === "noscript" ? dnr.EMBEDS.map((e) => ({id: e.id, name: e.name, domains: [...e.domains]})) : []};
+      }
+      case "load-embed": {
+        if (!pageHost || !sender.tab || !Number.isInteger(sender.tab.id)) return {error: "Not a page."};
+        if (!dnr.EMBEDS.some((e) => e.id === message.embed)) return {error: "Bad message."};
+        await loadEmbed(message.embed, sender.tab.id);
+        return {ok: true};
+      }
       case "links-cleaned": {
         const n = Number(message.count);
         if (!pageHost || !Number.isInteger(n) || n < 1 || n > 100) return {error: "Bad message."};
@@ -446,6 +501,7 @@
           categories: Object.fromEntries(Object.entries(dnr.CATEGORIES).filter(([, v]) => v.label).map(([k, v]) => [k, v.label])),
           mode: modeFor(hosts.siteOf(host)), siteMode: modes.sites[hosts.siteOf(host)] || null, defaultMode: modes.defaultMode,
           strictAllowed: [...(modes.allowHosts[hosts.siteOf(host)] || [])],
+          noise: {on: modes.noise, site: !modes.noiseOff.includes(hosts.siteOf(host))},
           cleaning: {on: cleaningOn(hosts.siteOf(host)), links: await countsReady.then(() => counts.links.get(message.tabId) || 0),
             cookies: counts.cookies.get(hosts.siteOf(host)) || 0},
         };
@@ -462,6 +518,18 @@
         return {ok: true, on: message.on};
       }
       case "copy-clean": return copyClean(message.url);
+      case "set-noise": {
+        if (typeof message.on !== "boolean") return {error: "Bad message."};
+        if (message.site) {
+          const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
+          if (!site) return {error: "Open a web page first."};
+          const off = new Set(modes.noiseOff);
+          if (message.on) off.delete(site); else off.add(site);
+          modes.noiseOff = [...off].sort().slice(0, MAX_MODE_SITES);
+        } else modes.noise = message.on;
+        await saveModes(); await syncNoise();
+        return {ok: true};
+      }
       case "set-mode": {
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
         if (!site) return {error: "Open a web page first."};
