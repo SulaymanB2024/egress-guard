@@ -83,6 +83,36 @@ export const FILTER_LISTS = Object.freeze([
 ]);
 const FILTER_MAX_AGE = 24 * 3600;
 const MAX_FILTER_BYTES = 16 * 1024 * 1024;
+// An upstream list is unpinned: a fresh copy whose size, entry count or exception count moved by more than this factor
+// since the last accepted copy (recorded beside its hash in <id>.json) fails the build until someone has looked at it
+// (`--accept-list-change ID`).
+export const LIST_CHANGE_FACTOR = 2;
+// Exceptions and $important filters not anchored to a host are dropped and counted (scripts/lib/abp-dnr.cjs). A few are
+// ordinary list noise; more than this many in one list means the list is not what it should be, and the build stops.
+export const MAX_SUSPICIOUS = 25;
+
+/** Counts recorded beside a list's hash: size, entries, and (filter lists) exception lines. */
+export function listCounts(spec, body) {
+  const text = body.toString("utf8");
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("!") && !l.startsWith("[") && !l.startsWith("#"));
+  return {bytes: body.length, entries: lines.length, exceptions: spec.kind === "domains" ? 0 : lines.filter((l) => l.startsWith("@@")).length};
+}
+
+/** Throws when `next` moved by more than LIST_CHANGE_FACTOR from `prior` on any recorded count. */
+export function checkListChange(spec, prior, next, factor = LIST_CHANGE_FACTOR) {
+  if (!prior) return;
+  for (const key of ["bytes", "entries", "exceptions"]) {
+    const a = Number(prior[key]), b = Number(next[key]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    // Small counts (a handful of exceptions) may double without meaning anything; compare above a floor.
+    const lo = Math.max(Math.min(a, b), 50), hi = Math.max(a, b);
+    if (hi > lo * factor) {
+      const error = new Error(`${spec.name}: ${key} changed from ${a} to ${b} since the last accepted copy (more than ${factor}×). Review the new list, then rebuild with --accept-list-change ${spec.id}`);
+      error.listChange = true;
+      throw error;
+    }
+  }
+}
 
 export function defaultFiltersDir() { return path.join(defaultFeedsDir(), "browser-filters"); }
 
@@ -129,7 +159,8 @@ async function downloadFilter(spec, fetchImpl) {
   const body = Buffer.from(await response.arrayBuffer());
   const head = checkFilterBody(spec, body);
   return {body, meta: {id: spec.id, url: spec.url, sha256: crypto.createHash("sha256").update(body).digest("hex"), bytes: body.length,
-    fetched_at: Math.floor(Date.now() / 1000), version: head.version || null, last_modified: head.last_modified || null, licence: head.licence}};
+    fetched_at: Math.floor(Date.now() / 1000), version: head.version || null, last_modified: head.last_modified || null, licence: head.licence,
+    ...listCounts(spec, body)}};
 }
 
 function writeAtomic(file, data) {
@@ -142,7 +173,7 @@ function writeAtomic(file, data) {
  * The URL filter lists for a build: cached copies younger than a day, otherwise a fresh download (verified, then
  * cached). A failed download falls back to the cache with a warning; with neither, that list is left out.
  */
-export async function loadFilters(dir, {offline = false, log = () => {}, fetchImpl = globalThis.fetch, now = Date.now() / 1000} = {}) {
+export async function loadFilters(dir, {offline = false, log = () => {}, fetchImpl = globalThis.fetch, now = Date.now() / 1000, acceptChange = []} = {}) {
   fs.mkdirSync(dir, {recursive: true, mode: 0o700});
   const out = {};
   for (const spec of FILTER_LISTS) {
@@ -150,12 +181,18 @@ export async function loadFilters(dir, {offline = false, log = () => {}, fetchIm
     try { cached = readCachedFilter(dir, spec); } catch (error) { if (error.code !== "ENOENT") log(`${spec.id} cache unusable: ${error.message}`); }
     let use = cached;
     if (!offline && (!cached || now - cached.meta.fetched_at > FILTER_MAX_AGE)) {
+      let fresh = null;
       try {
-        use = await downloadFilter(spec, fetchImpl);
-        writeAtomic(path.join(dir, `${spec.id}.txt`), use.body);
-        writeAtomic(path.join(dir, `${spec.id}.json`), JSON.stringify(use.meta, null, 2) + "\n");
+        fresh = await downloadFilter(spec, fetchImpl);
       } catch (error) {
         log(`could not download ${spec.name}: ${error.message}${cached ? "; using the cached copy" : ""}`);
+      }
+      if (fresh) {
+        // Compare with the last accepted copy (its counts were recorded beside its hash). A big move fails the build.
+        if (cached && !acceptChange.includes(spec.id)) checkListChange(spec, {...listCounts(spec, cached.body), ...cached.meta}, fresh.meta);
+        writeAtomic(path.join(dir, `${spec.id}.txt`), fresh.body);
+        writeAtomic(path.join(dir, `${spec.id}.json`), JSON.stringify(fresh.meta, null, 2) + "\n");
+        use = fresh;
       }
     }
     if (!use) { log(`${spec.name} is not available: the build has no ${spec.name} rules`); continue; }
@@ -168,9 +205,11 @@ export async function loadFilters(dir, {offline = false, log = () => {}, fetchIm
 /**
  * Compile EasyPrivacy and EasyList into rulesets: "fp-trackers" (EasyPrivacy path filters that match on any host,
  * which is what catches first-party and proxied trackers, plus the hand-written ones), "easyprivacy" (the rest),
- * "easylist", and "filter-allow" (both lists' exceptions). Returns {rulesets: {id: rules}, stats}.
+ * "easylist", and "filter-allow" (both lists' exceptions). Each list's blocks and exceptions sit at that list's own
+ * pair of priorities (dnr.FILTER_PRIORITY), so EasyList's exceptions cannot lift EasyPrivacy's blocks, and no list
+ * exception reaches the hand-written filters or any cleaning rule. Returns {rulesets: {id: rules}, stats}.
  */
-export function compileFilterRulesets(filters) {
+export function compileFilterRulesets(filters, {maxSuspicious = MAX_SUSPICIOUS} = {}) {
   const P = dnr.PRIORITY;
   const sets = {"fp-trackers": dnr.compileHand("fp-trackers"), easyprivacy: [], easylist: [], "filter-allow": [], replay: dnr.compileHand("replay")};
   const stats = {};
@@ -180,10 +219,14 @@ export function compileFilterRulesets(filters) {
     if (!data || spec.kind === "domains") continue;
     const compiled = abp.compileFilters(data.text);
     stats[spec.id] = compiled.stats;
+    if (compiled.stats.suspicious > maxSuspicious) {
+      throw new Error(`${spec.name} has ${compiled.stats.suspicious} exceptions or $important filters not anchored to a host (at most ${maxSuspicious} allowed), e.g. ${JSON.stringify(compiled.stats.suspiciousLines[0])}. Review the list before building.`);
+    }
+    const pri = dnr.FILTER_PRIORITY[spec.id];
     const place = (set, rule, priority) => sets[set].push({id: sets[set].length + 1, priority, ...rule});
-    for (const rule of compiled.block) place(spec.id === "easyprivacy" && generic(rule) ? "fp-trackers" : spec.id, rule, P.filter);
+    for (const rule of compiled.block) place(spec.id === "easyprivacy" && generic(rule) ? "fp-trackers" : spec.id, rule, pri.block);
     for (const rule of compiled.important) place(spec.id, rule, P.filterImportant);
-    for (const rule of compiled.allow) place("filter-allow", rule, P.filterAllow);
+    for (const rule of compiled.allow) place("filter-allow", rule, pri.allow);
   }
   // Hosts the lists block wholesale (folded `||host^` filters): their third-party cookies are stripped whenever a
   // request to them still goes out (an exception, a list's own @@).
@@ -198,6 +241,7 @@ export function compileFilterRulesets(filters) {
 export function filterDomains(filters, id) {
   const data = filters && filters[id];
   if (!data) return [];
+  // core/dnr.js compilePrivacy() takes only subdomains, and never payment, sign-in or console hosts, from this list.
   return data.text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#") && !l.startsWith("!") && dnsName(l));
 }
 
@@ -303,7 +347,7 @@ function chromeExtensionId(manifest) {
 const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/params.js", "core/dnr.js", "core/cosmetic.js",
   "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const SURROGATE_FILES = [...new Set(dnr.SURROGATES.map((s) => `surrogates/${s.file}`))];
-const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.js", "page-gpc.js", "page-guard.js", "page-noise.js", "page-noise-key.js", "offscreen.html", "offscreen.js", "core/cookies.js", ...SURROGATE_FILES];
+const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", ...SURROGATE_FILES];
 const CHROME_WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js"];
 export const GUARANTEED_STATIC_RULES = 30000;   // Chrome's GUARANTEED_MINIMUM_STATIC_RULES
 export const MAX_STATIC_REGEX_RULES = 1000;     // Chrome's MAX_NUMBER_OF_REGEX_RULES
@@ -400,7 +444,8 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
       const stamps = (key) => src.map((s) => s[key]).filter((t) => typeof t === "number");
       meta[kind] = {label: dnr.LIST_KINDS[kind].label, name: joinNames(src.map((s) => s.name)),
         files: parts.map((_, i) => `rules/${i === 0 ? kind : `${kind}-${i + 1}`}.json`),
-        domains: compiled.domains, rules: compiled.rules.length, sources: src.map((s) => ({name: s.name, url: s.url, license: s.license.name})),
+        domains: compiled.domains, rules: compiled.rules.length,
+        sources: src.map((s) => ({name: s.name, url: s.url, license: s.license.name, sha256: s.sha256 || null, last_modified: s.published_at ? new Date(s.published_at * 1000).toISOString() : null})),
         published_at: stamps("published_at").length ? Math.min(...stamps("published_at")) : null,
         updated_at: stamps("updated_at").length ? Math.min(...stamps("updated_at")) : null};
       summary.lists[kind] = {domains: compiled.domains, rules: compiled.rules.length, bytes, files: parts.length};
@@ -434,7 +479,8 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     const sourceOf = (fid) => filters && filters[fid] ? filters[fid].source : null;
     meta.filters = {label: "URL filters", name: joinNames(FILTER_LISTS.filter((f) => sourceOf(f.id) && f.kind !== "domains").map((f) => f.name)),
       rules: Object.entries(compiledFilters.rulesets).reduce((n, [, r]) => n + r.length, 0), domains: 0,
-      sources: FILTER_LISTS.filter((f) => sourceOf(f.id)).map((f) => ({name: f.name, url: f.url, license: f.license.name, version: sourceOf(f.id).version})),
+      sources: FILTER_LISTS.filter((f) => sourceOf(f.id)).map((f) => ({name: f.name, url: f.url, license: f.license.name, version: sourceOf(f.id).version,
+        sha256: sourceOf(f.id).sha256 || null, last_modified: sourceOf(f.id).last_modified || null})),
       published_at: null, updated_at: Math.min(...FILTER_LISTS.map((f) => (sourceOf(f.id) || {}).fetched_at || Infinity)) || null};
     if (!Number.isFinite(meta.filters.updated_at)) meta.filters.updated_at = null;
     // Build identity: a hash of every ruleset and of the list metadata. An unpacked extension reads its own folder
@@ -484,7 +530,8 @@ function parseArgs(argv) {
     else if (a === "--filters") args.filtersDir = path.resolve(next());
     else if (a === "--offline") args.offline = true;
     else if (a === "--no-filters") args.noFilters = true;
-    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing] [--filters DIR] [--offline] [--no-filters]"); process.exit(0); }
+    else if (a === "--accept-list-change") (args.acceptChange = args.acceptChange || []).push(next());
+    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing] [--filters DIR] [--offline] [--no-filters] [--accept-list-change ID]"); process.exit(0); }
     else throw new Error(`unknown argument ${a}`);
   }
   return args;
@@ -509,14 +556,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     let filters = null;
     if (!args.noFilters) {
       filters = await loadFilters(args.filtersDir || (args.feeds ? path.join(args.feeds, "browser-filters") : defaultFiltersDir()),
-        {offline: Boolean(args.offline), log: (m) => console.warn(`warning: ${m}`)});
+        {offline: Boolean(args.offline), acceptChange: args.acceptChange || [], log: (m) => console.warn(`warning: ${m}`)});
     }
     const summary = build({out: args.out, lists, filters, chunk: args.chunk});
     console.log(`Chrome:  ${path.join(summary.out, "chrome")}  (extension id ${summary.extensionId})`);
     for (const [kind, s] of Object.entries(summary.lists)) console.log(`  ${kind.padEnd(8)} ${String(s.domains).padStart(7)} domains in ${s.rules} rules, ${(s.bytes / 1048576).toFixed(1)} MB`);
     for (const [fid, st] of Object.entries(summary.filters || {})) {
       const dropped = Object.values(st.dropped).reduce((a, b) => a + b, 0);
-      console.log(`  ${fid.padEnd(12)} ${st.network} network filters: ${st.converted} converted into ${st.rules} rules, ${dropped} dropped`);
+      console.log(`  ${fid.padEnd(12)} ${st.network} network filters: ${st.converted} converted into ${st.rules} rules, ${dropped} dropped (${st.suspicious} unanchored exceptions or $important)`);
     }
     console.log(`  rulesets: ${Object.entries(summary.rulesets).map(([k, v]) => `${k} ${v}`).join(", ")}`);
     console.log(`  ${summary.staticRules} static rules of ${GUARANTEED_STATIC_RULES} guaranteed, ${summary.regexRules} regex rules of ${MAX_STATIC_REGEX_RULES}`);

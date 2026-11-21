@@ -66,10 +66,13 @@ function headerRules(all, req) {
   return all.filter((r) => r.action.type === "modifyHeaders" && r.priority > ceiling && matches(r, req));
 }
 const withPriority = (rules, priority) => rules.map((r, i) => ({id: i + 1, priority, ...r}));
-function compileText(text) {
+/** Compile ABP text as the build does for one list ("easyprivacy" or "easylist"): its own block / allow pair. */
+function compileText(text, list = "easyprivacy") {
   const c = abp.compileFilters(text);
-  return [...withPriority(c.block, dnr.PRIORITY.filter), ...withPriority(c.important, dnr.PRIORITY.filterImportant), ...withPriority(c.allow, dnr.PRIORITY.filterAllow)];
+  const pri = dnr.FILTER_PRIORITY[list];
+  return [...withPriority(c.block, pri.block), ...withPriority(c.important, dnr.PRIORITY.filterImportant), ...withPriority(c.allow, pri.allow)];
 }
+const strips = (all, req) => headerRules(all, req).some((r) => r.action.requestHeaders && r.action.requestHeaders.some((h) => h.header === "cookie"));
 
 // ---- ABP -> DNR conversion ----
 test("filter conversion: patterns, options, types and party map onto DNR conditions", () => {
@@ -85,7 +88,7 @@ test("filter conversion: patterns, options, types and party map onto DNR conditi
   assert.deepEqual(p("/x$xhr,subdocument,beacon").condition.resourceTypes, ["ping", "sub_frame", "xmlhttprequest"]);
   assert.deepEqual(p("/x$method=post|~get").condition.requestMethods, ["post"]);
   assert.equal(p("/Track$match-case").condition.isUrlFilterCaseSensitive, true);
-  assert.equal(p("/x$important").important, true);
+  assert.equal(p("||x.example/x$important").important, true);
   assert.equal(p("**/pixel*").condition.urlFilter, "/pixel");
   // Regular expressions: kept when RE2 can run them, refused otherwise.
   assert.equal(p("/^https?:\\/\\/[a-z]+\\.example\\/t\\.js/$script").condition.regexFilter, "^https?:\\/\\/[a-z]+\\.example\\/t\\.js");
@@ -113,7 +116,7 @@ test("filter conversion: what DNR cannot express is dropped with a reason, never
   assert.match(p("/ads$domain=~b.*").drop, /entity/);
 });
 
-test("filter conversion: host-only filters fold into requestDomains, exceptions become allow / allowAllRequests, $badfilter removes", () => {
+test("filter conversion: host-only filters fold into requestDomains, exceptions become plain allow (never allowAllRequests), $badfilter removes", () => {
   const text = ["||a.example^", "||b.example^", "||c.example^$third-party", "/collect?v=", "@@||ok.example/collect?v=", "@@||news.example^$document",
     "/drop-me.js", "/drop-me.js$badfilter", "||e.example^$script,important"].join("\n");
   const c = abp.compileFilters(text);
@@ -122,15 +125,40 @@ test("filter conversion: host-only filters fold into requestDomains, exceptions 
   assert.ok(c.block.find((r) => r.condition.domainType === "thirdParty" && r.condition.requestDomains[0] === "c.example"));
   assert.ok(!c.block.some((r) => r.condition.urlFilter === "/drop-me.js"), "$badfilter disables its twin");
   assert.equal(c.stats.dropped["disabled by $badfilter"], 1);
-  assert.deepEqual(c.allow.map((r) => r.action.type).sort(), ["allow", "allowAllRequests"]);
-  assert.deepEqual(c.allow.find((r) => r.action.type === "allowAllRequests").condition.resourceTypes, ["main_frame", "sub_frame"]);
+  assert.deepEqual(c.allow.map((r) => r.action.type), ["allow", "allow"]);
+  const doc = c.allow.find((r) => r.condition.initiatorDomains);
+  assert.deepEqual(doc.condition, {initiatorDomains: ["news.example"]}, "$document: the host's own requests, at the list's exception tier only");
   assert.equal(c.important.length, 1);
   assert.equal(c.stats.network, 9);
+  assert.equal(c.stats.suspicious, 0);
+});
+
+test("hostile list lines: unanchored exceptions and $important filters are dropped and counted, never allow-everything", () => {
+  const bypass = ["@@||*^$document", "@@^$document", "@@|http$document", "@@/./$document", "@@|https://$all", "@@*$document", "@@||com^$document",
+    "@@||co.uk^$document", "@@/ads.js", "@@/ads.js$domain=co.uk", "@@/ads.js$domain=~site.example", "/.*/$important", "|http$important", "@@||site.example/x/*$document"];
+  for (const line of bypass) {
+    const r = abp.parseLine(line);
+    assert.ok(r && r.drop && r.suspicious, `${line} -> ${JSON.stringify(r)}`);
+  }
+  const c = abp.compileFilters(["/collect?v=", ...bypass, "@@||fine.example/collect?v=", "@@/ads.js$domain=site.example", "@@||whole.example^$all"].join("\n"));
+  assert.equal(c.stats.suspicious, bypass.length);
+  assert.equal(c.stats.suspiciousLines.length, bypass.length);
+  assert.ok(c.allow.every((r) => r.action.type === "allow"), "never allowAllRequests");
+  assert.ok(c.allow.every((r) => r.condition.requestDomains || r.condition.initiatorDomains || /^\|\|[a-z0-9.-]+\.[a-z]+/.test(r.condition.urlFilter || "")), "every exception is anchored to a host");
+  // In the model: none of them lets an ordinary tracker request through.
+  const all = compileText(["/collect?v=", ...bypass].join("\n"));
+  for (const initiator of ["news.example", "shop.example"]) {
+    const frame = {url: `https://${initiator}/`, type: "main_frame"};
+    assert.equal(outcome(all, {url: "https://t.example/collect?v=2", initiator, type: "image", frame}), "block", initiator);
+  }
+  // $all allows requests to that host only.
+  const allRule = c.allow.find((r) => r.condition.requestDomains && r.condition.requestDomains.includes("whole.example"));
+  assert.ok(allRule && !allRule.condition.initiatorDomains);
 });
 
 test("exception precedence: a list's @@ lifts its own filters, never $important, host lists, threats, or your rules", () => {
   const filters = compileText(["/collect?v=", "@@||shop.example/collect?v=", "||ads.example/banner$important", "@@||ads.example/banner", "@@||news.example^$document",
-    "@@||evil.example^", "@@||listed.example^"].join("\n"));
+    "@@||evil.example^", "@@||listed.example^"].join("\n"), "easylist");
   const threat = dnr.compileList("threats", ["evil.example"], {warningUrl: "chrome-extension://danbhmcinakkkkbobacafgidgkfibfmg/warning.html"}).rules;
   const list = dnr.compileList("trackers", ["listed.example"]).rules;
   const user = dnr.compileUserState([{id: "u", kind: "request", action: "block", site: "shop.example", host: "shop.example", path: "/collect", types: ["xmlhttprequest"]}], [], 0).rules;
@@ -142,11 +170,46 @@ test("exception precedence: a list's @@ lifts its own filters, never $important,
   assert.equal(outcome(all, req("https://ads.example/banner", "x.example", "image")), "block", "$important beats @@");
   assert.equal(outcome(all, req("https://evil.example/x.js", "x.example", "script")), "block", "@@ never unblocks a threat host");
   assert.equal(outcome(all, req("https://listed.example/x.js", "x.example", "script")), "block", "@@ never unblocks a host-list entry");
-  // $document exceptions lift URL filters for the page, not the host lists or threats.
+  // $document exceptions lift that list's URL filters for the page's own requests, not the host lists or threats.
   const frame = req("https://news.example/", undefined, "main_frame");
   assert.equal(outcome(all, req("https://news.example/collect?v=1", "news.example", "ping", {frame})), "allow");
   assert.equal(outcome(all, req("https://listed.example/p.gif", "news.example", "image", {frame})), "block");
   assert.equal(outcome(all, req("https://evil.example/p.gif", "news.example", "image", {frame})), "block");
+});
+
+test("exception precedence across lists: EasyList's @@ never lifts EasyPrivacy, hand-written or beacon blocks", () => {
+  const easyprivacy = compileText("/collect?v=\n/pixel.gif", "easyprivacy");
+  const easylist = compileText(["/banner.png", "@@||shop.example^$document", "@@||shop.example/collect?v=", "@@||cdn.example/fs.js", "@@||t.example/pixel.gif"].join("\n"), "easylist");
+  const hand = [...dnr.compileHand("replay"), ...dnr.compileHand("fp-trackers")];
+  const {beacons} = dnr.compilePrivacy();
+  const all = [...easyprivacy, ...easylist, ...hand, ...beacons];
+  const frame = {url: "https://shop.example/", type: "main_frame"};
+  const at = (url, type) => outcome(all, {url, initiator: "shop.example", type, frame});
+  assert.equal(at("https://shop.example/banner.png", "image"), "allow", "EasyList's $document exception lifts EasyList's own filter on that site");
+  assert.equal(at("https://shop.example/collect?v=2", "xmlhttprequest"), "block", "but not EasyPrivacy's");
+  assert.equal(outcome(all, {url: "https://t.example/pixel.gif", initiator: "x.example", type: "image"}), "block", "nor an EasyPrivacy block named exactly");
+  assert.equal(at("https://cdn.example/s/fs.js", "script"), "block", "nor a hand-written session-replay filter");
+  assert.equal(at("https://collector.example/e", "ping"), "block", "nor third-party beacon blocking");
+  // The other direction is documented: EasyPrivacy's exceptions sit above EasyList's blocks on one ladder.
+  const ep = compileText("@@||shop.example/banner.png", "easyprivacy");
+  assert.equal(outcome([...easylist, ...ep], {url: "https://shop.example/banner.png", initiator: "x.example", type: "image"}), "allow");
+});
+
+test("exception precedence: no list @@ reaches cookie stripping, bounce stripping, parameter stripping, unwrapping or the Referrer-Policy fix", () => {
+  const lists = [...compileText(["@@||facebook.com^$document", "@@||www.facebook.com/plugins/", "@@||t.co^", "@@||news.example^$document", "@@||news.example/a?", "@@||www.google.com/url?"].join("\n"), "easylist"),
+    ...compileText(["@@||facebook.com^$all", "@@||news.example/a?", "@@||www.google.com^$document"].join("\n"), "easyprivacy")];
+  const {cookies, bounce, referrer} = dnr.compilePrivacy();
+  const all = [...lists, ...cookies, ...bounce, ...referrer, ...dnr.compileParams(), ...dnr.compileLinks(UNWRAP)];
+  assert.ok(strips(all, {url: "https://www.facebook.com/plugins/like.php", initiator: "news.example", type: "sub_frame"}), "tracker-host cookies still stripped");
+  assert.ok(strips(all, {url: "https://t.co/AbC", initiator: "news.example", type: "main_frame"}), "bounce cookies still stripped");
+  assert.equal(outcome(all, {url: "https://news.example/a?utm_source=x", initiator: "news.example", type: "main_frame"}), "redirect", "parameters still stripped");
+  assert.equal(outcome(all, {url: "https://www.google.com/url?q=https%3A%2F%2Fexample.org", initiator: "www.google.com", type: "main_frame"}), "redirect", "unwrapping still on");
+  assert.ok(headerRules(all, {url: "https://news.example/", type: "main_frame"}).some((r) => r.action.responseHeaders && r.action.responseHeaders[0].header === "referrer-policy"));
+  // A timed exception and Relaxed still win over all of it.
+  const exc = dnr.compileUserState([], [{id: "e", site: "news.example", host: "www.facebook.com", path: "/plugins/*", type: "sub_frame", expiresAt: Date.now() + 60000}], Date.now()).rules;
+  assert.ok(!strips([...all, ...exc], {url: "https://www.facebook.com/plugins/like.php", initiator: "news.example", type: "sub_frame"}), "timed exception lifts stripping");
+  const relaxed = dnr.compileModes({sites: {"news.example": "relaxed"}}).rules;
+  assert.ok(!strips([...all, ...relaxed], {url: "https://www.facebook.com/plugins/like.php", initiator: "news.example", type: "sub_frame", frame: {url: "https://news.example/", type: "main_frame"}}), "Relaxed lifts stripping");
 });
 
 test("timed exceptions and Relaxed sites win over URL filters; the threat list is not overridable by either", () => {
@@ -171,7 +234,7 @@ test("hand-written fingerprinting, session-replay and first-party tracker filter
   assert.ok(hit("https://shop.example/fp/tags?org_id=abc&session_id=1", "image"));
   assert.ok(hit("https://shop.example/tr/?id=1234567890&ev=PageView", "image"));
   for (const url of ["https://shop.example/static/app.js", "https://shop.example/s/fonts.js", "https://shop.example/api/event", "https://shop.example/tracking/order?id=1"]) assert.ok(!hit(url), url);
-  for (const rule of rules) assert.equal(rule.priority, dnr.PRIORITY.filter);
+  for (const rule of rules) assert.equal(rule.priority, dnr.PRIORITY.hand);
 });
 
 // ---- link unwrapping ----
@@ -191,9 +254,6 @@ test("link unwrapping: known redirectors yield their destination", () => {
     ["https://disq.us/url?url=https%3A%2F%2Fexample.org%2Fa%3AAbCdEfGhIjKl&cuid=1", "https://example.org/a"],
     ["https://go.redirectingat.com/?id=1&url=https%3A%2F%2Fshop.example%2Fp", "https://shop.example/p"],
     ["https://www.bing.com/ck/a?!&&p=abc&u=a1" + Buffer.from("https://example.org/b?x=1").toString("base64url") + "&ntb=1", "https://example.org/b?x=1"],
-    ["https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.org%2Fdoc%3Fid%3D3&data=05%7C01&sdata=x&reserved=0", "https://example.org/doc?id=3"],
-    ["https://urldefense.proofpoint.com/v2/url?u=https-3A__example.org_path_page-3Fa-3D1&d=DwMF&c=x", "https://example.org/path/page?a=1"],
-    ["https://urldefense.com/v3/__https://example.org/a/b__;!!ABC!def$", "https://example.org/a/b"],
     ["https://r.search.yahoo.com/_ylt=Aw/RV=2/RE=1/RO=10/RU=https%3a%2f%2fexample.org%2fy/RK=2/RS=x-", "https://example.org/y"],
     ["https://www.google.com/amp/s/example.org/news/story.amp", "https://example.org/news/story.amp"],
     ["https://l.messenger.com/l.php?u=https%3A%2F%2Fexample.org%2Fm&h=x", "https://example.org/m"],
@@ -205,10 +265,63 @@ test("link unwrapping: known redirectors yield their destination", () => {
     // repeated parameter: the first usable value wins
     ["https://www.google.com/url?q=&q=https%3A%2F%2Fexample.org%2Ffirst&q=https%3A%2F%2Fevil.example", "https://example.org/first"],
   ];
-  for (const [input, want] of cases) assert.deepEqual(links.unwrap(input).url, want, input);
-  // Nested wrappers are unwrapped all the way.
-  const nested = "https://www.google.com/url?q=" + encodeURIComponent("https://l.facebook.com/l.php?u=" + encodeURIComponent("https://example.org/deep"));
-  assert.deepEqual(links.unwrap(nested), {url: "https://example.org/deep", via: ["google", "facebook"]});
+  // Each from its own site (what the DNR rule's initiatorDomains and the click-time check require).
+  const home = (input) => { const w = links.wrapperOf(input); return w.open ? "anywhere.example" : `www.${w.sites[0]}`; };
+  for (const [input, want] of cases) assert.deepEqual(links.unwrap(input, {from: home(input)}).url, want, input);
+  // Nested wrappers are unwrapped while each layer belongs to the site the click came from (or is open).
+  const deep = (inner) => "https://www.google.com/url?q=" + encodeURIComponent(inner);
+  assert.deepEqual(links.unwrap(deep(deep("https://example.org/deep")), {from: "www.google.com"}), {url: "https://example.org/deep", via: ["google", "google"]});
+  const fb = deep("https://l.facebook.com/l.php?u=" + encodeURIComponent("https://example.org/deep"));
+  assert.deepEqual(links.unwrap(fb, {from: "www.google.com"}), {url: "https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.org%2Fdeep", via: ["google"]},
+    "Facebook's layer keeps Facebook's own check: the click did not come from Facebook");
+  assert.deepEqual(links.unwrap(fb, {from: "www.facebook.com"}).error !== undefined, true, "and Google's outer layer is not unwrapped from Facebook");
+  const aff = deep("https://www.awin1.com/cread.php?ued=" + encodeURIComponent("https://shop.example/p"));
+  assert.deepEqual(links.unwrap(aff, {from: "www.google.com"}), {url: "https://shop.example/p", via: ["google", "awin"]}, "open affiliate layers unwrap anywhere");
+});
+
+test("link unwrapping keeps a redirector's own safety check for links that arrive from anywhere else", () => {
+  const phish = "https://www.google.com/url?q=https%3A%2F%2Fevil.example%2Flogin";
+  for (const from of [null, undefined, "mail.example", "outlook.live.com", "www.google.com.evil.example", "notgoogle.com"]) {
+    assert.ok(links.unwrap(phish, {from}).error, String(from));
+  }
+  assert.equal(links.unwrap(phish, {from: "mail.google.com"}).url, "https://evil.example/login", "Google's own pages (Gmail too) are Google's site");
+  for (const [url, from] of [["https://l.facebook.com/l.php?u=https%3A%2F%2Fevil.example", "evil.example"], ["https://www.linkedin.com/redir/redirect?url=https%3A%2F%2Fevil.example", "mail.example"],
+    ["https://away.vk.com/away.php?to=https%3A%2F%2Fevil.example", "x.example"], ["https://www.youtube.com/redirect?q=https%3A%2F%2Fevil.example", "x.example"]]) {
+    assert.ok(links.unwrap(url, {from}).error, url);
+    assert.ok(!links.allowedFrom(links.wrapperOf(url), from));
+  }
+  for (const w of links.WRAPPERS) assert.ok(w.open ? w.sites.length === 0 : w.sites.length > 0, `${w.id} names its sites or is open`);
+  assert.deepEqual(links.WRAPPERS.filter((w) => w.open).map((w) => w.id).sort(), ["awin", "hrefli", "mandrill", "rakuten", "skimlinks"], "only redirectors with no safety check of their own");
+});
+
+test("mail scanners: never unwrapped automatically; decoded for the interstitial only, IDN shown both ways", () => {
+  const cases = [
+    ["https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.org%2Fdoc%3Fid%3D3&data=05%7C01&sdata=x&reserved=0", "safelinks", "https://example.org/doc?id=3"],
+    ["https://urldefense.proofpoint.com/v2/url?u=https-3A__example.org_path_page-3Fa-3D1&d=DwMF&c=x", "proofpoint2", "https://example.org/path/page?a=1"],
+    ["https://urldefense.com/v3/__https://example.org/a/b__;!!ABC!def$", "proofpoint3", "https://example.org/a/b"],
+    ["https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fexample.org%2fp&c=E,1,x&typo=1", "barracuda", "https://example.org/p"],
+    ["https://imsva91-ctp.trendmicro.com:443/wis/clicktime/v1/query?url=https%3a%2f%2fexample.org%2ft&umid=1&auth=x", "trendmicro", "https://example.org/t"],
+  ];
+  for (const [href, id, url] of cases) {
+    for (const from of [null, "outlook.office.com", "www.google.com"]) assert.ok(links.unwrap(href, {from}).error, `${href} is not a tracker to unwrap`);
+    const s = links.scanned(href);
+    assert.equal(s.scanner.id, id);
+    assert.equal(s.url, url);
+    assert.equal(s.host, "example.org");
+  }
+  const mime = links.scanned("https://protect-eu.mimecast.com/s/AbCdEf?domain=example.org");
+  assert.deepEqual([mime.scanner.id, mime.url, mime.host], ["mimecast", null, "example.org"], "Mimecast: host only, opened through the scanner");
+  assert.equal(links.scanned("https://protect-eu.mimecast.com/s/AbCdEf?domain=javascript:alert(1)").host, null);
+  assert.equal(links.scanned("https://nam02.safelinks.protection.outlook.com/?url=javascript%3Aalert(1)").url, null);
+  assert.equal(links.scanned("https://example.org/?url=https://x.example"), null);
+  const idn = links.scanned("https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2F%D0%B0%D1%80%D1%80%D3%8F%D0%B5.com%2F");
+  assert.equal(idn.host, "xn--80ak6aa92e.com");
+  assert.equal(links.unicodeHost(idn.host), "аррӏе.com");
+  assert.equal(links.unicodeHost("example.org"), null);
+  assert.equal(links.unicodeHost("xn--bcher-kva.example"), "bücher.example");
+  // A tracker that leads to a scanner stops at the scanner.
+  const viaGoogle = "https://www.google.com/url?q=" + encodeURIComponent(cases[0][0]);
+  assert.equal(links.unwrap(viaGoogle, {from: "www.google.com"}).url, cases[0][0]);
 });
 
 test("link unwrapping refuses anything but an absolute http(s) destination, at any depth", () => {
@@ -216,28 +329,28 @@ test("link unwrapping refuses anything but an absolute http(s) destination, at a
     "file:///etc/passwd", "//example.org/x", "/relative", "https://user:pw@example.org/", "https://", " https://example.org", "https://exa\tmple.org", "https://ex\nample.org", "vbscript:x", "HTTPS:example.org"];
   for (const dest of bad) {
     for (const wrap of [(d) => `https://www.google.com/url?q=${encodeURIComponent(d)}`, (d) => `https://l.facebook.com/l.php?u=${encodeURIComponent(d)}`]) {
-      const r = links.unwrap(wrap(dest));
+      const r = links.unwrap(wrap(dest), {from: "www.google.com"});
       assert.ok(r.error, `${dest} -> ${JSON.stringify(r)}`);
     }
   }
   // A good outer layer around a hostile inner one fails as a whole (no partial unwrap that would loop).
   const inner = "https://l.facebook.com/l.php?u=" + encodeURIComponent("javascript:alert(1)");
-  assert.ok(links.unwrap("https://www.google.com/url?q=" + encodeURIComponent(inner)).error);
+  assert.ok(links.unwrap("https://www.google.com/url?q=" + encodeURIComponent(inner), {from: "www.facebook.com"}).error);
   // Too deep.
   let deep = "https://example.org/";
   for (let i = 0; i < 6; i++) deep = "https://www.google.com/url?q=" + encodeURIComponent(deep);
-  assert.match(links.unwrap(deep).error, /too many/);
+  assert.match(links.unwrap(deep, {from: "www.google.com"}).error, /too many/);
   // Not a wrapper, lookalike hosts, malformed input.
   for (const href of ["https://example.org/url?q=https://x.example", "https://www.google.com.evil.example/url?q=https://x.example", "https://evilgoogle.com/url?q=https://x.example",
     "https://www.google.com/search?q=https://x.example", "not a url", "", null, "https://www.bing.com/ck/a?u=a1!!!", "https://www.bing.com/ck/a?u=a1" + Buffer.from("javascript:alert(1)").toString("base64url")]) {
     assert.ok(links.unwrap(href).error, String(href));
   }
-  for (const r of [links.unwrap("https://www.google.com/url?q=https%3A%2F%2Fexample.org%2F%23frag")]) assert.equal(r.url, "https://example.org/#frag");
+  for (const r of [links.unwrap("https://www.google.com/url?q=https%3A%2F%2Fexample.org%2F%23frag", {from: "www.google.com"})]) assert.equal(r.url, "https://example.org/#frag");
 });
 
 test("link unwrapping DNR rules: main frame only, redirect to the unwrap page, RE2-safe, and the same patterns as the page", () => {
   const rules = dnr.compileLinks(UNWRAP);
-  assert.equal(rules.length, links.WRAPPERS.length);
+  assert.equal(rules.length, links.WRAPPERS.length + links.SCANNERS.length);
   assert.throws(() => dnr.compileLinks("https://example.org/unwrap.html"));
   for (const r of rules) {
     assert.deepEqual(r.condition.resourceTypes, ["main_frame"]);
@@ -245,16 +358,34 @@ test("link unwrapping DNR rules: main frame only, redirect to the unwrap page, R
     assert.ok(abp.re2Compatible(r.condition.regexFilter), r.condition.regexFilter);
     assert.ok(r.condition.regexFilter.length < 400);
   }
-  const fires = (url) => rules.some((r) => matches(r, {url, type: "main_frame"}));
+  const fires = (url, initiator = "www.google.com") => rules.some((r) => matches(r, {url, initiator, type: "main_frame"}));
   assert.ok(fires("https://www.google.com/url?q=https%3A%2F%2Fexample.org"));
   assert.ok(!fires("https://www.google.com/url?q=javascript%3Aalert(1)"), "a non-http destination is never even redirected");
   assert.ok(!fires("https://www.google.com/search?q=https%3A%2F%2Fexample.org"));
-  assert.ok(!rules.some((r) => matches(r, {url: "https://www.google.com/url?q=https%3A%2F%2Fexample.org", type: "sub_frame"})));
-  // Mail security rewriters are unwrapped at the owner's request (documented: it skips the employer's click-time scan).
-  assert.ok(fires("https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.org&data=x"));
-  assert.ok(fires("https://urldefense.proofpoint.com/v2/url?u=https-3A__example.org_a&d=x"));
-  // Mimecast links are opaque: never a rule, never an unwrap.
-  assert.ok(!fires("https://protect-eu.mimecast.com/s/AbCdEf?domain=example.org") && links.unwrap("https://protect-eu.mimecast.com/s/AbCdEf?domain=example.org").error);
+  assert.ok(!rules.some((r) => matches(r, {url: "https://www.google.com/url?q=https%3A%2F%2Fexample.org", initiator: "www.google.com", type: "sub_frame"})));
+  // From anywhere but the redirector's own site (a mail client, another site, the address bar): left alone.
+  for (const initiator of [null, "mail.example", "outlook.live.com", "evil.example"]) {
+    assert.ok(!fires("https://www.google.com/url?q=https%3A%2F%2Fevil.example", initiator), String(initiator));
+    assert.ok(!fires("https://l.facebook.com/l.php?u=https%3A%2F%2Fevil.example", initiator), String(initiator));
+  }
+  assert.ok(fires("https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.org", "www.facebook.com"));
+  assert.ok(fires("https://www.awin1.com/cread.php?ued=https%3A%2F%2Fshop.example", "blog.example"), "open affiliate redirectors from anywhere");
+  // Mail security scanners: always to the interstitial (never unwrapped), from anywhere, above the cleaning tier.
+  for (const url of ["https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.org&data=x", "https://urldefense.proofpoint.com/v2/url?u=https-3A__example.org_a&d=x",
+    "https://protect-eu.mimecast.com/s/AbCdEf?domain=example.org", "https://linkprotect.cudasvc.com/url?a=https%3a%2f%2fexample.org"]) {
+    const hit = rules.filter((r) => matches(r, {url, type: "main_frame"}));
+    assert.equal(hit.length, 1, url);
+    assert.equal(hit[0].priority, dnr.PRIORITY.scanner);
+    assert.equal(outcome([...rules, ...dnr.compileParams()], {url: url + "&utm_source=x", type: "main_frame"}), "redirect");
+  }
+  // "Continue through the scanner": one session allow for that tab and that scanner host, above the redirect.
+  const pass = dnr.scannerPassRule(200000, "nam02.safelinks.protection.outlook.com", 7);
+  const all = [...rules, ...dnr.compileParams(), pass];
+  const safe = "https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.org&data=x&utm_source=y";
+  assert.equal(outcome(all, {url: safe, type: "main_frame", tabId: 7}), "allow", "the scanner gets its own address, untouched");
+  assert.equal(outcome(all, {url: safe, type: "main_frame", tabId: 8}), "redirect", "other tabs still see the interstitial");
+  assert.ok(pass.priority < dnr.PRIORITY.threat);
+  assert.throws(() => dnr.scannerPassRule(1, "evil.example", 7), /scanner/);
 });
 
 // ---- link cleaning (query parameters) ----
@@ -271,7 +402,7 @@ test("link cleaner: global names everywhere, ambiguous names only on their sites
   assert.equal(c("https://shop.example/p?s=20&t=abc&tag=red"), "https://shop.example/p?s=20&t=abc&tag=red", "generic names elsewhere are content");
   assert.equal(c("https://www.google.com/search?q=kettle&ei=abc&ved=0ah&oq=ket&sxsrf=x&start=10"), "https://www.google.com/search?q=kettle&start=10");
   assert.equal(c("https://app.example/cb?code=abc&state=xyz&utm_source=mail"), "https://app.example/cb?code=abc&state=xyz", "OAuth parameters stay");
-  assert.equal(c("https://mail.example/unsub?mkt_tok=abc&_hsenc=1&_hsmi=2&utm_source=x"), "https://mail.example/unsub?mkt_tok=abc&_hsenc=1&_hsmi=2");
+  assert.equal(c("https://mail.example/landing?mkt_tok=abc&_hsenc=1&_hsmi=2&utm_source=x"), "https://mail.example/landing?mkt_tok=abc&_hsenc=1&_hsmi=2");
   assert.equal(c("https://bücher.example/?gclid=1&a=1"), "https://xn--bcher-kva.example/?a=1");
   assert.equal(c("https://news.example/a?UTM_SOURCE=x"), "https://news.example/a?UTM_SOURCE=x", "names are exact (DNR is case-sensitive here too)");
   assert.equal(c("https://news.example/a?utm%5Fsource=x&b=1"), "https://news.example/a?b=1", "an encoded name is still that name");
@@ -281,9 +412,74 @@ test("link cleaner: global names everywhere, ambiguous names only on their sites
   const g = new Set(params.GLOBAL);
   for (const n of ["utm_source", "mc_cid", "mc_eid", "pk_campaign", "piwik_campaign", "mtm_source", "hsa_cam", "oly_enc_id", "vero_id", "_openstat", "yclid", "ysclid",
     "gclid", "gclsrc", "gbraid", "wbraid", "dclid", "gad_source", "gad_campaignid", "fbclid", "msclkid", "twclid", "ttclid", "li_fat_id", "igshid", "igsh", "epik", "sccid",
-    "rdt_cid", "irclickid", "srsltid", "_gl", "s_kwcid", "ef_id", "cmpid"]) assert.ok(g.has(n), n);
+    "rdt_cid", "irclickid", "srsltid", "_gl", "s_kwcid", "ef_id"]) assert.ok(g.has(n), n);
   for (const n of ["ref", "source", "src", "tag", "cid", "si", "s", "t", "id", "code", "state", "token", "session", "q", "page"]) assert.ok(!g.has(n), `${n} is not global`);
   for (const k of params.KEPT) for (const scope of params.SCOPED) assert.ok(!params.namesFor(scope.domains[0]).has(k), `${k} kept on ${scope.domains[0]}`);
+});
+
+test("link cleaner: unsubscribe and preference links keep their parameters; recipient tokens are never removed", () => {
+  const params = require("../../browser/core/params.js");
+  const c = (u) => params.clean(u).url;
+  for (const url of ["https://www.linkedin.com/comm/psettings/email-unsubscribe?midToken=AQ&midSig=x&eid=1&trk=e&utm_source=newsletter",
+    "https://www.nytimes.com/newsletters/unsubscribe?nl=well&user_id=abc&segment_id=9&campaign_id=1&utm_source=x",
+    "https://shop.example/email/preferences?ck_subscriber_id=1&utm_campaign=x", "https://news.example/opt-out?ml_subscriber=1&ml_subscriber_hash=h&fbclid=z",
+    "https://site.example/manage-subscriptions?elq=abc&elqTrackId=x&gclid=1", "https://site.example/u/UNSUBSCRIBE?mc_eid=1", "https://p.example/email-settings?utm_source=a"]) {
+    assert.equal(c(url), url, url);
+  }
+  // Away from those pages the recipient tokens are still never removed (they authenticate the reader), the rest is.
+  assert.equal(c("https://www.linkedin.com/jobs/view/1?midToken=AQ&midSig=x&trk=eml"), "https://www.linkedin.com/jobs/view/1?midToken=AQ&midSig=x");
+  assert.equal(c("https://www.nytimes.com/2026/a.html?nl=well&user_id=a&segment_id=9&smid=x"), "https://www.nytimes.com/2026/a.html?nl=well&user_id=a&segment_id=9");
+  assert.equal(c("https://shop.example/p?ck_subscriber_id=1&ml_subscriber=2&ml_subscriber_hash=h&elq=e&elqTrackId=t&utm_source=x"), "https://shop.example/p?ck_subscriber_id=1&ml_subscriber=2&ml_subscriber_hash=h&elq=e&elqTrackId=t");
+  for (const n of ["ck_subscriber_id", "ml_subscriber", "ml_subscriber_hash", "elq", "elqTrackId", "midToken", "midSig", "nl", "user_id", "segment_id"]) {
+    assert.ok(params.KEPT.includes(n), n);
+    assert.ok(!params.GLOBAL.includes(n), n);
+  }
+  assert.ok(!params.SCOPED.find((s) => s.domains.includes("linkedin.com")).params.includes("eid"));
+  // Navigation rules: the same pages are allowed, at the redirect's own priority, so nothing is removed on the way.
+  const rules = dnr.compileParams();
+  assert.equal(outcome(rules, {url: "https://www.linkedin.com/comm/psettings/email-unsubscribe?midToken=AQ&utm_source=x", type: "main_frame"}), "allow");
+  assert.equal(outcome(rules, {url: "https://shop.example/email/preferences?ck_subscriber_id=1&utm_campaign=x", type: "main_frame"}), "allow");
+  assert.equal(outcome(rules, {url: "https://shop.example/preferential-pricing?utm_campaign=x", type: "main_frame"}), "redirect", "a word merely starting like it is not a preference page");
+  assert.equal(outcome(rules, {url: "https://shop.example/article?utm_campaign=x", type: "main_frame"}), "redirect");
+});
+
+test("link cleaner: campaign and ad ids are not global; sign-in, payment, cloud and advertiser consoles are never cleaned", () => {
+  const params = require("../../browser/core/params.js");
+  for (const n of ["campaign_id", "ad_id", "adset_id", "cmpid"]) assert.ok(!params.GLOBAL.includes(n), n);
+  assert.ok(params.SCOPED.find((s) => s.domains.includes("bloomberg.com")).params.includes("cmpid"), "still removed where it is tracking");
+  const c = (u) => params.clean(u).url;
+  assert.equal(c("https://ads.google.com/aw/campaigns?campaign_id=1&ad_id=2&utm_source=x"), "https://ads.google.com/aw/campaigns?campaign_id=1&ad_id=2&utm_source=x");
+  assert.equal(c("https://adsmanager.facebook.com/adsmanager/manage/ads?act=1&campaign_id=1&adset_id=2"), "https://adsmanager.facebook.com/adsmanager/manage/ads?act=1&campaign_id=1&adset_id=2");
+  assert.equal(c("https://shop.example/p?campaign_id=1&ad_id=2&adset_id=3&cmpid=4"), "https://shop.example/p?campaign_id=1&ad_id=2&adset_id=3&cmpid=4", "ordinary sites keep them");
+  for (const url of ["https://accounts.google.com/o/oauth2/auth?source=x&utm_source=y&ei=z", "https://pay.google.com/gp/w/home?utm_source=x&ved=1",
+    "https://affiliate-program.amazon.com/home?tag=me-20&ref_=x&linkCode=y", "https://console.aws.amazon.com/console/home?ref=x&utm_source=y",
+    "https://sellercentral.amazon.com/home/ref=xx_1?ref_=y", "https://signin.aws.amazon.com/signin?redirect_uri=x&utm_source=y"]) {
+    assert.equal(c(url), url, url);
+  }
+  assert.equal(c("https://www.amazon.com/dp/B000/ref=sr_1_1?tag=aff-20&th=1"), "https://www.amazon.com/dp/B000?th=1", "the consumer site is still cleaned");
+  const rules = dnr.compileParams();
+  for (const url of ["https://accounts.google.com/o/oauth2/auth?source=x&utm_source=y", "https://affiliate-program.amazon.com/home?tag=me-20&utm_source=y",
+    "https://console.aws.amazon.com/home?ref=x&utm_source=y", "https://sellercentral.amazon.com/home/ref=xx_1?x=1"]) {
+    assert.equal(outcome(rules, {url, type: "main_frame"}), "none", url);
+  }
+});
+
+test("compileParams honours KEPT on the navigation path too, whatever the name lists say", () => {
+  const rules = dnr.compileParams({global: ["utm_source", "token", "code"], scoped: [{domains: ["a.example"], params: ["ref", "state", "mkt_tok"]}]});
+  const named = new Set(rules.flatMap((r) => (r.action.redirect && r.action.redirect.transform ? r.action.redirect.transform.queryTransform.removeParams : [])));
+  const triggers = new Set(rules.map((r) => r.condition.urlFilter).filter(Boolean).map((f) => f.slice(1, -1)));
+  for (const kept of ["token", "code", "state", "mkt_tok"]) {
+    assert.ok(!named.has(kept), `${kept} never removed`);
+    assert.ok(!triggers.has(kept), `${kept} never triggers a redirect`);
+  }
+  assert.ok(named.has("utm_source") && named.has("ref"));
+  assert.ok(!named.has("fbclid") && !named.has("gclid"), "only the names it was given");
+  // And the page cleaner, on every scoped site.
+  const params = require("../../browser/core/params.js");
+  for (const scope of params.SCOPED) {
+    const url = `https://www.${scope.domains[0]}/p?${params.KEPT.map((k) => `${k}=1`).join("&")}`;
+    assert.equal(params.clean(url).url, url, scope.domains[0]);
+  }
 });
 
 test("link cleaner and DNR rules agree: every name the page cleaner removes has a navigation rule on the same sites", () => {
@@ -296,7 +492,7 @@ test("link cleaner and DNR rules agree: every name the page cleaner removes has 
   }
   assert.ok(!fires("https://github.com/o/r?ref=main"));
   assert.ok(fires("https://www.amazon.com/dp/B000/ref=sr_1_1"));
-  const path = rules.find((r) => r.action.redirect.regexSubstitution);
+  const path = rules.find((r) => r.action.redirect && r.action.redirect.regexSubstitution);
   const out = "https://www.amazon.com/dp/B000/ref=sr_1_1?k=v".replace(new RegExp(path.condition.regexFilter), path.action.redirect.regexSubstitution.replace(/\\(\d)/g, "$$$1"));
   assert.equal(out, "https://www.amazon.com/dp/B000?k=v");
 });
@@ -305,13 +501,27 @@ test("tracking cookies: analytics, ad and click-id cookies are removed; logins, 
   const cookies = require("../../browser/core/cookies.js");
   for (const name of ["_ga", "_ga_ABC123XYZ", "_gid", "_gat_UA-1", "_gcl_au", "_gcl_aw", "_gac_UA-1", "_fbp", "_fbc", "_uetsid", "_uetvid", "_uetmsclkid", "_ttp", "_scid",
     "_pin_unauth", "_hjSessionUser_123", "_hjid", "ajs_anonymous_id", "ajs_user_id", "mp_0123abcd_mixpanel", "amplitude_id_abc", "_clck", "_clsk", "li_fat_id",
-    "IDE", "test_cookie", "_rdt_uuid", "_pk_id.1.abcd", "hubspotutk", "__hstc", "_epik", "__utma"]) assert.equal(cookies.classify(name), "remove", name);
+    "_rdt_uuid", "_pk_id.1.abcd", "hubspotutk", "__hstc", "_epik", "__utma", "_cs_id", "taboola_session_id"]) assert.equal(cookies.classify(name, ".shop.example"), "remove", name);
+  // Names that are not unique to one tracker: only on their vendor's own domains.
+  for (const [name, vendor] of [["IDE", ".doubleclick.net"], ["test_cookie", ".doubleclick.net"], ["DSID", ".doubleclick.net"], ["uuid2", ".adnxs.com"], ["anj", ".adnxs.com"],
+    ["muc_ads", ".x.com"], ["muc_ads", ".twitter.com"], ["t_gid", ".taboola.com"], ["_kuid_", ".krxd.net"], ["_cc_id", ".krxd.net"]]) {
+    assert.equal(cookies.classify(name, vendor), "remove", `${name} on ${vendor}`);
+    for (const elsewhere of [".vpn.university.example", "intranet.corp.example", "", undefined]) assert.equal(cookies.classify(name, elsewhere), null, `${name} on ${elsewhere}`);
+  }
+  // Pulse / Ivanti Connect Secure keeps its VPN session in DSID: never removed there.
+  assert.equal(cookies.classify("DSID", "vpn.university.example"), null);
+  // Opt-out and consent cookies are never removed, whatever vendor pattern they resemble.
+  for (const name of ["_hjOptOut", "taboola_optout", "_cs_c", "_cs_optout", "mtm_consent", "mtm_consent_removed", "__hs_opt_out", "_pk_consent.1", "ajs_consent", "_ga_optout"]) {
+    assert.equal(cookies.classify(name, ".shop.example"), null, name);
+  }
+  // Hotjar's poll and survey state is the widget remembering an answer, not an identifier.
+  for (const name of ["_hjDonePolls", "_hjMinimizedPolls", "_hjClosedSurveyInvites", "_hjShownFeedbackMessage"]) assert.equal(cookies.classify(name, ".shop.example"), null, name);
   assert.equal(cookies.classify("MUID"), null, "left alone: session-limiting it broke Bing search");
   for (const name of ["sessionid", "session", "csrftoken", "XSRF-TOKEN", "cart", "user_session", "_gh_sess", "OptanonConsent", "euconsent-v2", "CookieConsent", "theme",
     "prefs", "SID", "HSID", "__Secure-3PSID", "_gaz", "ga", "_g", "lang", "_shopify_y", "", null]) assert.equal(cookies.classify(name), null, String(name));
 });
 
-test("cookie and bounce rules: third-party tracker hosts and opaque redirectors lose cookies; the per-site brake lifts only cleaning", () => {
+test("cookie and bounce rules: third-party tracker hosts and opaque redirectors lose cookies; the per-site brake lifts only navigation cleaning", () => {
   const {cookies, bounce} = dnr.compilePrivacy({trackerDomains: ["metrics.vendor.example"], bounceDomains: ["click.shop.example"]});
   const brake = dnr.compileModes({cleanOff: ["braked.example"]}).rules;
   const filters = compileText("/collect?v=");
@@ -323,10 +533,30 @@ test("cookie and bounce rules: third-party tracker hosts and opaque redirectors 
   assert.ok(!strips({url: "https://accounts.google.com/gsi/iframe", initiator: "news.example", type: "sub_frame"}), "sign-in keeps its cookies");
   assert.ok(strips({url: "https://t.co/AbC", type: "main_frame"}), "bounce: t.co");
   assert.ok(strips({url: "https://click.shop.example/aff?id=1", type: "main_frame"}), "bounce: disguised click-through");
-  assert.ok(!strips({url: "https://www.facebook.com/plugins/like.php", initiator: "braked.example", type: "sub_frame"}), "brake: cookies kept on that site");
+  assert.ok(strips({url: "https://www.facebook.com/plugins/like.php", initiator: "braked.example", type: "sub_frame"}), "brake: third-party tracker cookies still stripped (Relaxed lifts that)");
   assert.equal(outcome(all, {url: "https://braked.example/a?utm_source=x", type: "main_frame"}), "allow", "brake: no parameter stripping on navigations to it");
   assert.equal(outcome(all, {url: "https://braked.example/collect?v=1", initiator: "braked.example", type: "ping"}), "block", "brake: URL filters still apply");
   assert.equal(outcome(all, {url: "https://other.example/a?utm_source=x", type: "main_frame"}), "redirect");
+  assert.equal(outcome(all, {url: "https://braked.example/fp/tags?org_id=1", initiator: "braked.example", type: "script"}), "none", "brake lifts nothing but cleaning (no hand filter here)");
+  const hand = dnr.compileHand("replay");
+  assert.equal(outcome([...all, ...hand], {url: "https://braked.example/fp/tags?org_id=1", initiator: "braked.example", type: "script"}), "block", "hand-written filters stay on a braked site");
+});
+
+test("bounce list from upstream: subdomains only, never payment, sign-in or console hosts", () => {
+  const upstream = ["click.shop.example", "shop.example", "go.checkout.com", "link.afterpay.com", "x.affirm.com", "affirm.com", "pay.google.com", "track.news.example",
+    "co.uk", "click.example.co.uk", "accounts.google.com", "BAD_NAME.example", "login.microsoftonline.com", "go.paypal.com"];
+  const {bounce} = dnr.compilePrivacy({bounceDomains: upstream});
+  const names = bounce.flatMap((r) => r.condition.requestDomains);
+  for (const ok of ["click.shop.example", "track.news.example", "click.example.co.uk"]) assert.ok(names.includes(ok), ok);
+  for (const bad of ["shop.example", "go.checkout.com", "link.afterpay.com", "x.affirm.com", "affirm.com", "pay.google.com", "co.uk", "accounts.google.com", "BAD_NAME.example",
+    "login.microsoftonline.com", "go.paypal.com"]) assert.ok(!names.includes(bad), bad);
+  for (const r of bounce) {
+    assert.ok(r.condition.excludedRequestDomains.includes("checkout.com") && r.condition.excludedRequestDomains.includes("accounts.google.com"));
+    assert.equal(r.priority, dnr.PRIORITY.clean);
+  }
+  const strip = (url) => headerRules(bounce, {url, type: "main_frame"}).length > 0;
+  assert.ok(strip("https://click.shop.example/aff?id=1"));
+  assert.ok(!strip("https://go.checkout.com/pay?x=1") && !strip("https://shop.example/"));
 });
 
 // ---- privacy signals ----
@@ -375,7 +605,10 @@ test("site modes: No scripts blocks every script of the site and adds script-src
   assert.equal(outcome(rules, {url: "https://vendor.example/w.js", initiator: "any.example", type: "script"}), "block", "Strict by default");
   assert.equal(outcome(rules, {url: "https://vendor.example/w.js", initiator: "app.example", type: "script"}), "none", "a site set to Standard");
   assert.equal(outcome(rules, {url: "https://m.stripe.network/inner.js", initiator: "js.stripe.com", type: "script"}), "none", "functional providers' own frames are not held to Strict");
-  for (const r of rules) assert.ok(r.priority === dnr.PRIORITY.mode || r.priority === dnr.PRIORITY.relax);
+  for (const r of rules) assert.ok([dnr.PRIORITY.mode, dnr.PRIORITY.clean, dnr.PRIORITY.modeHeaders, dnr.PRIORITY.relax].includes(r.priority));
+  // The No-scripts policy sits above the cleaning brake: switching cleaning off cannot switch scripts back on.
+  const braked = dnr.compileModes({sites: {"reader.example": "noscript"}, cleanOff: ["reader.example"]}).rules;
+  assert.ok(headerRules(braked, {url: "https://reader.example/", type: "main_frame"}).some((r) => r.action.responseHeaders && r.action.responseHeaders[0].value === "script-src 'none'"));
   assert.deepEqual(dnr.compileModes({sites: {"co.uk": "noscript", "x.example": "bogus"}}).rules, [], "invalid sites and modes compile to nothing");
   // Allow host under a Strict default applies on that site only.
   const repaired = dnr.compileModes({defaultMode: "strict", allowHosts: {"tomsguide.com": ["vanilla.futurecdn.net"]}}).rules;
@@ -384,14 +617,20 @@ test("site modes: No scripts blocks every script of the site and adds script-src
   assert.equal(outcome(repaired, {url: "https://ads.vendor.example/x.js", initiator: "www.tomsguide.com", type: "script"}), "block");
 });
 
-test("click-to-load: a held embed loads for one tab after a click; the session rule beats Strict only", () => {
+test("click-to-load: a held embed loads for one tab after a click, still without cookies unless the user chose them", () => {
   const {rules} = dnr.compileModes({sites: {"news.example": "strict"}});
+  const {cookies} = dnr.compilePrivacy();
   const allow = dnr.embedRule(300000, "youtube", 7);
-  const all = [...rules, allow];
-  const req = (tabId) => ({url: "https://www.youtube.com/embed/abc", initiator: "www.news.example", type: "sub_frame", tabId});
+  const all = [...rules, ...cookies, allow];
+  const req = (tabId, url = "https://www.youtube.com/embed/abc") => ({url, initiator: "www.news.example", type: "sub_frame", tabId});
   assert.equal(outcome(all, req(7)), "allow");
   assert.equal(outcome(all, req(8)), "block");
-  assert.ok(allow.priority < dnr.PRIORITY.threat);
+  assert.ok(strips(all, req(7)), "a loaded embed gets no third-party cookies");
+  assert.ok(strips([...rules, dnr.embedRule(300000, "disqus", 7)], req(7, "https://disqus.com/embed/comments/")), "Strict's own stripping too");
+  const withCookies = dnr.embedRule(300001, "youtube", 7, {withCookies: true});
+  assert.ok(!strips([...rules, ...cookies, withCookies], req(7)), "with cookies: lifted for that tab");
+  assert.ok(strips([...rules, ...cookies, withCookies], req(8)), "and only that tab");
+  assert.ok(allow.priority < dnr.PRIORITY.clean && withCookies.priority > dnr.PRIORITY.clean && withCookies.priority < dnr.PRIORITY.threat);
   assert.throws(() => dnr.embedRule(1, "nope", 1));
 });
 
@@ -410,7 +649,7 @@ test("surrogates: known tracker scripts redirect to bundled stubs that exist and
 
 test("surrogates run: the APIs pages call exist, callbacks fire, queued commands drain", async () => {
   const vm = require("node:vm");
-  const run = (file, window) => { const ctx = vm.createContext({window, setTimeout, Array, Object}); window.window = window; vm.runInContext(`with (window) {${fs.readFileSync(path.join(root, "browser/surrogates", file), "utf8")}}`, ctx); return window; };
+  const run = (file, window) => { const ctx = vm.createContext({window, setTimeout, queueMicrotask, Array, Object}); window.window = window; vm.runInContext(`with (window) {${fs.readFileSync(path.join(root, "browser/surrogates", file), "utf8")}}`, ctx); return window; };
   const tick = () => new Promise((r) => setTimeout(r, 5));
   let called = 0;
   const w1 = run("google-tag-manager.js", {dataLayer: [{event: "x", eventCallback: () => called++}]});
@@ -424,6 +663,7 @@ test("surrogates run: the APIs pages call exist, callbacks fire, queued commands
   assert.equal(called, 5);
   const w3 = run("google-publisher-tag.js", {googletag: {cmd: [() => called++]}});
   w3.googletag.cmd.push(() => { called++; w3.googletag.defineSlot("/1/x", [300, 250], "div-1").addService(w3.googletag.pubads()).setTargeting("a", "b"); w3.googletag.enableServices(); w3.googletag.display("div-1"); });
+  await tick();
   assert.equal(called, 7);
   const w4 = run("segment.js", {analytics: [["track", "x"]]});
   w4.analytics.ready(() => called++);

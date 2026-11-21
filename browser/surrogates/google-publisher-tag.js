@@ -5,7 +5,8 @@
   var w = window;
   var noop = function () {};
   var self = function () { return this; };
-  var run = function (fn) { if (typeof fn === "function") { try { fn(); } catch (e) { /* page's own error */ } } };
+  // Queued commands run as microtasks straight from the queue: no surrogate frame (no extension address) on their stack.
+  var run = function (fn) { if (typeof fn === "function") queueMicrotask(fn); };
   var slot = function (path, sizes, div) {
     var s = {};
     ["addService", "clearCategoryExclusions", "clearTargeting", "defineSizeMapping", "set", "setCategoryExclusion", "setClickUrl",

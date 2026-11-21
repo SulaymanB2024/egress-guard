@@ -117,10 +117,7 @@
     const info = MODES.find((m) => m[0] === current);
     $("mode-note").textContent = `${info ? info[2] : ""}${state.siteMode ? "" : " (the default for every site)"}`;
     $("default-mode").value = state.defaultMode === "strict" ? "strict" : "standard";
-    const noise = state.noise || {on: false, site: true};
-    $("noise").checked = noise.on;
-    $("noise-site").checked = noise.on && noise.site;
-    $("noise-site").disabled = !noise.on;
+    $("scanned-direct").checked = state.scannedDirect === true;
     const allowed = $("strict-allowed");
     allowed.hidden = !(state.strictAllowed && state.strictAllowed.length);
     allowed.replaceChildren(...(state.strictAllowed || []).map((h) => row({verb: "Allowed", text: h, tags: [["third party under Strict", ""]]},
@@ -156,6 +153,19 @@
       parts.push(el("b", l.name), document.createTextNode(l.domains > 0 ? ` (${Number(l.domains).toLocaleString("en-US")})` : ` (${Number(l.rules).toLocaleString("en-US")} URL rules)`));
     });
     parts.push(document.createTextNode("."));
+    // Every source with its SHA-256 and last-modified date, so a build can be matched to the exact list files.
+    const sources = active.flatMap((l) => (l.sources || []).filter((s) => s && s.sha256));
+    if (sources.length) {
+      const more = document.createElement("details");
+      more.className = "sources";
+      more.append(el("summary", "List files"));
+      for (const s of sources) {
+        const line = el("p", null, "source");
+        line.append(el("b", s.name), document.createTextNode(` · ${s.last_modified || s.version || "date unknown"}`), el("code", s.sha256, "sha"));
+        more.append(line);
+      }
+      parts.push(more);
+    }
     footer.replaceChildren(...parts);
   }
 
@@ -251,6 +261,15 @@
   async function act(message) {
     const reply = await send(message);
     if (reply && !reply.error) await render();
+    // Switching a site to No scripts or Strict clears its service workers and Cache Storage, for the origins the
+    // extension can name; say which, and what it could not reach.
+    if (reply && reply.cleared) {
+      const note = $("worker-note");
+      note.hidden = false;
+      note.textContent = reply.cleared.ok
+        ? `Service workers and cached files cleared for ${reply.cleared.origins.length} origins of this site (the site, www. and open tabs). Other subdomains keep theirs until you clear site data in Chrome.`
+        : "Could not clear this site's service workers: a worker may still serve cached pages and scripts. Clear site data in Chrome to be sure.";
+    }
     return reply;
   }
 
@@ -286,8 +305,7 @@
     });
     $("generic").addEventListener("click", () => act({type: "set-generic", on: !genericOn}));
     $("default-mode").addEventListener("change", (event) => act({type: "set-default-mode", mode: event.target.value}));
-    $("noise").addEventListener("change", (event) => act({type: "set-noise", on: event.target.checked}));
-    $("noise-site").addEventListener("change", (event) => act({type: "set-noise", site: true, on: event.target.checked}));
+    $("scanned-direct").addEventListener("change", (event) => act({type: "set-scanned-direct", on: event.target.checked}));
     $("add-rule").addEventListener("submit", async (event) => {
       event.preventDefault();
       const types = [...$("rule-types").querySelectorAll('input[name="types"]')].filter((b) => b.checked).map((b) => b.value);

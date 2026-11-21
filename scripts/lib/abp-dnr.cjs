@@ -4,10 +4,19 @@
  *
  * What converts: URL patterns (`||`, `|`, `^`, `*`), regular-expression filters that RE2 accepts, `$third-party`
  * and first-party, resource types (positive and negated), `domain=`/`from=` (initiator), `to=`/`denyallow=`
- * (request domain), `method=`, `match-case`, `important`, exceptions (`@@`; with `$document` they become
- * allowAllRequests) and `badfilter`. Everything else is dropped and counted by reason. Cosmetic filters are not
- * network filters and are not counted. Pure `||host^` filters with the same options are folded into one rule
- * with `requestDomains`, which costs one rule however many hosts it holds. */
+ * (request domain), `method=`, `match-case`, `important`, exceptions (`@@`) and `badfilter`. Everything else is
+ * dropped and counted by reason. Cosmetic filters are not network filters and are not counted. Pure `||host^` filters
+ * with the same options are folded into one rule with `requestDomains`, which costs one rule however many hosts it
+ * holds.
+ *
+ * Exceptions and `$important` filters are trusted only when anchored to a concrete host: a `||host…` pattern whose
+ * host is a real registrable name (not a public suffix, no wildcard), a `to=` host, or a `domain=` restriction.
+ * Anything else (`@@||*^$document`, `@@^$document`, `@@|http$document`, `@@/./$document`, `@@|https://$all`, …)
+ * would let one hostile or broken upstream line allow, or block, everything: it is dropped and counted in
+ * `stats.suspicious`, which the build caps. `$document` exceptions never become `allowAllRequests`: they compile to
+ * a plain `allow` for requests made by that host's pages, at the list's own exception priority, so they lift only that
+ * list's filters. `$all` exceptions allow requests to the host, nothing more. */
+const hosts = require("../../browser/core/hosts.js");
 
 const TYPES = Object.freeze({
   script: ["script"], image: ["image"], stylesheet: ["stylesheet"], css: ["stylesheet"], object: ["object"],
@@ -104,7 +113,7 @@ function parseLine(raw) {
   const body = exception ? line.slice(2) : line;
   const [pattern, opts] = splitOptions(body);
   const condition = {};
-  let important = false, badfilter = false, document = false, cosmeticOnly = false;
+  let important = false, badfilter = false, document = false, cosmeticOnly = false, all = false;
   const include = new Set(), exclude = new Set();
   let explicitTypes = false, popupOnly = false;
   if (opts !== null) {
@@ -127,7 +136,7 @@ function parseLine(raw) {
         case "badfilter": badfilter = true; continue;
         case "document": if (neg) return {drop: "negated $document"}; document = true; explicitTypes = true; continue;
         case "popup": explicitTypes = true; popupOnly = true; continue;
-        case "all": explicitTypes = true; for (const t of ALL_SUB) include.add(t); document = true; continue;
+        case "all": explicitTypes = true; for (const t of ALL_SUB) include.add(t); document = true; all = true; continue;
         case "domain": case "from": {
           if (value === null) return {drop: "domain= without a value"};
           const d = domainList(value);
@@ -191,10 +200,44 @@ function parseLine(raw) {
     else if (p.urlFilter) condition.urlFilter = p.urlFilter;
   }
   if (!domain && !condition.urlFilter && !condition.regexFilter && !condition.initiatorDomains && !condition.requestDomains) {
-    return {drop: "matches every request (no pattern and no domain)"};
+    return {drop: "matches every request (no pattern and no domain)", suspicious: exception || important};
   }
   if (condition.isUrlFilterCaseSensitive === undefined && (condition.urlFilter || condition.regexFilter)) condition.isUrlFilterCaseSensitive = false;
+  if (exception || important) {
+    // Only real registrable names count as anchors; a public suffix in domain= (or to=) is dropped from the list.
+    for (const key of ["initiatorDomains", "requestDomains"]) {
+      if (!condition[key]) continue;
+      condition[key] = condition[key].filter((d) => hosts.siteOf(d));
+      if (!condition[key].length) return {drop: `${exception ? "exception" : "$important filter"} scoped only to public suffixes`, suspicious: true};
+    }
+    const anchor = domain || anchoredHost(condition.urlFilter);
+    const anchored = (anchor && hosts.siteOf(anchor)) || condition.initiatorDomains || condition.requestDomains;
+    if (!anchored) return {drop: `${exception ? "exception" : "$important filter"} not anchored to a host`, suspicious: true};
+  }
+  if (exception && document) {
+    // Never allowAllRequests. "Allow on pages of this host" becomes a plain allow for the host's own requests;
+    // $all becomes a plain allow for requests to the host.
+    const host = domain || anchoredHost(condition.urlFilter);
+    if (!host || !hosts.siteOf(host) || condition.regexFilter || (condition.urlFilter && condition.urlFilter.replace(/[\^|]+$/, "") !== `||${host}`)) {
+      return {drop: "$document exception that is not a whole host", suspicious: true};
+    }
+    delete condition.resourceTypes;
+    delete condition.urlFilter;
+    delete condition.isUrlFilterCaseSensitive;
+    if (all) return {exception, important, badfilter, document: false, domain: host, condition, regex: false};
+    condition.initiatorDomains = [...new Set([...(condition.initiatorDomains || []), host])].filter((d) => d === host || d.endsWith(`.${host}`));
+    return {exception, important, badfilter, document: false, domain: null, condition, regex: false};
+  }
   return {exception, important, badfilter, document, domain, condition, regex: Boolean(condition.regexFilter)};
+}
+
+/** The host a `||host…` urlFilter is anchored to, when it is a plain host name followed by a separator. */
+function anchoredHost(urlFilter) {
+  if (typeof urlFilter !== "string") return null;
+  const m = /^\|\|([a-z0-9.-]+)(?:[\^/:|?]|$)/i.exec(urlFilter);
+  if (!m) return null;
+  const host = m[1].toLowerCase().replace(/\.$/, "");
+  return DOMAIN.test(host) && host.includes(".") ? host : null;
 }
 
 /** Text identity used by $badfilter: the line without its badfilter option. */
@@ -211,7 +254,7 @@ function badKey(line) {
  */
 function compileFilters(text, {maxRegex = Infinity} = {}) {
   const lines = String(text).split(/\r?\n/);
-  const stats = {lines: lines.length, network: 0, converted: 0, rules: 0, regex: 0, folded: 0, dropped: {}};
+  const stats = {lines: lines.length, network: 0, converted: 0, rules: 0, regex: 0, folded: 0, dropped: {}, suspicious: 0, suspiciousLines: [], exceptions: 0};
   const drop = (reason) => { stats.dropped[reason] = (stats.dropped[reason] || 0) + 1; };
   const parsed = [];
   const bad = new Set();
@@ -219,7 +262,7 @@ function compileFilters(text, {maxRegex = Infinity} = {}) {
     const p = parseLine(line);
     if (p === null) continue;
     stats.network++;
-    if (p.drop) { drop(p.drop); continue; }
+    if (p.drop) { drop(p.drop); if (p.suspicious) { stats.suspicious++; stats.suspiciousLines.push(line.trim().slice(0, 200)); } continue; }
     if (p.badfilter) { bad.add(badKey(line)); stats.converted++; continue; }
     parsed.push({line: line.trim(), ...p});
   }
@@ -232,7 +275,8 @@ function compileFilters(text, {maxRegex = Infinity} = {}) {
     if (p.regex) regexUsed++;
     stats.converted++;
     const bucket = p.exception ? "allow" : p.important ? "important" : "block";
-    const action = {type: p.exception ? (p.document ? "allowAllRequests" : "allow") : "block"};
+    if (p.exception) stats.exceptions++;
+    const action = {type: p.exception ? "allow" : "block"};   // never allowAllRequests (see the header)
     if (p.domain && !p.condition.requestDomains) {
       // Fold `||host^` filters that share every other condition into one requestDomains rule.
       const key = `${bucket}|${action.type}|${JSON.stringify(p.condition)}`;

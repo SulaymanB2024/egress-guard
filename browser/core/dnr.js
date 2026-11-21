@@ -4,27 +4,39 @@
  *   - compileList(): build-time. Turns verified domain lists into static rulesets.
  *   - compileUserState(): run time. Turns validated user rules and exceptions into dynamic rules.
  *
- * Priority ladder (higher wins; within one extension allow beats block at equal priority; a modifyHeaders rule
- * applies only when its priority is above every matching allow rule):
- *   1 params        strip tracking parameters from navigations (redirect)
- *   2 filter        URL filters (EasyPrivacy, EasyList, fingerprinting and session-replay paths), third-party
- *                   beacons, link-tracker unwrapping, the Referrer-Policy fix
- *   3 filterAllow   the filter lists' own exceptions (@@); they lift only the filters below them
- *   4 filterImportant  $important filters, which the lists' exceptions must not lift
- *   5 mode          Strict and No-scripts site modes, click-to-load embeds, third-party cookie stripping
- *   6 relax         "Relaxed" site mode (allowAllRequests) and a clicked-to-load embed: lift everything above
- *   7 threat        malware/phishing: navigation -> local warning page, everything else blocked
- *   8 continue      "continue once" from the warning page: session `allow` rules for one tab and one host, its
- *                   navigation and its own requests. Never allowAllRequests, which would lift every lower-priority
- *                   rule (other threat hosts included) for the whole frame tree.
- *   9 list          ad/tracker and CNAME-cloaked tracker host lists
- *  10 surrogate     known tracker scripts answered by an inert bundled stub instead of a block
- *  11 user block    endpoint rules added in the popup
- *  12 user allow    endpoint allow rules
- *  13 exception     timed exceptions; beat every list and rule above
- *  14 gpc           Sec-GPC: 1 on every request (modifyHeaders; above every allow so nothing switches it off)
- * "continue" sits below "list" on purpose: continuing to a flagged site does not unblock its trackers. Nothing a
- * filter list or a site mode can allow reaches the threat list: their allow rules sit below it. */
+ * DNR semantics the ladder relies on: the highest-priority matching block/allow/redirect rule decides (at equal
+ * priority allow > allowAllRequests > block > redirect); an `allow` lifts only rules of LOWER priority; a modifyHeaders
+ * rule applies only when its priority is above every matching allow rule.
+ *
+ * Priority ladder (higher wins):
+ *   1 easylist        EasyList URL filters
+ *   2 easylistAllow   EasyList's own exceptions (@@): lift EasyList filters only
+ *   3 easyprivacy     EasyPrivacy URL filters (including its path filters that catch first-party trackers)
+ *   4 easyprivacyAllow EasyPrivacy's own exceptions: lift EasyPrivacy filters (and, unavoidably on one ladder,
+ *                     EasyList's; never the other way round)
+ *   5 filterImportant $important filters of either list: no list exception lifts them
+ *   6 hand            hand-written fingerprinting / session-replay / first-party tracker filters, third-party beacons
+ *   7 mode            Strict and No-scripts blocks, click-to-load holds
+ *   8 embed           a clicked-to-load embed (session allow, one tab): lifts Strict, NOT its cookie stripping
+ *   9 clean           parameter stripping and link unwrapping (redirects), the Referrer-Policy fix, third-party cookie
+ *                     stripping (tracker hosts, opaque redirectors, Strict), the per-site "cleaning off" brake
+ *  10 modeHeaders     No-scripts `script-src 'none'` policy (above the brake, so it cannot switch it off)
+ *  11 scanner         mail-security link scanners -> the local interstitial (never unwrapped automatically)
+ *  12 scannerPass     "Continue through the scanner": one tab, one scanner host, one navigation
+ *  13 embedCookies    a clicked-to-load embed "with cookies"
+ *  14 relax           "Relaxed" site mode (allowAllRequests): lifts everything above here except the rows below
+ *  15 threat          malware/phishing: navigation -> local warning page, everything else blocked
+ *  16 continue        "continue once" from the warning page: session `allow` rules for one tab and one host. Never
+ *                     allowAllRequests, which would lift every lower-priority rule (other threat hosts included).
+ *  17 list            ad/tracker and CNAME-cloaked tracker host lists
+ *  18 surrogate       known tracker scripts answered by an inert bundled stub instead of a block
+ *  19 user block      endpoint rules added in the popup
+ *  20 user allow      endpoint allow rules
+ *  21 exception       timed exceptions; beat every list and rule above
+ *  22 gpc             Sec-GPC: 1 on every request (modifyHeaders; above every allow so nothing switches it off)
+ * No list exception reaches cookie stripping, parameter stripping, unwrapping, the hand-written filters or the other
+ * list's blocks. "continue" sits below "list" on purpose: continuing to a flagged site does not unblock its trackers.
+ * Nothing a filter list or a site mode can allow reaches the threat list: their allow rules sit below it. */
 (function (root) {
   "use strict";
   const isNode = typeof module !== "undefined" && module.exports;
@@ -32,8 +44,12 @@
   const links = isNode ? require("./links.js") : root.EGLinks;
   const params = isNode ? require("./params.js") : root.EGParams;
 
-  const PRIORITY = Object.freeze({params: 1, filter: 2, filterAllow: 3, filterImportant: 4, mode: 5, relax: 6, threat: 7,
-    continue: 8, list: 9, surrogate: 10, userBlock: 11, userAllow: 12, exception: 13, gpc: 14});
+  const PRIORITY = Object.freeze({easylist: 1, easylistAllow: 2, easyprivacy: 3, easyprivacyAllow: 4, filterImportant: 5, hand: 6,
+    mode: 7, embed: 8, clean: 9, modeHeaders: 10, scanner: 11, scannerPass: 12, embedCookies: 13, relax: 14, threat: 15, continue: 16,
+    list: 17, surrogate: 18, userBlock: 19, userAllow: 20, exception: 21, gpc: 22});
+  // Each URL filter list's own block / exception pair.
+  const FILTER_PRIORITY = Object.freeze({easylist: {block: PRIORITY.easylist, allow: PRIORITY.easylistAllow},
+    easyprivacy: {block: PRIORITY.easyprivacy, allow: PRIORITY.easyprivacyAllow}});
 
   // Every Chrome resource type except main_frame. Lists never stop a top-level navigation;
   // threat navigations are redirected to the warning page instead.
@@ -144,33 +160,42 @@
    * rule per parameter ("?name=" and "&name="), each removing the whole set: a single regex with every
    * name exceeds Chrome's compiled-regex size limit and is silently dropped.
    */
-  function compileParams() {
+  function compileParams({global = TRACKING_PARAMS, scoped = SCOPED_PARAMS, kept = KEPT_PARAMS, excludedHosts = params.EXCLUDED_HOSTS} = {}) {
     const redirect = (names) => ({type: "redirect", redirect: {transform: {queryTransform: {removeParams: names}}}});
+    // The protected names (unsubscribe tokens, OAuth, sessions) are never removed, whatever a list says.
+    const keep = new Set(kept);
+    const globalNames = global.filter((n) => !keep.has(n));
+    const excludedRequestDomains = [...excludedHosts].sort();
     const out = [];
     let id = 1;
-    const global = redirect([...TRACKING_PARAMS]);
-    for (const name of TRACKING_PARAMS) {
+    const action = redirect([...globalNames]);
+    for (const name of globalNames) {
       for (const sep of ["?", "&"]) {
-        out.push({id: id++, priority: PRIORITY.params, action: global,
-          condition: {urlFilter: `${sep}${name}=`, isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame", "sub_frame"]}});
+        out.push({id: id++, priority: PRIORITY.clean, action,
+          condition: {urlFilter: `${sep}${name}=`, isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame", "sub_frame"], excludedRequestDomains}});
       }
     }
     // A scoped rule removes its own names and every global one. If a global rule wins the race on the same
     // navigation, the redirected request is matched again and the scoped rule removes the rest.
-    for (const scope of SCOPED_PARAMS) {
-      const action = redirect([...TRACKING_PARAMS, ...scope.params]);
-      for (const name of scope.params) {
+    for (const scope of scoped) {
+      const names = scope.params.filter((n) => !keep.has(n));
+      const scopedAction = redirect([...globalNames, ...names]);
+      for (const name of names) {
         for (const sep of ["?", "&"]) {
-          out.push({id: id++, priority: PRIORITY.params, action,
-            condition: {urlFilter: `${sep}${name}=`, isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame", "sub_frame"], requestDomains: [...scope.domains]}});
+          out.push({id: id++, priority: PRIORITY.clean, action: scopedAction,
+            condition: {urlFilter: `${sep}${name}=`, isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame", "sub_frame"], requestDomains: [...scope.domains], excludedRequestDomains}});
         }
       }
     }
     // Amazon's "/ref=…" path segment: cut out of the path, the rest of the address untouched.
     for (const rule of params.PATH_RULES) {
-      out.push({id: id++, priority: PRIORITY.params, action: {type: "redirect", redirect: {regexSubstitution: "\\1\\2"}},
-        condition: {regexFilter: "^(https?://[^/?#]+/[^?#]*?)/ref=[^/?#]*(.*)$", requestDomains: [...rule.domains], resourceTypes: ["main_frame"]}});
+      out.push({id: id++, priority: PRIORITY.clean, action: {type: "redirect", redirect: {regexSubstitution: "\\1\\2"}},
+        condition: {regexFilter: "^(https?://[^/?#]+/[^?#]*?)/ref=[^/?#]*(.*)$", requestDomains: [...rule.domains], excludedRequestDomains, resourceTypes: ["main_frame"]}});
     }
+    // Unsubscribe, opt-out and preference pages keep every parameter (allow beats redirect at equal priority). The
+    // page cleaner applies the same test (params.preservedPath).
+    out.push({id: id++, priority: PRIORITY.clean, action: {type: "allow"},
+      condition: {regexFilter: params.PRESERVE_REGEX, isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame", "sub_frame"]}});
     return out;
   }
 
@@ -182,10 +207,25 @@
    */
   function compileLinks(unwrapUrl) {
     if (!/^chrome-extension:\/\/[a-p]{32}\/unwrap\.html$/.test(unwrapUrl || "")) throw new Error("link unwrapping needs the extension's unwrap page URL");
-    return links.WRAPPERS.map((w, i) => ({id: i + 1, priority: PRIORITY.filter,
-      action: {type: "redirect", redirect: {regexSubstitution: `${unwrapUrl}#\\0`}},
-      // "\0" is the whole match, so the pattern runs to the end of the address.
-      condition: {regexFilter: `${w.dnr}.*$`, requestDomains: [...w.domains], resourceTypes: ["main_frame"]}}));
+    const redirect = {type: "redirect", redirect: {regexSubstitution: `${unwrapUrl}#\\0`}};
+    // "\0" is the whole match, so the pattern runs to the end of the address.
+    // A redirector with a safety check of its own is unwrapped only when the navigation starts on its own site
+    // (initiatorDomains); one arriving from a mail client, another site or the address bar keeps its check.
+    const wrapped = links.WRAPPERS.map((w) => ({priority: PRIORITY.clean, action: redirect,
+      condition: {regexFilter: `${w.dnr}.*$`, requestDomains: [...w.domains], ...(w.open ? {} : {initiatorDomains: [...w.sites]}), resourceTypes: ["main_frame"]}}));
+    // Mail security scanners always go to the interstitial, wherever the navigation started. Above the cleaning tier
+    // so parameter stripping never rewrites a scanner's signed address first.
+    const scanners = links.SCANNERS.map((w) => ({priority: PRIORITY.scanner, action: redirect,
+      condition: {regexFilter: w.dnr, requestDomains: [...w.domains], resourceTypes: ["main_frame"]}}));
+    return [...wrapped, ...scanners].map((r, i) => ({id: i + 1, ...r}));
+  }
+
+  /** Session rule for "Continue through the scanner": the next navigation to that scanner host in that tab passes. */
+  function scannerPassRule(id, host, tabId) {
+    const name = hosts.normalizeHost(host);
+    if (!name || !links.SCANNERS.some((s) => s.domains.some((d) => name === d || name.endsWith(`.${d}`)))) throw new Error("not a scanner host");
+    if (!Number.isInteger(tabId) || tabId < 0 || !Number.isInteger(id) || id < 1) throw new Error("scanner pass needs a tab");
+    return {id, priority: PRIORITY.scannerPass, action: {type: "allow"}, condition: {requestDomains: [name], resourceTypes: ["main_frame"], tabIds: [tabId]}};
   }
 
   // Third-party providers that sign-in, payment, captcha and public script CDNs need. Strict mode does not block
@@ -233,8 +273,9 @@
    * Dynamic rules for site modes. `modes` = {defaultMode: "standard"|"strict", sites: {site: mode}, allowHosts:
    * {site: [host]}}. Returns {rules, kinds} where kinds maps each rule id to the popup category it reports as (null for
    * allows and header changes).
-   *   relaxed  allowAllRequests for the site's pages at "relax": URL filters, beacons, link unwrapping, Strict and the
-   *            Referrer-Policy fix stand down; host lists, threats, your rules and GPC stay.
+   *   relaxed  allowAllRequests for the site's pages at "relax": URL filters, beacons, link unwrapping, parameter and
+   *            cookie stripping, Strict and the Referrer-Policy fix stand down; host lists, threats, your rules and GPC
+   *            stay.
    *   strict   third-party scripts, frames and fonts blocked (FUNCTIONAL_HOSTS and the hosts you allowed excepted);
    *            third-party Cookie / Set-Cookie removed; the Referer removed from third-party frames; embeds held.
    *   noscript every script the site's pages request is blocked and a `script-src 'none'` policy is added to them.
@@ -251,13 +292,12 @@
     let id = firstId;
     const add = (kind, priority, action, condition) => { kinds[id] = kind; rules.push({id: id++, priority, action, condition}); };
     if (by.relaxed.length) add(null, PRIORITY.relax, {type: "allowAllRequests"}, {requestDomains: by.relaxed, resourceTypes: ["main_frame"]});
-    // "Clean links and cookies" off for a site: navigations to it keep their parameters and are not unwrapped, and
-    // its pages' third-party requests keep their cookies. Plain allows at the cleaning tiers lift nothing else.
+    // "Clean links and cookies" off for a site: navigations to it keep their parameters and are not unwrapped. One
+    // main-frame allow at the cleaning tier; lists do not block navigations, so it lifts nothing else. Third-party
+    // cookie stripping on its pages stays: an allow for the site's subresources at that tier would also lift every URL
+    // filter below it. Relaxed is the level that lifts cookie stripping.
     const cleanOff = ((modes && modes.cleanOff) || []).filter((s) => hosts.siteOf(s) === s).sort();
-    if (cleanOff.length) {
-      add(null, PRIORITY.filter, {type: "allow"}, {requestDomains: cleanOff, resourceTypes: ["main_frame"]});
-      add(null, PRIORITY.params, {type: "allow"}, {initiatorDomains: cleanOff, resourceTypes: [...SUBRESOURCE_TYPES]});
-    }
+    if (cleanOff.length) add(null, PRIORITY.clean, {type: "allow"}, {requestDomains: cleanOff, resourceTypes: ["main_frame"]});
 
     // Strict: one set for the sites switched to Strict, one for "everything else" when Strict is the default.
     const strictSets = [];
@@ -280,25 +320,31 @@
         const excludedRequestDomains = [...new Set([...FUNCTIONAL_HOSTS, ...extra])].sort();
         add(noscript ? "noscript" : "strict", PRIORITY.mode, {type: "block"},
           {...scopeWho, domainType: "thirdParty", resourceTypes: ["script", "sub_frame", "font", "object"], excludedRequestDomains});
-        add(null, PRIORITY.mode, {type: "modifyHeaders", requestHeaders: [{header: "cookie", operation: "remove"}], responseHeaders: [{header: "set-cookie", operation: "remove"}]},
+        // Header changes sit at the cleaning tier, above a clicked-to-load embed's allow: a loaded embed still gets no
+        // cookies unless the user chose "with cookies".
+        add(null, PRIORITY.clean, {type: "modifyHeaders", requestHeaders: [{header: "cookie", operation: "remove"}], responseHeaders: [{header: "set-cookie", operation: "remove"}]},
           {...scopeWho, domainType: "thirdParty", excludedRequestDomains, resourceTypes: ["sub_frame", "stylesheet", "script", "image", "font", "object", "xmlhttprequest", "ping", "media", "other"]});
-        add(null, PRIORITY.mode, {type: "modifyHeaders", requestHeaders: [{header: "referer", operation: "remove"}]},
+        add(null, PRIORITY.clean, {type: "modifyHeaders", requestHeaders: [{header: "referer", operation: "remove"}]},
           {...scopeWho, domainType: "thirdParty", excludedRequestDomains: [...FUNCTIONAL_HOSTS, "youtube.com", "youtube-nocookie.com"].sort(), resourceTypes: ["sub_frame"]});
       }
     }
     if (by.noscript.length) {
       add("noscript", PRIORITY.mode, {type: "block"}, {initiatorDomains: by.noscript, resourceTypes: ["script"]});
-      add(null, PRIORITY.mode, {type: "modifyHeaders", responseHeaders: [{header: "content-security-policy", operation: "append", value: "script-src 'none'"}]},
+      add(null, PRIORITY.modeHeaders, {type: "modifyHeaders", responseHeaders: [{header: "content-security-policy", operation: "append", value: "script-src 'none'"}]},
         {requestDomains: by.noscript, resourceTypes: ["main_frame", "sub_frame"]});
     }
     return {rules, kinds};
   }
 
-  /** Session rule that lets one embed provider load in one tab after a click (beats Strict, nothing above it). */
-  function embedRule(id, embedId, tabId) {
+  /**
+   * Session rule that lets one embed provider load in one tab after a click. It beats Strict's blocks but not its cookie
+   * stripping (or the tracker-host cookie stripping): the embed loads without cookies. `withCookies` puts it above the
+   * stripping too, for embeds that need a sign-in.
+   */
+  function embedRule(id, embedId, tabId, {withCookies = false} = {}) {
     const embed = EMBEDS.find((e) => e.id === embedId);
     if (!embed || !Number.isInteger(tabId) || tabId < 0 || !Number.isInteger(id) || id < 1) throw new Error("embed needs a provider and a tab");
-    return {id, priority: PRIORITY.relax, action: {type: "allow"},
+    return {id, priority: withCookies ? PRIORITY.embedCookies : PRIORITY.embed, action: {type: "allow"},
       condition: {requestDomains: [...embed.domains], tabIds: [tabId], resourceTypes: ["sub_frame", "script", "stylesheet", "image", "font", "xmlhttprequest", "media"]}};
   }
 
@@ -312,24 +358,29 @@
   function compilePrivacy({trackerDomains = [], bounceDomains = [], chunk = DEFAULT_CHUNK} = {}) {
     const strip = {type: "modifyHeaders", requestHeaders: [{header: "cookie", operation: "remove"}], responseHeaders: [{header: "set-cookie", operation: "remove"}]};
     const functional = new Set(FUNCTIONAL_HOSTS);
+    const coveredBy = (name, list) => list.some((d) => name === d || name.endsWith(`.${d}`));
+    // The click-through list comes from an unpinned upstream file: only subdomains are taken (a bare registrable
+    // domain would strip the cookies of a whole site's navigations), and never a payment, sign-in or console host.
+    const keepOut = [...FUNCTIONAL_HOSTS, ...params.EXCLUDED_HOSTS];
+    const bounceNames = bounceDomains.filter((d) => hosts.normalizeHost(d) === d && hosts.siteOf(d) && hosts.siteOf(d) !== d && !coveredBy(d, keepOut));
     let cid = 1, bid = 1;
     return {
       // Third-party requests to tracker hosts that are not blocked outright (social and ad hosts that embeds need,
       // hosts a list's own exception lets through) go without cookies, so they cannot recognise the visitor.
-      cookies: chunks(minimize([...TRACKER_COOKIE_HOSTS, ...trackerDomains]).filter((d) => !functional.has(d)), chunk).map((part) => ({id: cid++, priority: PRIORITY.params,
+      cookies: chunks(minimize([...TRACKER_COOKIE_HOSTS, ...trackerDomains]).filter((d) => !functional.has(d)), chunk).map((part) => ({id: cid++, priority: PRIORITY.clean,
         action: strip, condition: {requestDomains: part, excludedRequestDomains: [...FUNCTIONAL_HOSTS], domainType: "thirdParty",
           resourceTypes: SUBRESOURCE_TYPES.filter((t) => t !== "websocket" && t !== "webtransport")}})),
       // Opaque redirectors (short links, email click trackers, disguised click-through subdomains): the hop still
       // happens, but the redirector can neither read nor set a cookie on the way through.
-      bounce: chunks(minimize([...BOUNCE_HOSTS, ...bounceDomains]), chunk).map((part) => ({id: bid++, priority: PRIORITY.params,
-        action: strip, condition: {requestDomains: part, resourceTypes: ["main_frame", "sub_frame"]}})),
+      bounce: chunks(minimize([...BOUNCE_HOSTS, ...bounceNames]), chunk).map((part) => ({id: bid++, priority: PRIORITY.clean,
+        action: strip, condition: {requestDomains: part, excludedRequestDomains: [...new Set(keepOut)].sort(), resourceTypes: ["main_frame", "sub_frame"]}})),
       gpc: [{id: 1, priority: PRIORITY.gpc, action: {type: "modifyHeaders", requestHeaders: [{header: "sec-gpc", operation: "set", value: "1"}]},
         condition: {resourceTypes: ["main_frame", ...SUBRESOURCE_TYPES]}}],
-      referrer: [{id: 1, priority: PRIORITY.filter,
+      referrer: [{id: 1, priority: PRIORITY.clean,
         action: {type: "modifyHeaders", responseHeaders: [{header: "referrer-policy", operation: "set", value: "strict-origin-when-cross-origin"}]},
         condition: {resourceTypes: ["main_frame", "sub_frame"],
           responseHeaders: [{header: "referrer-policy", values: ["*unsafe-url", "*no-referrer-when-downgrade", "origin-when-cross-origin", "*, origin-when-cross-origin", "*,origin-when-cross-origin"]}]}}],
-      beacons: [{id: 1, priority: PRIORITY.filter, action: {type: "block"}, condition: {domainType: "thirdParty", resourceTypes: ["ping"]}}],
+      beacons: [{id: 1, priority: PRIORITY.hand, action: {type: "block"}, condition: {domainType: "thirdParty", resourceTypes: ["ping"]}}],
     };
   }
 
@@ -448,7 +499,7 @@
   function compileHand(kind) {
     const list = HAND_FILTERS[kind];
     if (!list) throw new Error(`unknown filter set ${kind}`);
-    return list.map((c, i) => ({id: i + 1, priority: PRIORITY.filter, action: {type: "block"}, condition: {...c, isUrlFilterCaseSensitive: false}}));
+    return list.map((c, i) => ({id: i + 1, priority: PRIORITY.hand, action: {type: "block"}, condition: {...c, isUrlFilterCaseSensitive: false}}));
   }
 
   // Known tracker scripts answered by an inert stub (browser/surrogates/) instead of being blocked, so pages that call
@@ -481,9 +532,9 @@
     return info.quiet ? null : id;
   }
 
-  const api = Object.freeze({PRIORITY, SUBRESOURCE_TYPES, TYPE_MAP, CHROME_TO_CORE, EXCEPTION_TYPE_MAP, TRACKING_PARAMS, SCOPED_PARAMS, KEPT_PARAMS,
+  const api = Object.freeze({PRIORITY, FILTER_PRIORITY, SUBRESOURCE_TYPES, TYPE_MAP, CHROME_TO_CORE, EXCEPTION_TYPE_MAP, TRACKING_PARAMS, SCOPED_PARAMS, KEPT_PARAMS,
     LIST_KINDS, CATEGORIES, DEFAULT_CHUNK, FUNCTIONAL_HOSTS, TRACKER_COOKIE_HOSTS, BOUNCE_HOSTS, EMBEDS, SITE_MODES, MODE_BASE, HAND_FILTERS, SURROGATES,
-    endpointRegex, minimize, compileList, compileParams, compileLinks, compilePrivacy, compileHand, compileSurrogates, compileModes, embedRule, compileUserState, continueRules,
+    endpointRegex, minimize, compileList, compileParams, compileLinks, scannerPassRule, compilePrivacy, compileHand, compileSurrogates, compileModes, embedRule, compileUserState, continueRules,
     parseWarning, extensionIdFromHex, categoryOf});
   if (isNode) module.exports = api;
   else root.EGDnr = api;

@@ -34,11 +34,11 @@
   <label class="default-mode">Default for other sites
     <select id="default-mode"><option value="standard">Standard</option><option value="strict">Strict</option></select>
   </label>
+  <p id="worker-note" class="note" hidden></p>
   <details class="experimental">
-    <summary>Experimental</summary>
-    <label class="check"><input type="checkbox" id="noise"> Fingerprint noise on all sites</label>
-    <label class="check"><input type="checkbox" id="noise-site"> …including this site</label>
-    <p class="note">Adds small per-site, per-session noise to canvas, WebGL and audio readouts. Detectable, and can break drawing apps or some captchas. Off by default.</p>
+    <summary>Mail scanner links</summary>
+    <label class="check"><input type="checkbox" id="scanned-direct"> Always open scanned links directly</label>
+    <p class="note">Off (the default): a Safe Links, Proofpoint, Mimecast, Barracuda or Trend Micro link first shows where it leads, and Continue goes through your mail's scanner. On: every scanned link whose address is readable opens straight away, skipping the scanner's click-time check. Malware and phishing blocking applies either way.</p>
   </details>
 </section>
 

@@ -3,7 +3,8 @@
 (function () {
   "use strict";
   var w = window;
-  var later = function (fn) { if (typeof fn === "function") setTimeout(function () { try { fn(); } catch (e) { /* page's own error */ } }, 0); };
+  // The page callback runs straight from the timer, so no surrogate frame (no extension address) is on its stack.
+  var later = function (fn, arg) { if (typeof fn === "function") setTimeout(fn, 0, arg); };
   var callbackOf = function (args) {
     for (var i = 0; i < args.length; i++) {
       var a = args[i];
@@ -13,7 +14,7 @@
   var tracker = {get: function () {}, set: function () {}, send: function () { callbackOf(arguments); }, toString: function () { return ""; }};
   var ga = function () {
     var args = arguments;
-    if (typeof args[0] === "function") { later(function () { args[0](tracker); }); return; }
+    if (typeof args[0] === "function") { later(args[0], tracker); return; }
     callbackOf(args);
   };
   ga.create = function () { return tracker; };

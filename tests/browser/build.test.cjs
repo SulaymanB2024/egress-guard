@@ -228,3 +228,56 @@ test("URL filter lists: downloaded once a day into the build's own cache, verifi
     fs.rmSync(out, {recursive: true, force: true});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
+
+test("unpinned lists: a fresh copy whose size, entries or exceptions moved by more than the cap fails the build until accepted", async () => {
+  const {loadFilters, FILTER_LISTS, LIST_CHANGE_FACTOR} = await load();
+  const dir = tmp();
+  const body = (title, exceptions) => `[Adblock Plus 2.0]\n! Version: 202611210000\n! Title: ${title}\n! Licence: https://easylist.to/pages/licence.html\n` +
+    Array.from({length: 20001}, (_, i) => `||t${i}.example^`).join("\n") + "\n" + Array.from({length: exceptions}, (_, i) => `@@||ok${i}.example/x`).join("\n") + "\n";
+  const domains = (n) => Array.from({length: n}, (_, i) => `c${i}.click.example`).join("\n") + "\n";
+  let exceptions = 100, names = 6000;
+  const textFor = (url) => { const spec = FILTER_LISTS.find((f) => f.url === url); return spec.kind === "domains" ? domains(names) : body(spec.name, spec.id === "easylist" ? exceptions : 100); };
+  const fetchImpl = async (url) => ({ok: true, status: 200, url, headers: {get: () => null}, arrayBuffer: async () => Buffer.from(textFor(url))});
+  const day = Date.now() / 1000 + 2 * 86400;
+  try {
+    await loadFilters(dir, {fetchImpl});
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, "easylist.json"), "utf8"));
+    assert.equal(meta.exceptions, 100, "the counts are recorded beside the hash");
+    assert.ok(meta.entries > 20000 && meta.bytes > 0);
+    // Exceptions tripled overnight: refused, and the cached copy is kept as it was.
+    exceptions = 100 * (LIST_CHANGE_FACTOR + 1);
+    await assert.rejects(loadFilters(dir, {fetchImpl, now: day}), /EasyList: exceptions changed from 100 to 300.*--accept-list-change easylist/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "easylist.json"), "utf8")).sha256, meta.sha256);
+    // Accepted on purpose: cached, and the new counts become the reference.
+    const accepted = await loadFilters(dir, {fetchImpl, now: day, acceptChange: ["easylist"]});
+    assert.ok(accepted.easylist);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "easylist.json"), "utf8")).exceptions, 300);
+    // The click-through domain list has the same cap (it feeds cookie stripping on navigations).
+    names = 6000 * 3;
+    await assert.rejects(loadFilters(dir, {fetchImpl, now: day + 3 * 86400}), /AdGuard disguised click-throughs: (bytes|entries) changed/);
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("hostile list lines: more unanchored exceptions than the cap stop the build; the bypass lines never become allow rules", async () => {
+  const {compileFilterRulesets, MAX_SUSPICIOUS, build} = await load();
+  const source = (id, name) => ({id, name, url: "fixture", license: {name: "fixture", url: "fixture"}, sha256: "a".repeat(64), fetched_at: 1795000000, version: "1", last_modified: "21 Nov 2026 05:15 UTC"});
+  const lines = ["@@||*^$document", "@@^$document", "@@|http$document", "@@/./$document", "@@|https://$all"];
+  const ok = {easylist: {text: ["/banner.png", ...lines, "@@||fine.example/banner.png"].join("\n"), source: source("easylist", "EasyList")}};
+  const compiled = compileFilterRulesets(ok);
+  assert.equal(compiled.stats.easylist.suspicious, lines.length);
+  assert.deepEqual(compiled.rulesets["filter-allow"].map((r) => r.action.type), ["allow"]);
+  assert.equal(compiled.rulesets["filter-allow"][0].priority, 2, "EasyList's own exception tier");
+  const flood = {easylist: {text: Array.from({length: MAX_SUSPICIOUS + 1}, (_, i) => `@@/path${i}/x.js`).join("\n"), source: source("easylist", "EasyList")}};
+  assert.throws(() => compileFilterRulesets(flood), /not anchored to a host/);
+  // The popup footer and NOTICE.txt carry each list's SHA-256 and last-modified date.
+  const out = tmp();
+  try {
+    build({out, filters: ok});
+    const worker = fs.readFileSync(path.join(out, "chrome/background.js"), "utf8");
+    const lists = JSON.parse(/globalThis\.EGLists = Object\.freeze\((.*)\);\n/.exec(worker)[1]).lists;
+    assert.deepEqual(lists.filters.sources.map((s) => [s.name, s.sha256, s.last_modified]), [["EasyList", "a".repeat(64), "21 Nov 2026 05:15 UTC"]]);
+    const notice = fs.readFileSync(path.join(out, "chrome/NOTICE.txt"), "utf8");
+    assert.match(notice, /last modified: 21 Nov 2026 05:15 UTC.*sha256: a{64}/);
+    assert.match(fs.readFileSync(path.join(root, "browser/popup.js"), "utf8"), /s\.sha256/);
+  } finally { fs.rmSync(out, {recursive: true, force: true}); }
+});

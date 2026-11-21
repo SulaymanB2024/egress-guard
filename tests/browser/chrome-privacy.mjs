@@ -6,8 +6,9 @@
 // the fixture names to loopback and everything else to NOTFOUND, with no proxy: nothing external is contacted.
 // Checks: first-party tracker paths, the lists' exceptions, fingerprinting and session-replay paths, Relaxed
 // sites, Sec-GPC and navigator.globalPrivacyControl, third-party beacons and <a ping>, the Referrer-Policy fix,
-// link unwrapping (and refusal of hostile destinations), surrogates, site modes, click-to-load embeds, tracker
-// cookie lifetimes and the popup's categories.
+// link unwrapping (only from the redirector's own site; refusal of hostile destinations; threat-listed destinations to
+// the warning page), the mail-scanner interstitial, surrogates (and their callback stacks), site modes, click-to-load
+// embeds (and a clickjacked placeholder), No scripts clearing service workers, tracker cookie lifetimes and the popup.
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -60,14 +61,15 @@ window.img = (src) => new Promise((r) => { const i = new Image(); i.onload = () 
   "/dest": () => `<!doctype html><title>destination</title><p id="dest">destination</p>`,
   "/refpage": () => `<!doctype html><title>ref</title><img id="r" src="http://clean-fixture.test:${port}/ref.gif">`,
   "/surrogate": () => `<!doctype html><title>s</title><body>
-<script>window.dataLayer = []; window.GoogleAnalyticsObject = "ga"; window.ga = function () { (ga.q = ga.q || []).push(arguments); };</script>
+<script>window.stacks = []; window.grab = function () { stacks.push(new Error("probe").stack); };
+window.dataLayer = []; window.GoogleAnalyticsObject = "ga"; window.ga = function () { (ga.q = ga.q || []).push(arguments); };</script>
 <script src="http://www.google-analytics.com/analytics.js"></script>
 <script src="http://www.googletagmanager.com/gtm.js?id=GTM-FIXTURE"></script>
 <script src="http://securepubads.g.doubleclick.net/tag/js/gpt.js"></script>
 <script>
-ga("send", "pageview", {hitCallback: function () { document.body.dataset.ga = "1"; }});
-dataLayer.push({event: "x", eventCallback: function () { document.body.dataset.gtm = "1"; }});
-googletag.cmd.push(function () { googletag.defineSlot("/1/x", [300, 250], "ad").addService(googletag.pubads()); googletag.enableServices(); document.body.dataset.gpt = "1"; });
+ga("send", "pageview", {hitCallback: function () { grab(); document.body.dataset.ga = "1"; }});
+dataLayer.push({event: "x", eventCallback: function () { grab(); document.body.dataset.gtm = "1"; }});
+googletag.cmd.push(function () { grab(); googletag.defineSlot("/1/x", [300, 250], "ad").addService(googletag.pubads()); googletag.enableServices(); document.body.dataset.gpt = "1"; });
 </script>`,
   "/embeds": () => `<!doctype html><title>embeds</title><p id="t">article with a video</p>
 <iframe id="yt" width="560" height="315" src="http://disqus.com:${port}/embed/comments/?f=fixture" title="comments"></iframe>
@@ -83,16 +85,26 @@ googletag.cmd.push(function () { googletag.defineSlot("/1/x", [300, 250], "ad").
 <a id="tco" href="https://t.co/AbCdEf" data-expanded-url="http://clean-fixture.test:${port}/dest?x=1&utm_source=tw">t.co</a>
 <a id="plain" href="http://clean-fixture.test:${port}/dest?ref=main&id=5">plain</a>
 <script>document.getElementById("hijack").addEventListener("mousedown", function () { this.href = "https://www.google.com/url?q=" + encodeURIComponent("http://clean-fixture.test:${port}/dest?id=4&gclid=hijack"); });</script>`,
+  "/results": () => `<!doctype html><title>results</title><body>
+<a id="r1" href="http://www.google.com/url?q=${encodeURIComponent(`http://clean-fixture.test:${port}/dest?a=1`)}&usg=X">result</a>
+<a id="r2" href="http://www.google.com/url?q=${encodeURIComponent(`http://malware-fixture.test:${port}/payload`)}&usg=Y">bad result</a>`,
+  "/url": () => `<!doctype html><title>google redirect notice</title><p id="notice">The page you were on is trying to send you to another site.</p>`,
+  "/scanner": () => `<!doctype html><title>scanner</title><p id="scanned">scanner checked it</p>`,
+  "/sw.js": () => "",
+  "/swpage": () => `<!doctype html><title>sw</title><script>window.swReady = navigator.serviceWorker.register("/sw.js").then(() => navigator.serviceWorker.ready).then(() => caches.keys()).then((k) => k.length);</script>`,
+  "/clickjack": () => `<!doctype html><title>clickjack</title><p>article</p><div id="wrap"><iframe id="yt" width="560" height="315" src="http://disqus.com:${port}/embed/comments/?f=cj" title="comments"></iframe></div>`,
   "/dest2": () => `<!doctype html><title>dest2</title><script>history.replaceState(null, "", "/dest2?gclid=zzz&k=1&mc_eid=abc");</script>`,
-  "/noise": () => `<!doctype html><title>noise</title><canvas id="c" width="64" height="32"></canvas><script>
-window.canvasHash = () => { const c = document.getElementById("c"); const x = c.getContext("2d"); x.fillStyle = "#c33"; x.fillRect(0, 0, 64, 32); x.fillStyle = "#123"; x.font = "14px sans-serif"; x.fillText("egress", 4, 20);
-  const d = x.getImageData(0, 0, 64, 32).data; let h = 0; for (let i = 0; i < d.length; i++) h = (h * 31 + d[i]) >>> 0; return h; };</script>`,
 };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://fixture");
   const host = (req.headers.host || "").replace(/:\d+$/, "");
   hits.push({host, path: url.pathname, query: url.search, gpc: req.headers["sec-gpc"] || null, referer: req.headers.referer || null, cookie: req.headers.cookie || null, method: req.method});
   const send = (code, type, body, extra = {}) => { res.writeHead(code, {"content-type": type, "cache-control": "no-store", ...extra}); res.end(body); };
+  if (url.pathname === "/sw.js") {
+    return send(200, "text/javascript", `self.addEventListener("install", (e) => e.waitUntil(caches.open("eg-fixture").then((c) => c.put("/cached.js", new Response("window.fromCache = 1", {headers: {"content-type": "text/javascript"}})))));
+self.addEventListener("fetch", (e) => { if (e.request.url.endsWith("/cached.js")) e.respondWith(caches.match("/cached.js")); });`);
+  }
+  if (host.endsWith("safelinks.protection.outlook.com")) return send(200, "text/html; charset=utf-8", pages["/scanner"]());
   if (pages[url.pathname]) {
     const extra = url.pathname === "/refpage" ? {"referrer-policy": "unsafe-url"} : {};
     return send(200, "text/html; charset=utf-8", pages[url.pathname](), extra);
@@ -105,14 +117,15 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 port = server.address().port;
-const FIXTURE_HOSTS = ["publisher.example", "www.publisher.example", "tracker-fixture.test", "clean-fixture.test", "cdn-assets.test", "www.youtube.com", "disqus.com"];
+const FIXTURE_HOSTS = ["publisher.example", "www.publisher.example", "tracker-fixture.test", "clean-fixture.test", "cdn-assets.test", "www.youtube.com", "disqus.com",
+  "www.google.com", "malware-fixture.test", "nam02.safelinks.protection.outlook.com"];
 const P = (p) => `http://publisher.example:${port}${p}`;
 const hitPaths = () => hits.map((h) => `${h.host}${h.path}`);
 
 // ---- Chrome ---------------------------------------------------------------------------------
 const profile = path.join(work, "profile");
 fs.mkdirSync(profile);
-const browser = launch({bin: opt("--chrome", DEFAULT_CHROME), profile, args: ["--no-proxy-server",
+const browser = launch({bin: opt("--chrome", DEFAULT_CHROME), profile, args: ["--no-proxy-server", `--unsafely-treat-insecure-origin-as-secure=http://publisher.example:${port}`,
   "--disable-features=HttpsUpgrades,HttpsFirstBalancedModeAutoEnable,OptimizationHints,MediaRouter,Translate",
   `--host-resolver-rules=${FIXTURE_HOSTS.map((h) => `MAP ${h} 127.0.0.1`).join(", ")}, MAP * ~NOTFOUND, EXCLUDE 127.0.0.1`, "--window-size=1280,900"]});
 const {cdp, evaluate} = browser;
@@ -214,13 +227,15 @@ try {
   const ref = hits.find((h) => h.path === "/ref.gif");
   check("referrer: a page asking for unsafe-url sends only its origin cross-site", ref && ref.referer === `http://publisher.example:${port}/`, ref && ref.referer);
 
-  // 2. Link unwrapping: the redirector is never contacted; hostile destinations are refused.
+  // 2. Link unwrapping: from the redirector's own site the redirector is never contacted; hostile destinations are
+  // refused; a threat-listed destination lands on the warning page; from anywhere else the redirector keeps its check.
+  await navigate(page, `http://www.google.com:${port}/results`);
   hits.length = 0;
-  await navigate(page, `http://www.google.com/url?sa=t&q=${encodeURIComponent(`http://clean-fixture.test:${port}/dest?a=1`)}&usg=X`);
+  await evaluate(page, "location.href = document.getElementById('r1').href; true");   // a navigation started by Google's page (DNR path, not the click-time cleaner)
   const unwrapped = await until(page, `location.href === "http://clean-fixture.test:${port}/dest?a=1"`, "unwrapped link opens its destination");
-  check("links: google.com/url opens the destination directly", unwrapped && hits.some((h) => h.path === "/dest"), await evaluate(page, "location.href"));
+  check("links: a google.com/url navigation started on Google goes through the unwrap page to the destination directly; Google is not contacted", unwrapped && hits.some((h) => h.path === "/dest") && !hits.some((h) => h.host === "www.google.com"), await evaluate(page, "location.href"));
   const linkState = await popupState(await swEval(`chrome.tabs.query({url: "http://clean-fixture.test/*"}).then((t) => t[0].id)`), `http://clean-fixture.test:${port}/dest?a=1`);
-  check("links: the popup shows the unwrapped link tracker", linkState.blocked.some((b) => b.list === "links" && b.host === "www.google.com"), JSON.stringify(linkState.blocked));
+  check("links: the popup shows the unwrapped link tracker", linkState.blocked.some((b) => b.list === "links" && b.host === "www.google.com"), JSON.stringify({blocked: linkState.blocked, all: await swEval(`chrome.tabs.query({}).then((t) => t.map((x) => [x.id, x.url]))`), logs: await swEval(`chrome.storage.session.get(null).then((s) => Object.keys(s).filter((k) => k.startsWith("log:")).map((k) => [k, s[k].items.map((i) => i.list + ":" + i.host)]))`)}));
   await navigate(page, `chrome-extension://${id}/unwrap.html#https://www.google.com/url?q=${encodeURIComponent("https://user:pw@clean-fixture.test/")}`);
   await sleep(500);
   check("links: a destination with credentials is shown, not opened", (await evaluate(page, "location.protocol")) === "chrome-extension:" && !(await evaluate(page, "document.getElementById('card').hidden")));
@@ -230,15 +245,84 @@ try {
   await navigate(page, `http://www.google.com/url?q=${encodeURIComponent("javascript:alert(1)")}`);
   await sleep(500);
   check("links: a javascript: destination is never redirected at all", !(await evaluate(page, "location.href")).startsWith(`chrome-extension://${id}/unwrap.html`));
+  // The same wrapper arriving from elsewhere (typed, a mail client, another site): Google's own check stays.
+  hits.length = 0;
+  await navigate(page, `http://www.google.com/url?q=${encodeURIComponent(`http://clean-fixture.test:${port}/dest?typed=1`)}&utm_source=mail`);
+  await sleep(800);
+  const typedAt = await evaluate(page, "location.href");
+  check("links: a google.com/url link typed or opened from another app is not unwrapped (Google's own check stays)",
+    !typedAt.startsWith(`chrome-extension://${id}/unwrap.html`) && !hits.some((h) => h.path === "/dest"), typedAt);
+  const match = (initiator) => swEval(`chrome.declarativeNetRequest.testMatchOutcome({url: "https://www.google.com/url?q=https%3A%2F%2Fexample.org%2F", type: "main_frame"${initiator ? `, initiator: "${initiator}"` : ""}}).then((r) => r.matchedRules.map((m) => m.rulesetId))`);
+  const fromGoogle = await match("https://www.google.com"), fromMail = await match("https://mail.example"), fromNowhere = await match(null);
+  check("links: Chrome itself matches the unwrap rule only for navigations started on Google",
+    fromGoogle.includes("links") && !fromMail.includes("links") && !fromNowhere.includes("links"), JSON.stringify({fromGoogle, fromMail, fromNowhere}));
+  await navigate(page, P("/clicks"));
+  const otherSite = await (async () => {
+    const box = await evaluate(page, `(() => { const r = document.querySelector("#wrapped").getBoundingClientRect(); return {x: r.left + 4, y: r.top + r.height / 2}; })()`);
+    await cdp("Input.dispatchMouseEvent", {type: "mousePressed", x: box.x, y: box.y, button: "right", clickCount: 1}, page);
+    await cdp("Input.dispatchMouseEvent", {type: "mouseReleased", x: 5, y: 600, button: "right", clickCount: 1}, page);
+    await sleep(150);
+    return evaluate(page, "document.querySelector('#wrapped').getAttribute('href')");
+  })();
+  check("links: the same wrapper on another site keeps its address at click time", otherSite.startsWith("https://www.google.com/url?q="), otherSite);
+  // Unwrap -> threat list: the destination is checked before anything opens.
+  await navigate(page, `http://www.google.com:${port}/results`);
+  hits.length = 0;
+  await evaluate(page, "location.href = document.getElementById('r2').href; true");
+  const toWarning = await until(page, `location.href.startsWith("chrome-extension://${id}/warning.html") && document.getElementById("host").textContent === "malware-fixture.test"`, "unwrapped threat destination goes to the warning page");
+  check("links: an unwrapped destination on the threat list lands on warning.html; the threat host is never contacted",
+    toWarning && (await evaluate(page, "document.getElementById('host').textContent")) === "malware-fixture.test" && !hits.some((h) => h.host === "malware-fixture.test"), await evaluate(page, "location.href"));
+
+  // 2b. Mail scanners: the interstitial; nothing opens by itself; Continue goes through the scanner; Open directly is checked.
+  const scanUrl = (dest) => `http://nam02.safelinks.protection.outlook.com:${port}/?url=${encodeURIComponent(dest)}&data=05%7C02&sdata=sig&utm_source=x`;
+  const scanned = scanUrl(`http://clean-fixture.test:${port}/dest?s=1`);
+  hits.length = 0;
+  await navigate(page, scanned);
+  const onScan = await until(page, `location.href.startsWith("chrome-extension://${id}/unwrap.html") && !document.getElementById("scan").hidden`, "scanner link shows the interstitial");
+  await sleep(1500);
+  check("scanner: a Safe Links address shows the interstitial with the destination host and stays there; nothing is contacted",
+    onScan && (await evaluate(page, "document.getElementById('scan-host').textContent")) === "clean-fixture.test" && (await evaluate(page, "location.protocol")) === "chrome-extension:" && hits.length === 0,
+    JSON.stringify({host: await evaluate(page, "document.getElementById('scan-host').textContent"), hits: hitPaths()}));
+  check("scanner: Continue through the scanner has the focus; Open directly says it skips the scan",
+    (await evaluate(page, "document.activeElement && document.activeElement.id")) === "through" && /skips the mail scan/.test(await evaluate(page, "document.getElementById('direct').textContent")));
+  const framed = await evaluate(page, `new Promise((r) => { const f = document.createElement("iframe"); f.src = location.href; f.onload = () => { try { r(f.contentDocument ? f.contentDocument.getElementById("scan") && !f.contentDocument.getElementById("scan").hidden : false); } catch (e) { r(false); } }; document.body.append(f); setTimeout(() => r(false), 3000); })`);
+  check("scanner: the interstitial does not render inside a frame", framed === false, String(framed));
+  await click(page, "#through");
+  const through = await until(page, "location.hostname === 'nam02.safelinks.protection.outlook.com'", "Continue reaches the scanner");
+  const scanHit = hits.find((h) => h.host === "nam02.safelinks.protection.outlook.com");
+  check("scanner: Continue goes through the scanner with its address untouched (signature and every parameter)", through && scanHit && scanHit.query === new URL(scanned).search, JSON.stringify(scanHit));
+  await sleep(300);
+  const passesLeft = await swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => r.filter((x) => x.id >= 200000 && x.id < 300000).length)");
+  hits.length = 0;
+  await navigate(page, scanned);
+  await until(page, `location.href.startsWith("chrome-extension://${id}/unwrap.html")`, "the pass was for one navigation");
+  check("scanner: the pass is used up; the next scanned link shows the interstitial again", passesLeft === 0 && !hits.some((h) => h.host.endsWith("outlook.com") && h.path === "/"), `${passesLeft} ${hitPaths().join(" ")}`);
+  // Open directly to a threat-listed destination: warning page, nothing contacted.
+  hits.length = 0;
+  await navigate(page, scanUrl(`http://malware-fixture.test:${port}/doc`));
+  await until(page, "!document.getElementById('scan').hidden", "threat scanner interstitial");
+  await click(page, "#direct");
+  const directWarn = await until(page, `location.href.startsWith("chrome-extension://${id}/warning.html")`, "Open directly to a listed host goes to the warning page");
+  check("scanner: Open directly to a destination on the threat list lands on warning.html", directWarn && !hits.some((h) => h.host === "malware-fixture.test" || h.host.endsWith("outlook.com")), hitPaths().join(" "));
+  // The setting (off by default) opens readable scanned links directly, still checked.
+  await popupAct(tabId, P("/fp"), {type: "set-scanned-direct", on: true});
+  hits.length = 0;
+  await navigate(page, scanned);
+  const direct = await until(page, `location.href === "http://clean-fixture.test:${port}/dest?s=1"`, "the setting opens scanned links directly");
+  check("scanner: with Always open scanned links directly on, the destination opens and the scanner is skipped", direct && !hits.some((h) => h.host.endsWith("outlook.com")), hitPaths().join(" "));
+  await popupAct(tabId, P("/fp"), {type: "set-scanned-direct", on: false});
 
   // 8. Surrogates: page code that calls into blocked trackers keeps working; nothing reaches the trackers.
   await navigate(page, P("/surrogate"));
   const surrogate = await until(page, "document.body.dataset.ga === '1' && document.body.dataset.gtm === '1' && document.body.dataset.gpt === '1'", "surrogates answered");
   check("surrogates: ga() hitCallback, dataLayer eventCallback and googletag.cmd all run with no tracker contacted", surrogate,
     JSON.stringify(await evaluate(page, "({ga: typeof ga, loaded: ga && ga.loaded, gt: typeof googletag, ds: {...document.body.dataset}, entries: performance.getEntriesByType('resource').map((e) => e.name.slice(0, 90))})")));
+  const stacks = await evaluate(page, "window.stacks");
+  check("surrogates: a page callback's stack shows no extension address", stacks.length >= 3 && stacks.every((st) => !/chrome-extension:/.test(st)), JSON.stringify(stacks));
 
-  // 2 + owner priority: link cleaning at click time, at navigation, in the address bar, Copy clean link, cookies.
-  await navigate(page, `http://publisher.example:${port}/clicks`);
+  // 2 + owner priority: link cleaning at click time (on Google's own page, so its wrappers may be unwrapped), at
+  // navigation, in the address bar, Copy clean link, cookies.
+  await navigate(page, `http://www.google.com:${port}/clicks`);
   const press = async (selector, button = "left") => {
     const box = await evaluate(page, `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x: r.left + 4, y: r.top + r.height / 2}; })()`);
     await cdp("Input.dispatchMouseEvent", {type: "mousePressed", x: box.x, y: box.y, button, clickCount: 1}, page);
@@ -271,8 +355,11 @@ try {
   const bar = await waitFor(async () => (await evaluate(page, "location.search")) === "?k=1", 6000, 200);
   check("address bar: parameters a page adds with history.replaceState are cleaned after load", bar, await evaluate(page, "location.search"));
   // Copy clean link (context menu handler, through the offscreen document).
-  const copied = await swEval(`__EGBackground.copyClean(${JSON.stringify(`https://www.google.com/url?q=${encodeURIComponent("https://shop.example/p?id=9&utm_campaign=x&gclid=y")}`)})`);
-  check("copy clean link: the menu handler copies the unwrapped, cleaned address", copied.text === "https://shop.example/p?id=9" && copied.ok === true, JSON.stringify(copied));
+  const g9 = `https://www.google.com/url?q=${encodeURIComponent("https://shop.example/p?id=9&utm_campaign=x&gclid=y")}`;
+  const copied = await swEval(`__EGBackground.copyClean(${JSON.stringify(g9)}, "https://www.google.com/search?q=x")`);
+  check("copy clean link: on Google, the menu handler copies the unwrapped, cleaned address", copied.text === "https://shop.example/p?id=9" && copied.ok === true, JSON.stringify(copied));
+  const copiedElsewhere = await swEval(`__EGBackground.copyClean(${JSON.stringify(g9)}, "https://mail.example/inbox")`);
+  check("copy clean link: elsewhere, the wrapper is copied as it is (its own check stays)", copiedElsewhere.text === g9, JSON.stringify(copiedElsewhere));
   // Tracking cookies set by page script are removed; a preference cookie stays.
   await navigate(page, `http://clean-fixture.test:${port}/cookies`);
   const gone = await waitFor(async () => !/_ga=|_fbp=/.test(await evaluate(page, "document.cookie")), 5000, 200);
@@ -310,10 +397,12 @@ try {
   const quad = button && (await cdp("DOM.getBoxModel", {backendNodeId: button.backendNodeId}, page)).model.content;
   if (quad) for (const type of ["mousePressed", "mouseReleased"]) await cdp("Input.dispatchMouseEvent", {type, x: (quad[0] + quad[4]) / 2, y: (quad[1] + quad[5]) / 2, button: "left", clickCount: 1}, page);
   const embedded = await waitFor(() => hits.some((h) => h.host === "disqus.com" && h.path === "/embed/comments/"), 6000);
+  const embedCookie = hits.find((h) => h.host === "disqus.com" && h.path === "/embed/comments/");
   check("click-to-load: one real click loads the held embed for this page", embedded && (await evaluate(page, "getComputedStyle(document.getElementById('yt')).display")) !== "none",
     JSON.stringify({button: Boolean(quad), held: await evaluate(page, "document.querySelectorAll('[data-eg-embed]').length"), frames: await evaluate(page, "[...document.querySelectorAll('iframe')].map((f) => f.src + ' ' + f.style.display)"),
       session: await swEval("chrome.declarativeNetRequest.getSessionRules()"),
       outcome: await swEval(`chrome.declarativeNetRequest.testMatchOutcome({url: "http://www.youtube.com:${port}/embed/fixture", type: "sub_frame", initiator: "http://publisher.example:${port}", tabId: ${tabId}}).then((r) => r.matchedRules)`).catch((e) => String(e))}));
+  check("click-to-load: the loaded embed's request carries no cookies (Strict stripping stays above the embed allow)", embedCookie && embedCookie.cookie === null, JSON.stringify(embedCookie));
   const sessionEmbeds = await swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => r.filter((x) => x.id >= 300000 && x.id < 400000).length)");
   await navigate(page, P("/embeds"));
   await sleep(500);
@@ -333,29 +422,61 @@ try {
   // Known limit, reported not asserted: Chrome still gives the frame's own script the embedder's origin
   // (document.referrer, and location.ancestorOrigins, which no extension can override).
   console.log(`note: inside the frame, document.referrer was ${report ? decodeURIComponent(report.query.slice(3)) || "(empty)" : "(no report)"}`);
+  // Clickjacking: the page makes the placeholder's ancestor nearly transparent; a real click on it loads nothing.
+  await navigate(page, P("/clickjack"));
+  await sleep(900);
+  await evaluate(page, "document.getElementById('wrap').style.opacity = '0.02'; true");
+  hits.length = 0;
+  const cj = await (async () => {
+    const {root: r} = await cdp("DOM.getDocument", {depth: -1, pierce: true}, page);
+    const b = findButton(r);
+    const q = b && (await cdp("DOM.getBoxModel", {backendNodeId: b.backendNodeId}, page)).model.content;
+    if (q) for (const type of ["mousePressed", "mouseReleased"]) await cdp("Input.dispatchMouseEvent", {type, x: (q[0] + q[4]) / 2, y: (q[1] + q[5]) / 2, button: "left", clickCount: 1}, page);
+    return Boolean(q);
+  })();
+  await sleep(1200);
+  check("click-to-load: a click on a placeholder the page made transparent loads nothing", cj && !hits.some((h) => h.host === "disqus.com") && (await swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => r.filter((x) => x.id >= 300000 && x.id < 400000).length)")) === 0);
   await popupAct(tabId, P("/embeds"), {type: "strict-unallow", host: "cdn-assets.test"});
-  await popupAct(tabId, P("/embeds"), {type: "set-mode", mode: "noscript"});
+  // No scripts: a service worker that would serve cached scripts is unregistered and its caches cleared.
+  await popupAct(tabId, P("/embeds"), {type: "set-mode", mode: "default"});
+  await navigate(page, P("/swpage"));
+  const cachesBefore = await evaluate(page, "window.swReady.then((n) => n).catch((e) => 'error: ' + e.message)");
+  const regsBefore = await evaluate(page, "navigator.serviceWorker.getRegistrations().then((r) => r.length)");
+  const swReply = await popupAct(tabId, P("/swpage"), {type: "set-mode", mode: "noscript"});
+  await sleep(800);
+  const regsAfter = await evaluate(page, "navigator.serviceWorker.getRegistrations().then((r) => r.length)");
+  const cachesAfter = await evaluate(page, "caches.keys().then((k) => k.length)");
+  check("no scripts: switching to it unregisters the site's service worker and clears its Cache Storage",
+    regsBefore === 1 && cachesBefore === 1 && swReply.cleared && swReply.cleared.ok && regsAfter === 0 && cachesAfter === 0, JSON.stringify({regsBefore, cachesBefore, regsAfter, cachesAfter, cleared: swReply.cleared}));
   await navigate(page, P("/embeds"));
   await sleep(600);
   check("no scripts: the site's own script and inline code do not run", ((await evaluate(page, "window.loaded || []")).length === 0) && (await evaluate(page, "window.inline")) === undefined);
   await popupAct(tabId, P("/embeds"), {type: "set-mode", mode: "default"});
 
-  // 9: experimental fingerprint noise, off by default; stable within a site and session, different across sites.
-  const hashOn = async (url) => { await navigate(page, url); return evaluate(page, "canvasHash()"); };
-  const raw1 = await hashOn(P("/noise"));
-  const raw2 = await hashOn(`http://clean-fixture.test:${port}/noise`);
-  check("noise: off by default (both sites read the true canvas)", raw1 === raw2, `${raw1} ${raw2}`);
-  await popupAct(tabId, P("/noise"), {type: "set-noise", on: true});
-  const a1 = await hashOn(P("/noise"));
-  const a2 = await hashOn(P("/noise"));
-  const b1 = await hashOn(`http://clean-fixture.test:${port}/noise`);
-  check("noise: stable within a site and session, different across sites, never the true value", a1 === a2 && a1 !== b1 && a1 !== raw1 && b1 !== raw1, `${a1} ${a2} ${b1} raw ${raw1}`);
-  await popupAct(tabId, P("/noise"), {type: "set-noise", on: false});
-  const off = await hashOn(P("/noise"));
-  check("noise: switching it off restores the true value", off === raw1, `${off}`);
+  // 9: fingerprint noise was removed; nothing of it is registered, and GPC's getter looks native.
+  const noiseGone = await popupAct(tabId, P("/fp"), {type: "set-noise", on: true});
+  const registered = await swEval("chrome.scripting.getRegisteredContentScripts().then((s) => s.length)");
+  check("noise: removed (no switch, no registered page scripts)", Boolean(noiseGone.error) && registered === 0, JSON.stringify({noiseGone, registered}));
+  await navigate(page, P("/fp"));
+  const gpcShape = await evaluate(page, `(() => { const d = Object.getOwnPropertyDescriptor(Navigator.prototype, "globalPrivacyControl"); return {own: Object.prototype.hasOwnProperty.call(navigator, "globalPrivacyControl"), str: Function.prototype.toString.call(d.get), name: d.get.name, proto: "prototype" in d.get, value: navigator.globalPrivacyControl, enumerable: d.enumerable}; })()`);
+  check("GPC: the getter sits on Navigator.prototype and reads as native code", !gpcShape.own && /\[native code\]/.test(gpcShape.str) && gpcShape.name === "get globalPrivacyControl" && !gpcShape.proto && gpcShape.value === true, JSON.stringify(gpcShape));
 
   if (shots) {
     fs.mkdirSync(shots, {recursive: true});
+    // The mail-scanner interstitial at desktop and phone widths, light and dark.
+    const shot = (await cdp("Target.attachToTarget", {targetId: (await cdp("Target.createTarget", {url: "about:blank"})).targetId, flatten: true})).sessionId;
+    await cdp("Page.enable", {}, shot);
+    const demo = "https://nam02.safelinks.protection.outlook.com/?url=" + encodeURIComponent("https://payroll.contoso-hr.example/statements/2026-11?id=88213&view=pdf") + "&data=05%7C02%7Cj.doe%40contoso.example%7C9f2c%7C0&sdata=kQ3vZ7&reserved=0";
+    for (const scheme of ["light", "dark"]) {
+      await cdp("Emulation.setEmulatedMedia", {features: [{name: "prefers-color-scheme", value: scheme}]}, shot);
+      for (const [w, tag] of [[1440, "desktop"], [390, "390"]]) {
+        await cdp("Emulation.setDeviceMetricsOverride", {width: w, height: 800, deviceScaleFactor: 2, mobile: w < 600}, shot);
+        await navigate(shot, `chrome-extension://${id}/unwrap.html#${demo}`);
+        await until(shot, "!document.getElementById('scan').hidden", "interstitial rendered");
+        await sleep(300);
+        await screenshot(shot, path.join(shots, `scanner-interstitial-${tag}-${scheme}.png`), w);
+      }
+    }
     await navigate(page, P("/fp"));
     await evaluate(page, `Promise.all([probe("/sgtm/gtm.js?id=GTM-ABC"), probe("/hotjar-123.js?sv=6"), img("/g/collect?v=2&tid=G-1"), img("http://tracker-fixture.test:${port}/p.gif")]).then(() => navigator.sendBeacon("http://clean-fixture.test:${port}/b", "x"))`);
     await sleep(800);

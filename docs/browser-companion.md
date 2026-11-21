@@ -84,10 +84,11 @@ to the Chrome Web Store as is.
 | Ads by address | URL filters for ad paths that host lists cannot name | EasyList network filters |
 | Fingerprinting and session replay | FingerprintJS / Fingerprint Pro custom-subdomain and proxy loaders, ThreatMetrix `fp/` paths, iovation, proxied Hotjar, FullStory, LogRocket, Clarity, Mouseflow, Contentsquare, PostHog recorder, Smartlook | Hand-written paths in `browser/core/dnr.js`, plus EasyPrivacy |
 | Third-party beacons | `navigator.sendBeacon` and `<a ping>` to another site are blocked; `ping` attributes are removed before a click can fire them | `beacons` ruleset, `page-guard.js` |
-| Link trackers | Known redirectors (Google `/url`, Facebook and Messenger `l.php`, Instagram, Threads, Reddit `out.`, Tumblr, VK, YouTube `/redirect`, Slack, LinkedIn, DuckDuckGo, Bing `ck/a`, Yahoo `RU=`, Google AMP, Disqus, href.li, Skimlinks, Rakuten, Awin, Mandrill, Microsoft Safe Links, Proofpoint) are skipped: the navigation goes straight to the destination | `browser/core/links.js` |
-| Tracking parameters | 156 names removed everywhere and 220 more on the 67 sites that use generic names for tracking, on every navigation and at click time; Amazon's `/ref=` path segment | `browser/core/params.js` |
-| Tracking cookies | 41 name patterns (`_ga*`, `_gcl_*`, `_fbp`, `_fbc`, `_uet*`, `_ttp`, `_scid`, `_hj*`, `ajs_*`, `mp_*`, `amplitude_id_*`, `_clck`, `IDE`, …) deleted the moment they are set; third-party cookies stripped for tracker hosts and opaque redirectors | `browser/core/cookies.js`, `cookies` and `bounce` rulesets |
-| Global Privacy Control | `Sec-GPC: 1` on every request and `navigator.globalPrivacyControl === true` | `gpc` ruleset, `page-gpc.js` |
+| Link trackers | Known redirectors (Google `/url`, Facebook and Messenger `l.php`, Instagram, Threads, Reddit `out.`, Tumblr, VK, YouTube `/redirect`, Slack, LinkedIn, DuckDuckGo, Bing `ck/a`, Yahoo `RU=`, Google AMP, Disqus) are skipped when the click starts on the redirector's own site; affiliate and email click trackers with no safety check of their own (href.li, Skimlinks, Rakuten, Awin, Mandrill) from anywhere. The destination is checked against the threat list first | `browser/core/links.js` |
+| Mail security scanners | Microsoft Safe Links, Proofpoint URL Defense, Mimecast, Barracuda and Trend Micro links show a local page with the destination first; **Continue through the scanner** is the default | `unwrap.html` |
+| Tracking parameters | 147 names removed everywhere and 214 more on the 67 sites that use generic names for tracking, on every navigation and at click time; Amazon's `/ref=` path segment | `browser/core/params.js` |
+| Tracking cookies | 44 name patterns (`_ga*`, `_gcl_*`, `_fbp`, `_fbc`, `_uet*`, `_ttp`, `_scid`, Hotjar's ids, `ajs_*`, `mp_*`, `amplitude_id_*`, `_clck`, …; names that are not unique to one tracker only on their vendor's domains; never an opt-out or consent cookie) deleted the moment they are set; third-party cookies stripped for tracker hosts and opaque redirectors | `browser/core/cookies.js`, `cookies` and `bounce` rulesets |
+| Global Privacy Control | `Sec-GPC: 1` on every request and `navigator.globalPrivacyControl === true` (a getter on `Navigator.prototype` that reads as native code) | `gpc` ruleset, `page-gpc.js` |
 | Full-address referrers | A page or frame whose `Referrer-Policy` would send full addresses cross-site (`unsafe-url`, `no-referrer-when-downgrade`, `origin-when-cross-origin`) gets Chrome's default instead | `referrer` ruleset |
 | Trackers pages depend on | `ga()`, `gtag()`/`dataLayer` callbacks, `fbq()`, `analytics.*`, `_satellite`, `googletag` answered by inert local stubs | `browser/surrogates/` |
 
@@ -134,25 +135,43 @@ Threat-listed requests never get a one-click **Allow** in the popup.
 **Parameters removed.** The list lives in `browser/core/params.js` and was
 built from what each vendor documents its parameters for, then checked for
 coverage against ClearURLs, Brave's and Firefox's query stripping and
-AdGuard's URL tracking filter (names only; nothing copied). Global (156):
+AdGuard's URL tracking filter (names only; nothing copied). Global (147):
 campaign tags (`utm_*`, `pk_*`, `piwik_*`, `mtm_*`, `hsa_*`, `mc_cid`,
 `mc_eid`, `oly_*`, `vero_*`, `_openstat`, `yclid`, `ysclid`, `s_kwcid`,
-`ef_id`, `cmpid`, Eloqua and Silverpop ids), click ids (`gclid`, `gclsrc`,
+`ef_id`, Eloqua campaign and Silverpop ids), click ids (`gclid`, `gclsrc`,
 `gbraid`, `wbraid`, `dclid`, `gad_source`, `gad_campaignid`, `fbclid`,
 `msclkid`, `twclid`, `ttclid`, `li_fat_id`, `igshid`, `igsh`, `epik`,
 `sccid`, `rdt_cid`, `irclickid`, `srsltid`, `_gl`, Branch, Taboola,
 Outbrain), email-platform subscriber ids (Klaviyo, Drip, ActiveCampaign,
-ConvertKit, MailerLite, beehiiv, Bronto) and HubSpot's analytics ids.
-Per site (220 names on 67 sites): generic names that are tracking only there,
+beehiiv, Bronto) and HubSpot's analytics ids. `campaign_id`, `ad_id`,
+`adset_id` and `cmpid` are not global: inside ad and email platforms'
+dashboards they are the page's own data (`cmpid` stays on Bloomberg and
+`campaign_id` on the New York Times, where they are tracking).
+Per site (214 names on 67 sites): generic names that are tracking only there,
 for example `si` and `feature` on YouTube and Spotify, `s`/`t`/`ref_src` on
 X, `trk` and `trackingId` on LinkedIn, `ref`, `tag`, `linkCode`,
 `ascsubtag`, `pd_rd_*`, `pf_rd_*`, `psc` and the `/ref=` path on Amazon,
 `spm`/`scm` on AliExpress and Taobao, `ved`/`ei`/`sxsrf`/`oq` on Google
 search, `cvid`/`form` on Bing, `source` on Medium, eBay's `mk*` ids. Never
-removed anywhere: `mkt_tok`, `_hsenc`, `_hsmi` (unsubscribe and preference
-links), OAuth and session parameters (`code`, `state`, `token`, `session`,
-`nonce`, `client_id`, `redirect_uri`, SAML), search queries and pagination.
-A `ref` on any site outside the per-site sets (a GitHub branch, say) is kept.
+removed anywhere (`KEPT`, honoured by both the navigation rules and the page
+cleaner): recipient tokens that unsubscribe and preference links need
+(`mkt_tok`, `_hsenc`, `_hsmi`, ConvertKit `ck_subscriber_id`, MailerLite
+`ml_subscriber` and `ml_subscriber_hash`, Eloqua `elq` and `elqTrackId`,
+LinkedIn `midToken` and `midSig`, New York Times `nl`, `user_id` and
+`segment_id`), OAuth and session parameters (`code`, `state`, `token`,
+`session`, `nonce`, `client_id`, `redirect_uri`, SAML), search queries and
+pagination. A `ref` on any site outside the per-site sets (a GitHub branch,
+say) is kept.
+
+**Pages that are never cleaned.** An address whose path is an unsubscribe,
+opt-out, preferences, email-settings or subscriptions page keeps every
+parameter (one `allow` at the cleaning tier, mirrored in the page cleaner).
+Sign-in, payment, cloud-console and advertiser, affiliate and email-platform
+console hosts (`accounts.google.com`, `pay.google.com`, `ads.google.com`,
+`console.aws.amazon.com`, `affiliate-program.amazon.com`,
+`sellercentral.amazon.com`, `business.facebook.com`, `app.hubspot.com`, …;
+`EXCLUDED_HOSTS` in `core/params.js`) are left alone entirely, although the
+Google and Amazon per-site sets cover their consumer sites.
 
 **Popup.** It leads with what was blocked on this page: the count and a
 breakdown by named category (Ads and trackers, Disguised trackers, Malware and
@@ -218,10 +237,19 @@ with `scripts/lib/abp-dnr.cjs`:
 - converted: URL patterns (`||`, `|`, `^`, `*`), regular expressions RE2 can
   run, `$third-party` and first-party, resource types (including negated
   ones), `domain=`/`from=`, `to=`, `denyallow=`, `method=`, `match-case`,
-  `important`, exceptions (`@@`; with `$document` they become
-  `allowAllRequests`) and `$badfilter`. Host-only filters with the same
+  `important`, exceptions (`@@`) and `$badfilter`. Host-only filters with the same
   options fold into one `requestDomains` rule, so 47,000 EasyPrivacy hosts cost
   85 rules.
+- exceptions and `$important` filters only when anchored to a concrete host:
+  a `||host…` pattern on a real registrable name, a `to=` host, or a
+  `domain=` restriction (public suffixes removed from it). Anything else
+  (`@@||*^$document`, `@@^$document`, `@@|http$document`, `@@/./$document`,
+  `@@|https://$all`, a bare `@@/path`) would let one hostile or broken
+  upstream line allow, or block, everything: it is dropped and counted as
+  *suspicious*. A `$document` exception never becomes `allowAllRequests`: it
+  compiles to a plain `allow` for that host's own requests, at that list's
+  exception tier; `$all` allows requests to that host and nothing more. The
+  2026-11-21 lists have 7 (EasyList) and 4 (EasyPrivacy) such lines.
 - dropped, and counted by reason: anything that would block a top-level
   navigation, `$popup`, `$csp`, `$removeparam`, `$rewrite`,
   `$redirect-rule`, entity domains (`example.*`) where dropping them would
@@ -242,20 +270,54 @@ of Chrome's guaranteed 30,000 and 104 regular-expression rules of 1,000 (the
 build refuses to exceed either; limits from Chrome's
 `declarativeNetRequest` reference).
 
-**Exceptions** (`@@`) sit one step above the filters and below everything
-else: a list's exception lifts only that list's URL filters. It never
+**Exceptions** (`@@`). Each list has its own pair of tiers: its filters, and
+its exceptions directly above them. EasyList sits below EasyPrivacy, so an
+EasyList exception lifts only EasyList filters. The reverse cannot be kept
+apart on one priority ladder: an EasyPrivacy exception (there are about 850)
+also lifts an EasyList filter that matches the same request. Tracking blocks
+were put on top on purpose. No list exception reaches the hand-written
+fingerprinting, session-replay and first-party tracker filters, third-party
+beacon blocking, cookie and bounce stripping, parameter stripping, link
+unwrapping or the Referrer-Policy fix: all of those sit above every list
+exception (DNR applies a `modifyHeaders` rule only above every matching
+`allow`, and an `allow` lifts only lower tiers). A list exception never
 unblocks a host on the HaGeZi or CNAME lists, a threat, or one of your own
 block rules, and `$important` filters beat it. Your timed exceptions and a
-site set to Relaxed still win over the filters.
+site set to Relaxed still win over all of it.
+
+**Unpinned lists, checked twice.** The build fails when a list has more than
+25 suspicious lines, or when a fresh download's size, entry count or
+exception count moved by more than 2× from the last accepted copy (those
+counts are recorded beside its SHA-256 in the cache's `<id>.json`); review
+the list, then rebuild with `--accept-list-change ID`. The AdGuard
+click-through list has the same cap. Each list's SHA-256 and last-modified
+date are written to `NOTICE.txt` and shown under **List files** in the popup
+footer.
 
 ## Link and cookie cleaning
 
 Every link is cleaned in two places. On **every top-level or frame
 navigation** (so a link opened from Mail, Slack or any other app is cleaned
-too) the `params` and `links` rulesets strip the parameters above, cut
-Amazon's `/ref=` segment and send a known redirector to the local unwrap
-page, which decodes the destination and replaces itself with it: the
-redirector never sees the click, and Back returns to where the link was.
+too) the `params` ruleset strips the parameters above and cuts Amazon's
+`/ref=` segment, and the `links` ruleset sends a known redirector to the
+local unwrap page, which decodes the destination, checks it against the
+malware and phishing list (a listed one goes to the warning page) and
+replaces itself with it: the redirector never sees the click, and Back
+returns to where the link was.
+
+**Where a redirector is unwrapped.** Many redirectors run a safety check of
+their own on the way through: Google's redirect notice, Facebook's and
+LinkedIn's "leaving" pages, VK's and YouTube's warnings. A phishing email that
+links to `https://www.google.com/url?q=https://evil.example` relies on a
+blocker skipping that notice. So each redirector is unwrapped only when the
+navigation or click starts on its own site (DNR `initiatorDomains`; at click
+time, the page's own site): a Google result clicked on Google, a link clicked
+in Gmail, a Facebook post's link on Facebook. The same address arriving from
+anywhere else (a mail client, another site, the address bar, another app) is
+left alone, and only tracking parameters on it are removed. Inner layers of a
+nested link are unwrapped only while they belong to that same site. Affiliate
+and email click trackers that check nothing (href.li, Skimlinks, Rakuten,
+Awin, Mandrill) are unwrapped from anywhere.
 **At click time** (`page-guard.js`, on mousedown, click, middle click, the
 context menu and Enter) the link's `href` is rewritten to its clean,
 unwrapped destination before Chrome reads it, so "Copy link address" copies
@@ -281,21 +343,41 @@ the hop happen but strips its cookies both ways (63 short-link, email and
 affiliate redirectors plus AdGuard's 37,000 disguised click-through
 subdomains).
 
-**Mail security rewriters are unwrapped** (Microsoft Safe Links, Proofpoint
-URL Defense v2 and v3 when the address is complete) because the owner asked
-for it. That skips the click-time scan an employer's mail security would have
-made. Switch cleaning off for those hosts if that scan matters.
+**Mail security scanners are never unwrapped automatically.** Microsoft Safe
+Links, Proofpoint URL Defense (v2 and v3), Mimecast, Barracuda Link
+Protection and Trend Micro Click Time Protection links go, from anywhere, to
+a local page (`unwrap.html`, reachable only by the DNR redirect: it is
+web-accessible by its per-session dynamic address alone, refuses to render
+inside a frame and never navigates by itself). It shows the destination host
+large in a monospace face, the full address below it and, for an
+internationalized name, both the `xn--` form that really opens and the
+Unicode form it may imitate. **Continue through the scanner** has the focus:
+the worker adds a session rule that lets the next navigation to that scanner
+host in that tab pass once, so the scanner gets its own address, signature
+and parameters untouched. **Open directly (skips the mail scan)** opens the
+decoded destination after the threat-list check. Mimecast keeps the address
+on its server, so only the host is shown and only Continue is offered. The
+click-time cleaner and **Copy clean link** never change a scanner's link. The
+popup setting **Always open scanned links directly** (off by default) skips
+the page for every scanner link whose address is readable; the threat-list
+check still applies. This replaces the earlier behaviour (Safe Links and
+Proofpoint unwrapped automatically) and its escape hatch, which could not be
+reached: the scanner's host was never a page you could open the popup on.
 
-**Tracking cookies** (`core/cookies.js`, 41 name patterns, using the
+The interstitial at 1440 px and 390 px, light and dark, is captured by
+`node tests/browser/chrome-privacy.mjs --shots DIR`.
+
+**Tracking cookies** (`core/cookies.js`, 44 name patterns, using the
 `cookies` permission) are deleted the moment they are set, first or third
 party: Google Analytics and Ads (`_ga*`, `_gid`, `_gat*`, `_gcl_*`,
-`_gac_*`, `__utm*`, `__gads`, `IDE`, `test_cookie`, first-party tagging
-`FPID`), Meta (`_fbp`, `_fbc`), Microsoft Advertising (`_uetsid`, `_uetvid`,
+`_gac_*`, `__utm*`, `__gads`, first-party tagging `FPID`), DoubleClick
+(`IDE`, `DSID`, `test_cookie` on `doubleclick.net` only), Meta (`_fbp`, `_fbc`), Microsoft Advertising (`_uetsid`, `_uetvid`,
 `_uetmsclkid`), TikTok, Snap, Pinterest, Reddit, LinkedIn (`li_fat_id`), X,
 Hotjar (`_hj*`), Segment (`ajs_*`), Mixpanel, Amplitude, Clarity, Matomo,
 Snowplow, Heap, Yandex, Parse.ly, HubSpot (`__hstc`, `hubspotutk`), Marketo,
 PostHog, LogRocket, FullStory, Contentsquare, Taboola, Outbrain, Quantcast,
-Chartbeat and the cookies that click ids are written into. Microsoft's `MUID`
+Chartbeat and the cookies that click ids are written into (the full table is
+below). Microsoft's `MUID`
 is left alone: cutting it to a session cookie made Bing search render no
 results in the real-site run, and Microsoft sign-in reads it too.
 Nothing else is touched: sessions, carts, consent records and preferences
@@ -303,12 +385,72 @@ keep working. A script that sets the cookie again gets a fresh, unlinked id
 every time. Third-party requests to tracker hosts that stay reachable
 (social embeds, ad hosts a list's exception lets through) go without cookies
 (`cookies` ruleset); payment, sign-in and captcha providers are excepted.
+The `bounce` ruleset takes only subdomains from AdGuard's click-through list
+(a bare registrable domain would strip a whole site's cookies on every
+navigation to it) and never a payment, sign-in or console host, so
+`go.checkout.com`, `link.afterpay.com` and `*.affirm.com` from today's
+list are left out.
+
+Every cookie pattern, and why it is safe to delete. A name that is not
+unique to one tracker is matched only on its vendor's domains; any name that
+looks like an opt-out, consent, GDPR/CCPA or do-not-track record is never
+deleted, whatever pattern it resembles (deleting one would switch tracking
+back on).
+
+| Pattern | Vendor | Where | Why it is safe to delete |
+| --- | --- | --- | --- |
+| `_ga`, `_ga_<id>` | Google Analytics | everywhere | Client id; GA's own naming, used by nothing else |
+| `_gid` | Google Analytics | everywhere | 24-hour visitor id |
+| `_gat`, `_gat_*` | Google Analytics | everywhere | Request throttle flag |
+| `_gcl_au`, `_gcl_aw`, `_gcl_dc`, `_gcl_gb`, `_gcl_gf`, `_gcl_ha`, `_gcl_ag`, `_gcl_gs` | Google Ads | everywhere | Stored click ids and conversion linker |
+| `_gac_*` | Google Ads | everywhere | Campaign click id |
+| `_dc_gtm_*` | Google Tag Manager | everywhere | Throttle flag |
+| `__utma`, `__utmb`, `__utmc`, `__utmv`, `__utmt`, `__utmz` | Google Analytics (legacy) | everywhere | Visitor, session and campaign ids |
+| `__gads`, `__gpi`, `__eoi` | Google Ad Manager | everywhere | Ad-serving visitor ids |
+| `IDE`, `DSID`, `test_cookie` | DoubleClick | `doubleclick.net` | Ad ids. Elsewhere `DSID` is the Pulse / Ivanti Connect Secure VPN session and `test_cookie` a generic probe |
+| `FPID`, `FPLC`, `FPGCLAW`, `FPAU` | Google first-party tagging | everywhere | Server-side tagging ids |
+| `_fbp`, `_fbc` | Meta | everywhere | Browser id and stored click id |
+| `_uetsid`, `_uetvid`, `_uetmsclkid` | Microsoft Advertising | everywhere | UET visitor and click ids |
+| `_ttp`, `_tt_enable_cookie`, `ttcsid*` | TikTok | everywhere | Pixel ids |
+| `_scid`, `_scid_r`, `_sctr`, `_screload` | Snap | everywhere | Pixel ids |
+| `_pin_unauth`, `_pinterest_ct_ua`, `_pinterest_ct_rt`, `_epik`, `_derived_epik` | Pinterest | everywhere | Tag ids and stored click id |
+| `_rdt_uuid`, `_rdt_cid`, `_rdt_em` | Reddit | everywhere | Pixel ids |
+| `li_fat_id`, `_li_dcdm_c`, `li_sugr` | LinkedIn | everywhere | Insight tag ids |
+| `_twclid` | X | everywhere | Stored click id |
+| `muc_ads` | X | `twitter.com`, `x.com` | Ad id; generic-looking name |
+| Hotjar ids: `_hjSessionUser_*`, `_hjSession_*`, `_hjid`, `_hjFirstSeen`, `_hjAbsoluteSessionInProgress`, `_hjIncludedIn(Session\|Pageview)Sample*`, `_hjRecording*`, `_hjSessionRejected`, `_hjCachedUserAttributes`, `_hjUserAttributesHash` | Hotjar | everywhere | Visitor, session and sampling ids. Not `_hjOptOut`, not poll and survey state |
+| `ajs_anonymous_id`, `ajs_user_id`, `ajs_group_id` | Segment | everywhere | Visitor ids |
+| `mp_<hex>_mixpanel` | Mixpanel | everywhere | Visitor id |
+| `amplitude_id_*`, `AMP_<hex>`, `AMP_MKTG_<hex>` | Amplitude | everywhere | Visitor ids |
+| `_clck`, `_clsk` | Microsoft Clarity | everywhere | Visitor and session ids |
+| `_pk_id.*`, `_pk_ses.*`, `_pk_ref.*`, `_pk_cvar.*`, `_pk_hsr.*` | Matomo | everywhere | Visitor, session and referrer; not `mtm_consent*` |
+| `_sp_id.*`, `_sp_ses.*` | Snowplow | everywhere | Visitor and session ids |
+| `_hp2_id.*`, `_hp2_ses_props.*`, `_hp2_props.*` | Heap | everywhere | Visitor ids |
+| `_ym_uid`, `_ym_d`, `_ym_isad`, `_ym_visorc` | Yandex Metrica | everywhere | Visitor ids |
+| `_parsely_session`, `_parsely_visitor` | Parse.ly | everywhere | Visitor and session ids |
+| `__hstc`, `__hssc`, `__hssrc`, `hubspotutk` | HubSpot | everywhere | Visitor and session ids; not `__hs_opt_out` |
+| `_mkto_trk` | Marketo | everywhere | Visitor id |
+| `ph_phc_*_posthog` | PostHog | everywhere | Visitor id |
+| `_lr_uf_*`, `_lr_hb_*`, `_lr_tabs_*` | LogRocket | everywhere | Session-replay ids |
+| `_fs_uid`, `_fs_cd`, `fs_uid` | FullStory | everywhere | Session-replay ids |
+| `_cs_id`, `_cs_s` | Contentsquare | everywhere | Visitor and session; not `_cs_c` (consent) or `_cs_optout` |
+| `_tq_id.*` | TaboolaPush | everywhere | Visitor id |
+| `taboola_session_id`, `taboola_fp_td_user_id`, `taboola_select`, `taboola_global_user_id` | Taboola | everywhere | Visitor ids; not `taboola_optout` |
+| `t_gid` | Taboola | `taboola.com` | Visitor id; generic-looking name |
+| `outbrain_cid_fetch`, `obuid` | Outbrain | everywhere | Visitor ids |
+| `_kuid_`, `_cc_id`, `_cc_cc`, `_cc_aud` | Salesforce DMP (Krux) | `krxd.net` | Audience ids; short generic names |
+| `_an_uid` | Xandr | everywhere | Visitor id |
+| `uuid2`, `anj` | Xandr | `adnxs.com` | Ad ids; generic names |
+| `__qca` | Quantcast | everywhere | Visitor id |
+| `_cb_ls`, `_cb_svref`, `_chartbeat<n>` | Chartbeat | everywhere | Visitor and referrer. Bare `_cb` dropped: too short to be unique |
 
 The popup shows **links cleaned in this tab** and **tracking cookies removed
-on this site**. **Stop cleaning on this site** is the only brake: links to
-that site keep their parameters and are not unwrapped, its tracking cookies
-stay, and its third-party requests keep their cookies. URL filters and
-everything else stay on.
+on this site**. **Stop cleaning on this site**: links to that site keep their
+parameters and are not unwrapped, and its own tracking cookies stay. Its
+pages' third-party requests to tracker hosts still go without cookies: an
+allow at the cleaning tier for its subresources would also lift every URL
+filter below that tier. **Relaxed** is the level that lifts third-party
+cookie stripping too. URL filters and everything else stay on.
 
 ## Privacy signals and leak reducers
 
@@ -330,6 +472,18 @@ a third-party frame's own script can still learn the embedding site. No
 tracking request headers were stripped: the ones that matter are cookies
 (handled above) and Chrome's `X-Client-Data`, which extensions cannot see.
 
+**What a site can still notice.** `navigator.globalPrivacyControl` is a
+getter on `Navigator.prototype` (never on `navigator` itself) made from a
+bound native function, so `toString()` reads `function () { [native code]
+}`, it has no `prototype` and its name is `get globalPrivacyControl`; a
+script comparing it with Firefox's or Brave's native getter can still tell
+(the native `toString` includes the name, and the native getter throws on a
+foreign receiver). A tracking cookie a script sets disappears within
+milliseconds, which the script can observe by reading it back. An unwrapped
+link arrives with no `Referer` and no hop through the redirector, which the
+destination can notice. Blocked requests fail, as with any blocker. None of
+this identifies the person; it says some privacy tool runs.
+
 ## Fingerprinting
 
 Fingerprinting and session-replay scripts are **blocked by address**, which
@@ -342,18 +496,16 @@ checkout that requires it may ask for extra verification. Set that site to
 Relaxed.
 
 The browser APIs themselves (canvas, WebGL, audio, fonts, screen) are **not
-changed by default**. Overriding them in a content script is fragile, easy
-to detect and makes this one browser stand out from every other Chrome. An
-**experimental** switch in the popup (off by default) adds small,
-deterministic noise to canvas, WebGL and audio readouts, keyed per site and
-per browser session: one site sees the same values all session, another site
-sees different ones, so a canvas fingerprint cannot be matched across sites.
-The trade-off, plainly: a script can detect the noise by drawing a known
-image; one user adding noise does not hide in a crowd the way Brave's or
-Tor's users do; and canvas-dependent sites (drawing tools, some captchas) can
-misbehave. Fonts, screen size and the user agent are not touched. It
-registers its scripts only while switched on (`scripting` permission) and can
-be excluded per site.
+changed**. An experimental fingerprint-noise switch (0.3.0) was **removed**
+in 0.3.1 rather than shipped half-fixed: it keyed the noise by each frame's
+own site, so a third-party frame got one stable value on every site that
+embedded it (a cross-site identifier, the opposite of the point); its key was
+handed to the page world through DOM events a page script could listen for or
+fake; and it was easy to detect. Doing it soundly needs a per-session secret
+mixed with the top-level site, delivered to every frame (including
+`about:blank` and `srcdoc` frames, workers and `OffscreenCanvas`) through a
+channel no page script can reach, which this pass could not prove. The
+worker unregisters the old scripts on installs that had it on.
 
 Egress Guard never generates fake traffic to trackers or advertisers (no
 automatic ad clicks, fake page views or decoy searches): that sends deceptive
@@ -368,15 +520,24 @@ own level:
 
 | Mode | What it does |
 | --- | --- |
-| Relaxed | Host lists, malware protection, GPC and your rules only. URL filters, beacon blocking, link unwrapping, Strict and the Referrer-Policy fix stand down (`allowAllRequests` below the threat list, so threats stay blocked) |
+| Relaxed | Host lists, malware protection, GPC and your rules only. URL filters, beacon blocking, link unwrapping, parameter and cookie stripping, Strict and the Referrer-Policy fix stand down (`allowAllRequests` below the threat list, so threats stay blocked) |
 | Standard | Everything described above |
 | Strict | Standard, plus third-party scripts, frames, fonts and plugins blocked except a short list of payment, sign-in, captcha and public script CDN providers (`FUNCTIONAL_HOSTS` in `core/dnr.js`, each justified there); third-party `Cookie` and `Set-Cookie` removed on its subresources; the Referer removed from third-party frames; third-party `preconnect`, `dns-prefetch`, `prefetch` and `prerender` hints removed from the page (best effort: Chrome may act on a hint before the page script sees it, and DNR cannot see connection hints); YouTube, X, Instagram, Facebook, TikTok and Disqus embeds held |
-| No scripts | Strict, plus every script the site's pages request is blocked and a `script-src 'none'` Content-Security-Policy is appended to them, so inline scripts do not run either |
+| No scripts | Strict, plus every script the site's pages request is blocked and a `script-src 'none'` Content-Security-Policy is appended to them, so inline scripts do not run either. Switching a site to No scripts (or Strict) unregisters its service workers and clears its Cache Storage, so a worker cannot serve cached pages and scripts no rule sees. That reaches the origins the extension can name (the site, `www.`, and every origin of the site open in a tab); another subdomain's worker stays until Chrome's own site-data clearing removes it, and the popup says so |
 
 **Click-to-load.** Under Strict and No scripts a held embed is replaced by a
 local placeholder naming the provider. One real click (synthetic clicks are
 ignored) adds a session rule for that provider in that tab only and loads it;
-the allowance ends when the tab navigates. For script-built embeds (tweets,
+the allowance ends when the tab navigates. The embed still loads **without
+cookies**: the allow sits below Strict's and the tracker-host cookie
+stripping. **Load with cookies (signed in)** is the explicit second choice.
+The page owns the DOM around the placeholder, so it is hardened against
+clickjacking: the host element has `!important` inline styles and
+`all:initial !important`, and a click counts only when Chrome's
+IntersectionObserver v2 (`trackVisibility`) has reported the button fully
+visible and unobscured for half a second, the button is at least 24 × 16 px,
+no ancestor is transparent, hidden or filtered, and the pointer is on the
+button itself. For script-built embeds (tweets,
 Instagram posts) the page's own provider script is added back.
 
 **One-click repair.** A request Strict blocked shows **Allow host** in the
@@ -489,22 +650,30 @@ priority ladder (`browser/core/dnr.js`):
 
 | Priority | Rules |
 | --- | --- |
-| 14 | `Sec-GPC: 1` (header only; above every allow so nothing switches it off) |
-| 13 | Timed exceptions (allow) |
-| 12 | Your allow rules |
-| 11 | Your block rules |
-| 10 | Surrogates (stub instead of block) |
-| 9 | Ad, tracker and CNAME host lists |
-| 8 | Continue once (session `allow`, one tab, one host and its own requests) |
-| 7 | Malware and phishing lists |
-| 6 | Relaxed sites (`allowAllRequests`), a clicked-to-load embed |
-| 5 | Strict and No scripts site modes |
-| 4 | `$important` URL filters |
-| 3 | The URL filter lists' own exceptions (`@@`) |
-| 2 | URL filters, fingerprinting and replay paths, beacons, link unwrapping, Referrer-Policy fix |
-| 1 | Tracking-parameter stripping, cookie stripping for tracker hosts and redirectors |
+| 22 | `Sec-GPC: 1` (header only; above every allow so nothing switches it off) |
+| 21 | Timed exceptions (allow) |
+| 20 | Your allow rules |
+| 19 | Your block rules |
+| 18 | Surrogates (stub instead of block) |
+| 17 | Ad, tracker and CNAME host lists |
+| 16 | Continue once (session `allow`, one tab, one host and its own requests) |
+| 15 | Malware and phishing lists |
+| 14 | Relaxed sites (`allowAllRequests`) |
+| 13 | A clicked-to-load embed "with cookies" |
+| 12 | "Continue through the scanner" (session `allow`, one tab, one scanner host, one navigation) |
+| 11 | Mail scanners to the interstitial |
+| 10 | No scripts' `script-src 'none'` header |
+| 9 | Cleaning: parameter stripping, link unwrapping, unsubscribe-page allow, Referrer-Policy fix, tracker-host, bounce and Strict cookie stripping, Strict's Referer removal, the per-site "Stop cleaning" brake |
+| 8 | A clicked-to-load embed (lifts Strict's blocks, not its cookie stripping) |
+| 7 | Strict and No scripts blocks |
+| 6 | Hand-written fingerprinting, session-replay and first-party tracker filters; third-party beacons |
+| 5 | `$important` URL filters |
+| 4 | EasyPrivacy's own exceptions |
+| 3 | EasyPrivacy filters |
+| 2 | EasyList's own exceptions |
+| 1 | EasyList filters |
 
-So an exception really wins over every list, continuing to a flagged site
+So an exception really wins over every list, no list exception reaches cookie stripping, cleaning or the hand-written filters, continuing to a flagged site
 does not unblock that site's trackers, and nothing a filter list or a site
 mode allows can reach the threat list.
 
@@ -553,7 +722,8 @@ Firefox quits.
 | `alarms` | Both | Remove exceptions and rules when they expire |
 | `cookies` | Chrome | Delete tracking cookies (by name, `core/cookies.js`) the moment they are set |
 | `contextMenus`, `offscreen`, `clipboardWrite` | Chrome | "Copy clean link": the offscreen extension page writes the clipboard so the site never sees the copy |
-| `scripting` | Chrome | Register the experimental fingerprint-noise scripts only while that switch is on |
+| `browsingData` | Chrome | Unregister a site's service workers and clear its Cache Storage when it is switched to No scripts or Strict |
+| `scripting` | Chrome | Only to unregister the retired fingerprint-noise scripts on installs that had them; due to be dropped next release |
 
 No `tabs`, `history`, `webRequest` or native messaging. There is
 no remote code: extension pages allow only their own scripts. In Chrome,
@@ -595,7 +765,7 @@ the GPL-3.0 text and the list sources. See
 (storage injected), picker candidates, and `dnr.js`, which compiles both the
 list rulesets (at build time) and your rules (at run time). `background.js`
 is the Firefox adapter; `background-chrome.js` is the Chrome service worker.
-`content.js`, `popup.*`, `ui.css` are shared; `warning.*` is Chrome-only.
+`content.js`, `popup.*`, `ui.css` are shared; `warning.*` and `unwrap.*` are Chrome-only.
 `scripts/build-browser.mjs` assembles both builds, verifies the feeds again
 and bundles the Chrome worker into one file.
 
@@ -642,9 +812,15 @@ brake; Strict blocking a third-party script while the site's own and inline
 code run, holding a Disqus frame and dropping connection hints, attributing
 the block, loading the embed on one real click and ending that allowance on
 navigation, **Allow host**, removing the Referer from a third-party frame;
-No scripts stopping own and inline scripts; fingerprint noise off by default,
-stable within a site and session, different across sites, and gone when
-switched off.
+No scripts stopping own and inline scripts and clearing a service worker and
+its caches; unwrapping only from the redirector's own site (Chrome's own
+`testMatchOutcome` agrees), an unwrapped threat-listed destination landing
+on the warning page, the scanner interstitial (no auto-navigation, no
+framing, Continue passing the scanner its untouched address once, Open
+directly to a listed host landing on the warning page, the setting), a
+loaded embed carrying no cookies, a click on a transparent placeholder
+loading nothing, surrogate callbacks with no extension frame on the stack,
+and the GPC getter's shape.
 
 Real Chrome (157, headless, throwaway profile, loopback fixture only):
 `node tests/browser/chrome-headless.mjs [--feeds DIR] [--shots DIR]`. It

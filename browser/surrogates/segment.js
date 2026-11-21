@@ -3,7 +3,8 @@
 (function () {
   "use strict";
   var w = window;
-  var later = function (fn) { if (typeof fn === "function") setTimeout(function () { try { fn(); } catch (e) { /* page's own error */ } }, 0); };
+  // The page callback runs straight from the timer, so no surrogate frame (no extension address) is on its stack.
+  var later = function (fn, arg) { if (typeof fn === "function") setTimeout(fn, 0, arg); };
   var lastFn = function (args) { for (var i = args.length - 1; i >= 0; i--) if (typeof args[i] === "function") return args[i]; return null; };
   var old = w.analytics;
   var user = {id: function () { return null; }, anonymousId: function () { return null; }, traits: function () { return {}; }};

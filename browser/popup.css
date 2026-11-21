@@ -65,3 +65,7 @@ fieldset label { display: flex; gap: 5px; align-items: center; color: var(--ink)
 .lists { margin: 4px 14px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .lists b { color: var(--ink); font-weight: 600; }
 .rebuilt { margin: 8px 14px 0; padding: 8px 10px; border-radius: 6px; background: var(--chip, transparent); border: 1px solid currentColor; color: var(--ink); font-size: 12px; }
+.lists .sources { margin-top: 4px; }
+.lists .sources summary { cursor: pointer; }
+.lists .source { margin-top: 3px; }
+.lists .sha { display: block; font-size: 10px; overflow-wrap: anywhere; color: var(--muted); }
