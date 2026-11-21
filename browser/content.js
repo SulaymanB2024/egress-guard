@@ -4,7 +4,9 @@
 (function (root) {
   "use strict";
   if (root.__EGCosmetic) return;
-  const B = root.browser;
+  // Firefox exposes promise-based `browser`; Chrome exposes `chrome` and needs sendResponse for async replies.
+  const B = root.browser || root.chrome;
+  const chromeStyle = !root.browser;
   const picker = root.EGPicker;
   const MAX_PER_RULE = 25;
   const MAX_SCANS_PER_MINUTE = 40;
@@ -320,7 +322,7 @@
   function clearToast() { if (toast) toast.host.remove(); toast = null; }
 
   // ---- wiring ---------------------------------------------------------------
-  B.runtime.onMessage.addListener((message) => {
+  function onMessage(message) {
     if (!message || typeof message !== "object") return undefined;
     switch (message.type) {
       case "rules-changed": return Promise.resolve(setRules(message.rules));
@@ -330,6 +332,12 @@
       case "start-picker": startPicker(); return Promise.resolve(status());
       default: return undefined;
     }
+  }
+  B.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const reply = onMessage(message);
+    if (!reply || !chromeStyle) return reply;
+    reply.then(sendResponse, () => sendResponse(null));
+    return true;
   });
 
   const ready = B.runtime.sendMessage({type: "page-rules"}).then((reply) => {
