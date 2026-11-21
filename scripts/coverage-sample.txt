@@ -1,0 +1,98 @@
+# Labelled public hostnames for scripts/measure-coverage.py.
+# Format: <label> <hostname>. Labels: ad, tracker, malware, phishing, doh, lookalike, good.
+# Every entry is a widely published example (vendor documentation, security write-ups, test
+# domains or household-name services). No browsing history is used. A "good" host should never
+# be blocked; the other labels should be.
+
+ad doubleclick.net
+ad securepubads.g.doubleclick.net
+ad pagead2.googlesyndication.com
+ad googleadservices.com
+ad adservice.google.com
+ad ib.adnxs.com
+ad static.criteo.net
+ad cdn.taboola.com
+ad widgets.outbrain.com
+ad ads.yahoo.com
+ad amazon-adsystem.com
+ad ads.pubmatic.com
+ad c.amazon-adsystem.com
+ad ads-twitter.com
+ad ad.doubleclick.net
+tracker google-analytics.com
+tracker www.googletagmanager.com
+tracker connect.facebook.net
+tracker bat.bing.com
+tracker static.hotjar.com
+tracker sb.scorecardresearch.com
+tracker api.mixpanel.com
+tracker cdn.segment.com
+tracker api2.amplitude.com
+tracker app-measurement.com
+tracker analytics.tiktok.com
+tracker px.ads.linkedin.com
+tracker script.crazyegg.com
+tracker browser.sentry-cdn.com
+tracker js.hs-analytics.net
+# Malware: historical, publicly documented command-and-control and malware-distribution names.
+malware avsvmcloud.com
+malware coinhive.com
+malware malware.wicar.org
+# Phishing: published test names for phishing filters.
+phishing amiprotected.it
+phishing www.amiprotected.it
+phishing internetbadguys.com
+phishing phishing.testcategory.com
+malware malware.testcategory.com
+# Encrypted DNS endpoints.
+doh dns.google
+doh cloudflare-dns.com
+doh mozilla.cloudflare-dns.com
+doh dns.quad9.net
+doh dns.nextdns.io
+doh doh.opendns.com
+# IDN homographs of brands (Cyrillic look-alikes written as punycode).
+lookalike xn--80ak6aa92e.com
+lookalike xn--pple-43d.com
+lookalike xn--pypal-4ve.com
+lookalike xn--ggle-55da.com
+lookalike xn--mazon-3ve.com
+lookalike xn--mirosoft-gch.com
+# Known-good: sign-in, updates, revocation, popular sites and legitimate internationalized names.
+good apple.com
+good www.apple.com
+good appleid.apple.com
+good swscan.apple.com
+good ocsp.apple.com
+good www.google.com
+good accounts.google.com
+good mail.google.com
+good www.youtube.com
+good login.microsoftonline.com
+good outlook.office365.com
+good ocsp.digicert.com
+good github.com
+good raw.githubusercontent.com
+good en.wikipedia.org
+good www.bbc.co.uk
+good www.nytimes.com
+good python.org
+good pypi.org
+good files.pythonhosted.org
+good news.ycombinator.com
+good stackoverflow.com
+good duckduckgo.com
+good www.mozilla.org
+good aus5.mozilla.org
+good cdn.jsdelivr.net
+good zoom.us
+good slack.com
+good www.amazon.com
+good www.paypal.com
+good www.chase.com
+good www.icloud.com
+good www.netflix.com
+good www.reddit.com
+good xn--bcher-kva.ch
+good xn--mnchen-3ya.de
+good xn--fiqs8s.xn--fiqs8s
