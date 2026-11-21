@@ -153,13 +153,27 @@ valid.test
         self.assertIsNotNone(feeds._parse_feed(generated, replace(feeds.PHISHING, minimum=2))[1])
 
     def test_host_set_is_compact_membership_only(self):
-        names = {f"host{number}.example" for number in range(1000)}
-        compact = feeds.HostSet(names)
-        self.assertEqual(len(compact), 1000)
+        names = {f"host{number}.example" for number in range(1000)} | {"a.example", "zz.example", "b"}
+        compact = feeds.HostSet.from_names(names)
+        self.assertEqual(len(compact), len(names))
         self.assertTrue(all(name in compact for name in names))
-        self.assertFalse(any(f"other{number}.example" in compact for number in range(1000)))
-        self.assertNotIn(None, compact)
-        self.assertLess(compact._hashes.itemsize * len(compact), 8 * 1001)
+        for absent in ("other1.example", "host1.exampl", "host1.example.", "", "a", "zzz.example",
+                       "0.example", "host1.examplé", None, b"a.example"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, compact)
+        # Names on both sides of every block boundary are found, and near misses are not.
+        ordered = sorted(names)
+        self.assertGreater(len(compact._starts), 5)
+        position = {name: number for number, name in enumerate(ordered)}
+        for first in compact._index:
+            number = position[first.decode()]
+            for edge in (number - 1, number, number + 1):
+                if 0 <= edge < len(ordered):
+                    self.assertIn(ordered[edge], compact)
+                    self.assertNotIn(ordered[edge] + "x", compact)
+                    self.assertNotIn("x" + ordered[edge], compact)
+        self.assertNotIn("one\ntwo", compact)
+        self.assertNotIn("x", feeds.HostSet())
         compact.clear()
         self.assertFalse(compact)
         # A loaded snapshot uses the compact set; the text view stays available for measurement.

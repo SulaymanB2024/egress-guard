@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Callable
 
 from egress_guard.config import EXEMPTION_PRESETS
-from egress_guard.feeds import (ALL_FEEDS, THREAT_TIERS, CachedFeed, dns_name, ip_literal, load_cached_feed,
-                                selected_feeds)
+from egress_guard.feeds import (ALL_FEEDS, THREAT_TIERS, CachedFeed, HostSet, dns_name, ip_literal,
+                                load_cached_feed, selected_feeds)
 from egress_guard.heuristics import DOH_RESOLVER_IPS, SAFETY_HOSTS, lookalike
 
 MAX_CONTROL_BYTES = 64 * 1024
@@ -166,7 +166,8 @@ class Policy:
                 self.coverage[feed.id] = "missing"
                 continue
             self.components[feed.id] = snapshot
-            groups[feed.category].append((feed, snapshot.names))
+            names = snapshot.names
+            groups[feed.category].append((feed, names if isinstance(names, HostSet) else HostSet.from_names(names)))
         self.threats = groups["threat"]
         self.ip_threats = [(feed, names) for feed, names in self.threats if feed.ips]
         self.trackers = [names for _, names in groups["tracker"]]
@@ -238,27 +239,38 @@ class Policy:
         return ("ip-literal", address) if ipaddress.ip_address(address).is_global else ("no-match", None)
 
     def _source(self, host: str, port: int | None) -> tuple[str, str | None]:
-        if (address := ip_literal(host)) is not None:
-            return self._ip_source(address)
         if dns_name(host) is None:
-            return "no-match", None
+            # An IP literal is never a valid DNS name (its last label has no letter).
+            address = ip_literal(host)
+            return self._ip_source(address) if address is not None else ("no-match", None)
         suffixes = _suffixes(host)
         manual = _first(suffixes, self.manual)
         # Built-in exact safety hosts outrank every downloaded list, never the user's own blocks.
         if host in SAFETY_HOSTS and manual is None:
             return "safety-list", host
+        # Feeds hold only dotted names (see _parse_feed), so the bare top-level label is skipped.
+        listed = suffixes[:-1]
+        probes = HostSet.probes(listed)
+
+        def first(stores) -> str | None:
+            for names in stores:
+                if (position := names.first(probes)) is not None:
+                    return listed[position]
+            return None
+
         # Threat data is never overridden by allow rules, exemptions or pauses.
         for feed, names in self.threats:
-            if match := _first(suffixes, names):
-                return feed.source, match
+            if (position := names.first(probes)) is not None:
+                return feed.source, listed[position]
         if manual:
             return "local-block", manual
         allowed = _first(suffixes, self.allow)
         if allowed is None and (imitation := lookalike(host)) is not None:
             return "lookalike-domain", imitation[0]
-        doh = next((match for names in self.doh if (match := _first(suffixes, names))), None)
-        tracker = next((match for names in self.trackers if (match := _first(suffixes, names))), None)
-        if doh is None and tracker is None and not any(host in names for names in self.cname):
+        doh = first(self.doh)
+        tracker = first(self.trackers)
+        # CNAME data is exact: only the host itself, the first probe, is checked.
+        if doh is None and tracker is None and not any(names.first(probes[:1]) is not None for names in self.cname):
             return ("no-match", None) if port is None or port in STANDARD_PORTS else ("nonstandard-port", None)
         if host in self.dashboard_hosts:
             return "dashboard-exception", host

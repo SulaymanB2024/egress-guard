@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from array import array
-from bisect import bisect_left
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,31 +58,68 @@ def ip_literal(value: object) -> str | None:
 
 
 class HostSet:
-    """A compact, read-only membership set of hostnames.
+    """A compact, read-only, exact membership set of ASCII hostnames.
 
-    Each name is kept as its 64-bit, per-process-salted `hash()` in one sorted array: 8 bytes
-    per name instead of roughly 150 for a `set` of `str`. A false match needs a 64-bit collision
-    between a queried name and a listed one (about 1 in 10^13 per lookup at two million names),
-    and the per-process salt stops anyone from choosing a colliding name in advance.
+    Names are kept as the sorted, newline-separated snapshot text itself, cut into blocks of
+    about 2 KiB at line boundaries. Only each block's first name and start offset are separate
+    objects, so memory is about the text size, instead of roughly 150 bytes per name for a `set`
+    of `str`, and loading creates no per-name objects. A lookup is a C-level bisect over the
+    block index plus a C-level find within one block. Verified snapshots are written sorted.
     """
 
-    __slots__ = ("_hashes",)
+    __slots__ = ("_blob", "_starts", "_index", "_count")
+    STRIDE = 2048
 
-    def __init__(self, names) -> None:
-        self._hashes = array("q", sorted(map(hash, names)))
+    def __init__(self, blob: bytes = b"") -> None:
+        # `blob` must be sorted, de-duplicated, newline-terminated ASCII names.
+        self._blob = blob
+        self._starts = array("I")
+        self._index: list[bytes] = []
+        self._count = blob.count(b"\n")
+        position, size = 0, len(blob)
+        while position < size:
+            self._starts.append(position)
+            self._index.append(blob[position:blob.index(b"\n", position)])
+            boundary = blob.find(b"\n", position + self.STRIDE)
+            if boundary < 0:
+                break
+            position = boundary + 1
+
+    @classmethod
+    def from_names(cls, names) -> HostSet:
+        return cls("".join(name + "\n" for name in sorted(set(names))).encode("ascii"))
+
+    @staticmethod
+    def probes(names: list[str]) -> list[tuple[bytes, bytes, bytes]]:
+        """Encode candidate names once for `first`; each must be ASCII without newlines."""
+        return [(target, target + b"\n", b"\n" + target + b"\n")
+                for target in (name.encode("ascii") for name in names)]
+
+    def first(self, probes: list[tuple[bytes, bytes, bytes]]) -> int | None:
+        """Index of the first probe whose name is in the set, or None."""
+        index, blob, starts = self._index, self._blob, self._starts
+        blocks, size = len(starts), len(blob)
+        for position, (target, line, needle) in enumerate(probes):
+            block = bisect_right(index, target) - 1
+            if block < 0:
+                continue
+            start = starts[block]
+            stop = starts[block + 1] if block + 1 < blocks else size
+            if (blob.startswith(line) if start == 0 else False) or blob.find(needle, start - 1 if start else 0,
+                                                                             stop) >= 0:
+                return position
+        return None
 
     def __contains__(self, name: object) -> bool:
-        if not isinstance(name, str):
+        if not isinstance(name, str) or not name.isascii() or "\n" in name:
             return False
-        value = hash(name)
-        index = bisect_left(self._hashes, value)
-        return index < len(self._hashes) and self._hashes[index] == value
+        return self.first(self.probes([name])) is not None
 
     def __len__(self) -> int:
-        return len(self._hashes)
+        return self._count
 
     def clear(self) -> None:
-        self._hashes = array("q")
+        self._blob, self._starts, self._index, self._count = b"", array("I"), [], 0
 
 
 @dataclass(frozen=True)
@@ -315,27 +352,32 @@ class CachedFeed:
     updated_at: float | None
 
 
-def _verified(state: Path, feed: Feed) -> tuple[list[str], dict, str] | None:
+def _verified(state: Path, feed: Feed) -> tuple[bytes, dict, str] | None:
     path = feed.path(state)
     try:
+        # Read the metadata line and the body separately, so the body is never copied.
         with path.open("rb") as file:
-            data = file.read(MAX_FEED_BYTES + 1)
-        meta, newline, contents = data.partition(b"\n")
-        if len(data) > MAX_FEED_BYTES or not newline or not meta.startswith(b"# "):
+            meta = file.readline(4097)
+            contents = file.read(MAX_FEED_BYTES + 1)
+        if (len(meta) + len(contents) > MAX_FEED_BYTES or not meta.endswith(b"\n")
+                or not meta.startswith(b"# ")):
             return None
+        meta = meta[:-1]
         metadata = json.loads(meta[2:])
         if not isinstance(metadata, dict):
             return None
         digest = hashlib.sha256(contents).hexdigest()
         if digest != metadata.get("sha256"):
             return None
-        # Snapshots are written sorted and de-duplicated, so the line count is the entry count.
-        names = contents.decode("ascii").splitlines()
-        if len(names) < feed.minimum or len(names) != metadata.get("entries"):
+        # `_snapshot` writes names sorted, de-duplicated and newline-terminated, and the digest
+        # covers that text, so the newline count is the entry count and the order is searchable.
+        count = contents.count(b"\n")
+        if (not contents.isascii() or (contents and not contents.endswith(b"\n"))
+                or count < feed.minimum or count != metadata.get("entries")):
             return None
     except (OSError, ValueError, RecursionError):
         return None
-    return names, metadata, digest
+    return contents, metadata, digest
 
 
 def load_cached_feed(state: Path, feed: Feed) -> CachedFeed | None:
@@ -343,17 +385,17 @@ def load_cached_feed(state: Path, feed: Feed) -> CachedFeed | None:
     verified = _verified(state, feed)
     if verified is None:
         return None
-    names, metadata, digest = verified
+    contents, metadata, digest = verified
     now = time.time()
     published, updated = metadata.get("published_at"), metadata.get("updated_at")
-    return CachedFeed(HostSet(names), digest, published if _valid_clock(published, now) else None,
+    return CachedFeed(HostSet(contents), digest, published if _valid_clock(published, now) else None,
                       updated if _valid_clock(updated, now) else None)
 
 
 def read_cached_feed(state: Path, feed: Feed) -> set[str]:
     """A verified snapshot's names as text, for measurement and tests; empty when unusable."""
     verified = _verified(state, feed)
-    return set(verified[0]) if verified else set()
+    return set(verified[0].decode("ascii").splitlines()) if verified else set()
 
 
 def _refresh(state: Path, config: dict) -> dict:
