@@ -96,7 +96,7 @@
     if (!active.length) { footer.textContent = "No built-in lists in this build: only your own rules apply."; return; }
     const stamps = active.map((l) => l.published_at || l.updated_at).filter((t) => typeof t === "number");
     const day = stamps.length ? new Date(Math.min(...stamps) * 1000).toLocaleDateString(undefined, {month: "short", day: "numeric"}) : null;
-    const parts = [el("span", day ? `Built-in lists, dated ${day}: ` : "Built-in lists: ")];
+    const parts = [el("span", day ? `Built-in lists (oldest from ${day}): ` : "Built-in lists: ")];
     active.forEach((l, i) => {
       if (i) parts.push(document.createTextNode(" · "));
       parts.push(el("b", l.name), document.createTextNode(` (${Number(l.domains).toLocaleString("en-US")})`));
@@ -185,7 +185,7 @@
   /** The active tab, or (for development captures) the tab named by ?tab=<id>. */
   async function currentTab() {
     const search = root.location && typeof root.location.search === "string" ? root.location.search : "";
-    const named = /^\?tab=([0-9]{1,9})$/.exec(search);
+    const named = /^\?tab=([0-9]{1,12})$/.exec(search);
     if (named && B.tabs.get) return B.tabs.get(Number(named[1]));
     const [active] = await B.tabs.query({active: true, currentWindow: true});
     return active;

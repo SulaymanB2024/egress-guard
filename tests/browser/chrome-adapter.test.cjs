@@ -122,6 +122,9 @@ test("acceptance (Chrome adapter): exception beats lists via a priority-7 dynami
   assert.ok(rule.priority > dnr.PRIORITY.list && rule.priority > dnr.PRIORITY.threat);
   assert.equal(w.alarms.get("eg-expiry").when, START + 15 * 60000);
   assert.ok((await w.popup({type: "add-exception", tabId: 1, tabUrl, host: "x.test", path: "/", resourceType: "main_frame", minutes: 5})).error);
+  await w.matched(1, "https://pixel.tracker.test/p.gif", "image", "_dynamic", rule.id);
+  const logged = await w.popup({type: "popup-state", tabId: 1, tabUrl});
+  assert.equal(logged.blocked.length, 0, "a match on an allow rule is not reported as blocked");
   w.clock.now = START + 15 * 60000;
   await w.chrome.alarms.onAlarm.fire({name: "eg-expiry"});
   await settle();

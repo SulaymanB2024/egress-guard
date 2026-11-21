@@ -1,3 +1,4 @@
+html { overflow-x: hidden; }
 body { width: 360px; padding: 0 0 12px; }
 .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 10px; }
 .site { font: 12px var(--mono); color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

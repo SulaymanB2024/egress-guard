@@ -122,8 +122,8 @@ async function click(sessionId, selector) {
 }
 async function screenshot(sessionId, file, width) {
   await cdp("Emulation.setDeviceMetricsOverride", {width, height: 600, deviceScaleFactor: 2, mobile: false}, sessionId);
-  await sleep(200);
-  const height = await evaluate(sessionId, "Math.ceil(document.documentElement.scrollHeight)");
+  await sleep(600);
+  const height = await evaluate(sessionId, "Math.ceil(Math.max(document.documentElement.scrollHeight, document.body.scrollHeight))");
   await cdp("Emulation.setDeviceMetricsOverride", {width, height, deviceScaleFactor: 2, mobile: false}, sessionId);
   await sleep(200);
   const {data} = await cdp("Page.captureScreenshot", {format: "png"}, sessionId);
@@ -281,7 +281,11 @@ try {
   check("threat: warning page names the host and the list", onWarning && warnText.includes("malware-fixture.test") && /Malware and phishing/.test(warnText) && /HaGeZi Threat Intelligence/.test(warnText), warnText.split("\n").slice(0, 8).join(" | "));
   check("threat: the flagged site received no request", !hits.some((h) => h.host === "malware-fixture.test"));
   if (shots) {
-    await screenshot(page, path.join(shots, "warning-light.png"), 760);
+    for (const scheme of ["light", "dark"]) {
+      await cdp("Emulation.setEmulatedMedia", {features: [{name: "prefers-color-scheme", value: scheme}]}, page);
+      await screenshot(page, path.join(shots, `warning-${scheme}.png`), 760);
+    }
+    await screenshot(page, path.join(shots, "warning-dark-390.png"), 390);
     await cdp("Emulation.clearDeviceMetricsOverride", {}, page);
   }
 

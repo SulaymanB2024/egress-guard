@@ -23,6 +23,7 @@
     save: (value) => C.storage.local.set({[KEY]: value}),
   }});
   let sources = {};                 // dynamic rule id -> store id
+  let allowIds = new Set();         // dynamic rule ids whose action is allow
   const ready = store.load().then(async () => {
     for (const msg of store.rejected) console.warn("Egress Guard dropped a stored entry:", msg);
     await sync();
@@ -37,6 +38,7 @@
       const existing = await C.declarativeNetRequest.getDynamicRules();
       await C.declarativeNetRequest.updateDynamicRules({removeRuleIds: existing.map((r) => r.id), addRules: compiled.rules});
       sources = compiled.sources;
+      allowIds = new Set(compiled.rules.filter((r) => r.action.type !== "block").map((r) => r.id));
       await schedule();
     });
     return syncing;
@@ -92,7 +94,8 @@
   }
 
   function listOf(rule) {
-    if (rule.rulesetId === "_dynamic") return {list: "user", ruleId: sources[rule.ruleId] || null};
+    // Allow rules (your allow rules and timed exceptions) also report matches; they blocked nothing.
+    if (rule.rulesetId === "_dynamic") return allowIds.has(rule.ruleId) ? null : {list: "user", ruleId: sources[rule.ruleId] || null};
     if (rule.rulesetId === "_session") return null;
     return {list: rule.rulesetId};
   }

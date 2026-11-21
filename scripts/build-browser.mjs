@@ -115,6 +115,17 @@ function copy(files, dest) {
   }
 }
 
+/** "AdGuard CNAME-cloaked ads" + "AdGuard CNAME-cloaked trackers" -> "AdGuard CNAME-cloaked ads and trackers". */
+export function joinNames(names) {
+  if (!names.length) return "none";
+  if (names.length === 1) return names[0];
+  const words = names.map((n) => n.split(" "));
+  let common = 0;
+  while (words.every((w) => w.length > common + 1 && w[common] === words[0][common])) common++;
+  if (!common) return names.join(" + ");
+  return `${words[0].slice(0, common).join(" ")} ${words.map((w) => w.slice(common).join(" ")).join(" and ")}`;
+}
+
 function notice(lists) {
   const lines = ["Egress Guard Companion: bundled list data", "",
     "The extension code is MIT licensed. The rulesets in rules/ are generated from the lists below and keep",
@@ -151,7 +162,7 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, chun
       fs.writeFileSync(path.join(chrome, "rules", `${kind}.json`), JSON.stringify(compiled.rules));
       const src = data.sources;
       const stamps = (key) => src.map((s) => s[key]).filter((t) => typeof t === "number");
-      meta[kind] = {label: dnr.LIST_KINDS[kind].label, name: src.map((s) => s.name).join(" + ") || "none",
+      meta[kind] = {label: dnr.LIST_KINDS[kind].label, name: joinNames(src.map((s) => s.name)),
         domains: compiled.domains, rules: compiled.rules.length, sources: src.map((s) => ({name: s.name, url: s.url, license: s.license.name})),
         published_at: stamps("published_at").length ? Math.min(...stamps("published_at")) : null,
         updated_at: stamps("updated_at").length ? Math.min(...stamps("updated_at")) : null};
