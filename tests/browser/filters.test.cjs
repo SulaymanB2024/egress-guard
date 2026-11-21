@@ -473,6 +473,7 @@ test("compileParams honours KEPT on the navigation path too, whatever the name l
     assert.ok(!triggers.has(kept), `${kept} never triggers a redirect`);
   }
   assert.ok(named.has("utm_source") && named.has("ref"));
+  assert.ok(!named.has("fbclid") && !named.has("gclid"), "only the names it was given");
   // And the page cleaner, on every scoped site.
   const params = require("../../browser/core/params.js");
   for (const scope of params.SCOPED) {
