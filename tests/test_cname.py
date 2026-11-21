@@ -21,8 +21,10 @@ class CNAMEInspectionTests(unittest.TestCase):
     def setUp(self):
         feeds = {
             "threat": {"malware.example"}, "tracker": {"metrics.example"}, "cname": {"static.example"},
+            "doh": {"dns.example"},
         }
-        cached = lambda _, feed: CachedFeed(feeds[feed.category], feed.id, None, None)
+        cached = lambda _, feed: CachedFeed(feeds[feed.category] if feed.source == "threat-intel" or feed.category
+                                            != "threat" else set(), feed.id, None, None)
         with patch("egress_guard.policy.load_cached_feed", side_effect=cached):
             self.policy = Policy({"block": {"hosts": ["manual.example"], "allow": ["static.example"]}},
                                  Path(__file__).parent / "unused-cname-state")

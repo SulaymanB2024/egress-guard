@@ -31,6 +31,10 @@ SOURCES = frozenset({
     "cname-feed", "tracker-paused", "local-allow", "temporary-exception",
     "dashboard-exception", "no-match", "plaintext-credentials", "not-ready",
     "non-tls-tunnel",
+    # Added in 0.4: specific threat sources, built-in rules and unfiltered-target labels.
+    # `egress_guard.policy.CATEGORIES` maps every source to its dashboard category.
+    "malware-feed", "phishing-feed", "lookalike-domain", "doh-feed", "safety-list",
+    "ip-literal", "nonstandard-port",
 })
 MAX_QUEUE = 2048
 MAX_EVENTS = 10_000
