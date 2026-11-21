@@ -275,20 +275,18 @@ test("packed build: popup gets per-list counts from getMatchedRules and says it 
   assert.equal((await unpacked.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/a"})).feedback, "debug");
 });
 
-test("a rebuilt unpacked extension reloads itself on the hourly check; not while a continue is active; never packed", async () => {
+test("a rebuilt unpacked folder is noticed on the hourly check and the popup says so; it never reloads itself", async () => {
   const w = await worker();
   await settle();
   assert.equal(w.alarms.get("eg-rebuilt").periodInMinutes, 60);
   const tick = async () => { await w.chrome.alarms.onAlarm.fire({name: "eg-rebuilt"}); await settle(); };
+  const state = () => w.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/a"});
   await tick();
-  assert.equal(w.reloads.length, 0, "same build on disk: nothing happens");
+  assert.equal((await state()).rebuilt, false, "same build on disk");
   w.disk.build = "f".repeat(32);
-  await w.cont();
-  assert.equal(await w.api.reloadIfRebuilt(), "deferred", "a continue-once session would be lost");
-  await w.chrome.tabs.onUpdated.fire(4, {status: "loading", url: "https://news.example/"}, {});
-  await settle();
   await tick();
-  assert.equal(w.reloads.length, 1, "newer build on disk: reload");
+  assert.equal((await state()).rebuilt, true, "newer build on disk: the popup asks for a reload");
+  assert.equal(w.reloads.length, 0, "runtime.reload() left the extension disabled in headless Chrome, so it is never called");
   w.disk.build = "<script>";
   assert.equal(await w.api.reloadIfRebuilt(), "unreadable");
   const packed = await worker({packed: true});

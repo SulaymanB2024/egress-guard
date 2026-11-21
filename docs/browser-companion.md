@@ -136,17 +136,23 @@ says which:
 | Packed | Counts by list since the page loaded (`getMatchedRules`, which reports rules, never addresses); the note says addresses are not available |
 | Neither API, or Chrome's `getMatchedRules` quota spent | The toolbar badge only, and the popup says so |
 
-**Fresh lists with no clicks.** Chrome reads an unpacked extension's files
-from its folder live. The build writes `rules/build.json` (a hash of the
-rulesets, list metadata and sources); the worker compares it with its own
-build id every hour and, when the folder was rebuilt, calls
-`runtime.reload()`, which re-reads the manifest and re-indexes the lists. It
-waits while a continue-once is active, since a reload ends those. It reads
-only its own file; no network request, no server, no local port. So running
-`node scripts/build-browser.mjs` after each proxy feed refresh (the same
-daily job) keeps the browser current without visiting `chrome://extensions`.
-The headless lifecycle check proves a rebuilt folder with a new tracker is
-picked up and enforced, and that user rules and exceptions survive.
+**Fresh lists: one click, not zero.** Chrome reads an unpacked extension's
+files from its folder live. The build writes `rules/build.json` (a hash of
+the rulesets, list metadata and sources); the worker compares it with its own
+build id every hour and, when the folder was rebuilt, the popup says "Newer
+lists have been built" and asks for the reload arrow on
+`chrome://extensions`. It reads only its own file: no network request, no
+server, no local port. Running `node scripts/build-browser.mjs` after each
+proxy feed refresh keeps the folder current; the user still presses reload.
+
+Reloading automatically was built and tested, then withdrawn: in headless
+Chrome 157 an unpacked extension that calls `runtime.reload()` came back
+**disabled** (with developer mode on or off), which would silently turn all
+protection off. Whether a normal profile behaves differently was not
+verified, so the extension never reloads itself. Truly zero-touch updates
+need a packed, signed build with an `update_url` (Chrome's own updater);
+that needs a signing key and a hosted update manifest, which this project
+does not have.
 
 A loopback endpoint on the dashboard serving domain lists as dynamic rules
 was considered and not built. Dynamic and session rules share a 30,000-rule
@@ -340,7 +346,59 @@ Real Firefox (headless, throwaway profile):
 `node tests/browser/firefox-headless.mjs` covers the Firefox build's rules,
 hiding, the picker and Undo.
 
+Service-worker lifecycle (Chrome, headless, loopback fixture, about two
+minutes): `node tests/browser/chrome-lifecycle.mjs`. A user rule, two timed
+exceptions and a continue-once survive the worker being stopped and started;
+Chrome keeps enforcing them while it is stopped; an exception and a continue
+that expire while the worker is stopped are removed because `chrome.alarms`
+wakes it (nothing else touches it); continue-once is stored with a 10-minute
+expiry; a rebuilt folder is noticed and the popup asks for a reload.
+
+### Real websites
+
+`node tests/browser/real-sites.mjs [--feeds DIR] [--sites a,b]` (opt-in; it
+contacts the public sites). Each site is loaded twice in headless Chrome 157
+with a throwaway profile and no proxy, without and with the extension. It
+only navigates and reads: no clicks, logins, forms or cookie banners. Run on
+2026-11-20 with HaGeZi PRO++, HaGeZi Threat Intelligence Medium and AdGuard
+CNAME (the Full threat tier, Phishing Army and URLhaus were not in the local
+cache). "Blocked" is the extension's own log; "ad slots" counts visible
+elements matching the built-in slot selectors plus visible text labels that
+read exactly "Advertisement" or "Sponsored".
+
+| Site | Kind | Blocked (trackers / CNAME / threats) | JS errors control → ext | Visible text control → ext | Ad slots control → ext | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| cnn.com | news | 607 / 0 / 0 | 9 → 10 | 10,106 → 10,106 | 9 → 0 | renders |
+| theguardian.com | news | 28 / 0 / 0 | 18 → 18 | 17,906 → 17,899 | 13 → 0 | renders |
+| foxnews.com | news | 42 / 2 / 0 | 2 → 14 | 22,525 → 22,537 | 0 → 0 | renders; extra errors are its own "Error loading script" for blocked ad and analytics scripts |
+| dailymail.co.uk | news | 0 / 0 / 0 | 0 → 0 | 216 → 216 | 0 → 0 | bot interstitial in both runs |
+| weather.com | news | 40 / 0 / 0 | 1 → 2 | 1,999 → 3,822 | 20 → 0 | renders |
+| allrecipes.com | recipe | 0 / 0 / 0 | 0 → 0 | 0 → 0 | 0 → 0 | blank in both runs (headless challenge) |
+| foodnetwork.com | recipe | 21 / 1 / 0 | 0 → 0 | 2,322 → 2,322 | 0 → 0 | renders |
+| theverge.com | tech | 13 / 0 / 0 | 1 → 1 | 22,387 → 22,387 | 0 → 0 | renders |
+| techcrunch.com | tech | 23 / 0 / 0 | 1 → 1 | 11,098 → 11,098 | 18 → 0 | renders |
+| tomsguide.com | tech | 1 / 0 / 0 | 3 → 3 | 20,577 → 20,577 | 0 → 0 | renders |
+| bing.com search | search | 0 / 0 / 0 | 0 → 0 | 2,913 → 0 | 0 → 0 | probe hit Bing's own redirect (`rdr=1`) mid-load; a separate run with the extension rendered 11 results |
+| html.duckduckgo.com | search | 0 / 0 / 0 | 0 → 0 | 205 → 205 | 0 → 0 | bot challenge in both runs (left untouched) |
+| github.com/login | sign-in | 3 / 0 / 0 | 0 → 0 | 282 → 282 | 0 → 0 | form renders |
+| accounts.google.com | sign-in | 0 / 0 / 0 | 0 → 0 | 1,038 → 1,038 | 0 → 0 | form renders |
+| login.live.com | sign-in | 0 / 0 / 0 | 0 → 0 | 231 → 231 | 0 → 0 | form renders |
+| paypal.com/signin | sign-in | 0 / 0 / 0 | 2 → 2 | 0 → 0 | 0 → 0 | captcha in both runs |
+| checkout.stripe.dev | checkout | 0 / 0 / 0 | 0 → 0 | 584 → 584 | 0 → 0 | renders |
+| allbirds.com/cart (Shopify) | checkout | 10 / 1 / 0 | 0 → 0 | 2,479 → 2,479 | 0 → 0 | renders |
+
+No breakage was found that needed an allow rule or a priority fix: on every
+site that rendered in the control run, the extension run rendered the same
+text (within 1%, more on weather.com, where blocked ads stopped a layout
+shift). The built-in ad-slot stylesheet removed every visible slot the probe
+found (60 across four sites). Its style-recalculation cost, measured as a
+forced full recalc with the sheet on and off (median of 7): cnn.com 30.0 vs
+30.8 ms (5,273 elements), tomsguide.com 33 vs 32 ms (4,415), theguardian.com
+12.6 vs 12.4 ms, foxnews.com 11.2 vs 11.2 ms: within noise. Three sites
+showed bot interstitials to headless Chrome in both runs, so they say nothing
+about the extension.
+
 Not verified in a real browser: the popup opened from the toolbar (captures
-open `popup.html?tab=<id>` in a tab), behaviour after the service worker is
-stopped and restarted, the 10-minute continue cap, Firefox dark mode, and any
-real website.
+open `popup.html?tab=<id>` in a tab), a packed build (the counts fallback is
+covered by the adapter tests only), automatic reload after a rebuild in a
+normal profile, Firefox dark mode, and YouTube.

@@ -118,22 +118,15 @@ try {
   hits.length = 0;
   check("after expiry Chrome blocks the formerly excepted endpoint again", (await loadImage(page, `http://pixel.tracker-fixture.test:${port}/short.gif`)) === "error" && !hits.length);
 
-  // 4. Fresh lists with no user action: rebuild the folder Chrome loaded (as a daily job would) with a new tracker;
-  //    the worker's check sees the new build stamp and reloads; the new list is enforced and user state survives.
+  // 4. A rebuilt folder (as a daily job would write it) is noticed by the running worker, which only reads its own
+  //    file. (runtime.reload() is not used: an unpacked extension that reloaded itself came back disabled here.)
   const fresh = loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true});
   fresh.trackers.names.push("fresh-tracker.test");
-  const rebuilt = build({out: path.join(work, "dist"), lists: fresh});
-  hits.length = 0;
-  check("before the check: the new tracker is not blocked yet", (await loadImage(page, `http://fresh-tracker.test:${port}/x.gif`)) === "ok");
-  const outcome = await swEval("__EGBackground.reloadIfRebuilt()").catch((e) => `reloading (${String(e.message).split("\n")[0]})`);
-  sw = null;
-  const reloaded = await waitFor(async () => { try { return (await swEval("globalThis.EGLists && EGLists.build")) === rebuilt.build; } catch { sw = null; return false; } }, 60000, 1000);
-  check("the worker reloaded itself onto the rebuilt folder", reloaded && /reloading/.test(outcome), outcome);
-  await waitFor(async () => (await swEval("chrome.declarativeNetRequest.getEnabledRulesets()")).includes("trackers"), 60000, 500);
-  hits.length = 0;
-  check("after the reload the new tracker is blocked", (await loadImage(page, `http://fresh-tracker.test:${port}/x.gif`)) === "error" && !hits.length);
-  const kept = await swEval("__EGBackground.ready.then(() => ({rules: __EGBackground.store.rules.length, exceptions: __EGBackground.store.exceptions.length}))");
-  check("user rules and exceptions survive the reload", kept.rules >= 1 && kept.exceptions === 1, JSON.stringify(kept));
+  build({out: path.join(work, "dist"), lists: fresh});
+  const before = await swEval("__EGBackground.reloadIfRebuilt()");
+  const state = await swEval(`__EGBackground.handle({type: "popup-state", tabId: ${tabId}, tabUrl: ${tabUrl}}, ${popup})`);
+  check("the worker notices the rebuilt folder and the popup asks for a reload", before === "rebuilt" && state.rebuilt === true, `${before} ${state.rebuilt}`);
+  check("still enabled and enforcing the loaded lists", (await swEval("chrome.declarativeNetRequest.getEnabledRulesets()")).includes("trackers"));
 } catch (error) {
   check("harness", false, error.stack || String(error));
 } finally {

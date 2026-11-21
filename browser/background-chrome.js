@@ -221,13 +221,12 @@
     C.storage.session.remove([`log:${tabId}`, `nav:${tabId}`]).catch(() => {});
     dropContinues((c) => c.tabId === tabId).catch(() => {});
   });
-  // ---- picking up a rebuilt extension with no user action ------------------------------------
+  // ---- noticing a rebuilt extension folder ---------------------------------------------------
   // An unpacked extension's files are read from its folder live. When `node scripts/build-browser.mjs` rewrites that
-  // folder (for example from the same daily job that refreshes the proxy's lists), rules/build.json changes; the
-  // worker notices on its next check and calls runtime.reload(), which re-reads the manifest and re-indexes the
-  // rulesets. No network: the only read is the extension's own file (connect-src 'self'). Packed builds have an
-  // update_url or a store and never change on disk, so they skip this. A reload ends "continue once" exceptions, so
-  // it waits while one is active.
+  // folder, rules/build.json changes; the worker notices on its hourly check and the popup asks the user to press
+  // the reload arrow. It does NOT call runtime.reload(): in headless Chrome 157 an unpacked extension that reloaded
+  // itself came back disabled (developer mode on or off), which would silently switch all protection off.
+  // No network: the only read is the extension's own file (connect-src 'self'). Packed builds skip this.
   const REFRESH_ALARM = "eg-rebuilt";
   const REFRESH_MINUTES = 60;
   async function reloadIfRebuilt() {
@@ -235,10 +234,9 @@
     let onDisk;
     try { onDisk = await fetch(OWN + "rules/build.json", {cache: "no-store"}).then((r) => r.json()); } catch { return "unreadable"; }
     if (!onDisk || typeof onDisk.build !== "string" || !/^[0-9a-f]{32}$/.test(onDisk.build)) return "unreadable";
-    if (onDisk.build === LISTS.build) return "current";
-    if ((await continues()).length) return "deferred";
-    C.runtime.reload();
-    return "reloading";
+    const stale = onDisk.build !== LISTS.build;
+    await C.storage.session.set({rebuilt: stale ? {at: Number(onDisk.built_at) || null} : null});
+    return stale ? "rebuilt" : "current";
   }
   C.alarms.get(REFRESH_ALARM).then((existing) => {
     if (!existing) C.alarms.create(REFRESH_ALARM, {delayInMinutes: 1, periodInMinutes: REFRESH_MINUTES});
@@ -322,6 +320,7 @@
         const report = await blockedReport(message.tabId);
         return {
           host, site: hosts.siteOf(host), lists, ...report, generic: !genericOff.has(hosts.siteOf(host)),
+          rebuilt: Boolean((await C.storage.session.get("rebuilt")).rebuilt),
           requestRules: active.requestRules.map(plain), cosmeticRules: active.cosmeticRules.map(plain),
           exceptions: active.exceptions.map((e) => ({...e, msLeft: Math.max(0, e.expiresAt - now)})),
           types: rulesApi.RESOURCE_TYPES,

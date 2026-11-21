@@ -111,6 +111,7 @@
     const state = await send({type: "popup-state"});
     const lists = (state && state.lists) || [];
     renderLists(lists);
+    $("rebuilt").hidden = !(state && state.rebuilt === true);
     if (!state || !state.site) {
       $("site").textContent = "Not a web page";
       for (const id of ["pick", "restore"]) $(id).disabled = true;
