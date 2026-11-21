@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blocked: possible malware or phishing</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="warning.css">
+</head>
+<body>
+<main class="warning">
+  <p class="brand"><span class="brand-symbol" aria-hidden="true"></span>Egress Guard</p>
+  <section class="card" aria-labelledby="title">
+    <p class="eyebrow">Stopped before loading</p>
+    <h1 id="title">This site is on a malware and phishing list</h1>
+    <p class="host" id="host">…</p>
+    <p class="url" id="url"></p>
+    <dl class="facts">
+      <div><dt>List</dt><dd id="list">Malware and phishing</dd></div>
+      <div><dt>Updated</dt><dd id="updated">Unknown</dd></div>
+    </dl>
+    <p class="body">Your browser did not contact this site. Threat lists are usually right, and sometimes wrong. If you did not expect to land here, go back.</p>
+    <div class="actions">
+      <button id="back" class="primary" type="button">Go back</button>
+      <button id="reveal" class="quiet" type="button" aria-expanded="false" aria-controls="confirm">I understand the risk…</button>
+    </div>
+    <div id="confirm" class="confirm" hidden>
+      <p>Continue loads this one site in this tab only. Ads and trackers stay blocked. The exception ends when you leave the site or after <span id="minutes">10</span> minutes.</p>
+      <button id="continue" class="danger" type="button">Continue to this site once</button>
+    </div>
+    <p id="error" class="error" role="alert" hidden></p>
+  </section>
+</main>
+<script src="core/hosts.js"></script>
+<script src="core/dnr.js"></script>
+<script src="warning.js"></script>
+</body>
+</html>

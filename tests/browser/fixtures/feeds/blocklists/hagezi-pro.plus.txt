@@ -1,0 +1,5 @@
+# {"updated_at":1795000000,"published_at":1794990000,"entries":4,"sha256":"7de6c5ecae9dd9244c3ab038f480ec07f4ff90369c4ae3786e302d178f9cfcf5"}
+adserver.example
+cdn.adserver.example
+pixel.tracker-fixture.test
+tracker-fixture.test

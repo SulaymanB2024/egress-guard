@@ -1,0 +1,17 @@
+body { min-height: 100vh; font-size: 15px; padding: 0 16px; }
+.warning { width: min(100%, 620px); margin: 0 auto; padding: 48px 0 40px; }
+.warning > .brand { margin-bottom: 22px; color: var(--muted); }
+.card { background: var(--white); border: 1px solid var(--line); border-top: 5px solid var(--bad); border-radius: 12px; padding: 26px 26px 24px; }
+.card .eyebrow { color: var(--bad); margin-bottom: 8px; }
+h1 { font-size: clamp(24px, 4vw, 31px); line-height: 1.15; font-weight: 700; letter-spacing: -.03em; max-width: 24ch; }
+.host { margin-top: 18px; font: 600 clamp(18px, 3vw, 22px)/1.25 var(--mono); overflow-wrap: anywhere; }
+.url { margin-top: 4px; font: 12px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; max-height: 4.2em; overflow: hidden; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 18px 0; padding: 12px 0; border-block: 1px solid var(--line); }
+.facts dt { font: 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.facts dd { font-weight: 600; }
+.body { color: var(--muted); max-width: 56ch; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
+.actions button { min-height: 38px; padding: 6px 16px; }
+.confirm { margin-top: 16px; padding: 14px 16px; border-radius: 9px; background: var(--bad-soft); }
+.confirm p { margin-bottom: 12px; max-width: 56ch; }
+#error { margin-top: 14px; }

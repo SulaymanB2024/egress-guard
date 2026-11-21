@@ -1,27 +1,46 @@
-/* Popup: shows what applies on the current site. All page-derived strings are set with textContent. */
+/* Popup: leads with what was blocked on this page, then the controls for this site.
+ * Works in Firefox (browser.*) and Chrome (chrome.*). All page-derived strings are set with textContent. */
 (function (root) {
   "use strict";
-  const B = root.browser;
+  const B = root.browser || root.chrome;
   const $ = (id) => document.getElementById(id);
   const FORM_TYPES = ["beacon", "ping", "xmlhttprequest", "image", "script", "sub_frame"];
   const EXCEPTION_MINUTES = 15;
+  const LIST_LABELS = {threats: "Malware and phishing", trackers: "Ads and trackers", cname: "Disguised trackers", user: "Your rules"};
+  const LIST_ORDER = ["threats", "trackers", "cname", "user"];
   let tab = null;
 
-  function item(parts, buttons = []) {
-    const li = document.createElement("li");
-    const what = document.createElement("span");
-    what.className = "what";
-    for (const [text, className] of parts) {
-      const span = document.createElement(className === "code" ? "code" : "span");
-      span.textContent = text;
-      if (className && className !== "code") span.className = className;
-      what.append(span, document.createTextNode(" "));
+  function el(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+
+  /** One row: an endpoint (host + path), tags underneath, and optional buttons. */
+  function row({verb, host, path, text, tags = []}, buttons = []) {
+    const li = el("li");
+    const what = el("span", null, "what");
+    const line = el("span", null, "line");
+    if (verb) line.append(el("span", verb, "verb"), document.createTextNode(" "));
+    if (host !== undefined) {
+      const code = el("code");
+      code.append(el("span", host, "h"), el("span", path, "p"));
+      code.setAttribute("title", `${host}${path}`);
+      line.append(code);
+    } else {
+      const code = el("code", text);
+      code.setAttribute("title", text);
+      line.append(code);
     }
+    what.append(line);
+    const meta = el("span", null, "meta");
+    for (const [label, kind] of tags) meta.append(el("span", label, `tag${kind ? ` ${kind}` : ""}`), document.createTextNode(" "));
+    what.append(meta);
     li.append(what);
     for (const [label, onClick, aria] of buttons) {
-      const button = document.createElement("button");
+      const button = el("button", label);
       button.type = "button";
-      button.textContent = label;
       if (aria) button.setAttribute("aria-label", aria);
       button.addEventListener("click", onClick);
       li.append(button);
@@ -30,10 +49,7 @@
   }
 
   function empty(list, text) {
-    const li = document.createElement("li");
-    li.className = "muted";
-    li.textContent = text;
-    list.replaceChildren(li);
+    list.replaceChildren(el("li", text, "empty"));
   }
 
   function showError(message) { $("error").textContent = message || ""; $("error").hidden = !message; }
@@ -53,28 +69,72 @@
     try { return await B.tabs.sendMessage(tab.id, message); } catch { return null; }
   }
 
+  const listLabel = (id, lists) => {
+    const meta = lists.find((l) => l.id === id);
+    return (meta && meta.label) || LIST_LABELS[id] || id;
+  };
+
+  function renderHero(blocked, lists) {
+    const totals = {};
+    let sum = 0;
+    for (const b of blocked) { const id = b.list || "user"; totals[id] = (totals[id] || 0) + b.count; sum += b.count; }
+    $("blocked-count").textContent = String(sum);
+    $("blocked-unit").textContent = sum === 1 ? "request" : "requests";
+    const ids = Object.keys(totals).sort((a, b) => LIST_ORDER.indexOf(a) - LIST_ORDER.indexOf(b));
+    const chips = ids.map((id) => {
+      const li = el("li", null, id);
+      li.append(el("b", String(totals[id])), document.createTextNode(" "), el("span", listLabel(id, lists)));
+      return li;
+    });
+    $("breakdown").replaceChildren(...chips);
+    $("breakdown").hidden = !chips.length;
+  }
+
+  function renderLists(lists) {
+    const footer = $("lists");
+    const active = lists.filter((l) => l.domains > 0);
+    if (!active.length) { footer.textContent = "No built-in lists in this build: only your own rules apply."; return; }
+    const stamps = active.map((l) => l.published_at || l.updated_at).filter((t) => typeof t === "number");
+    const day = stamps.length ? new Date(Math.min(...stamps) * 1000).toLocaleDateString(undefined, {month: "short", day: "numeric"}) : null;
+    const parts = [el("span", day ? `Built-in lists (oldest from ${day}): ` : "Built-in lists: ")];
+    active.forEach((l, i) => {
+      if (i) parts.push(document.createTextNode(" · "));
+      parts.push(el("b", l.name), document.createTextNode(` (${Number(l.domains).toLocaleString("en-US")})`));
+    });
+    parts.push(document.createTextNode("."));
+    footer.replaceChildren(...parts);
+  }
+
   async function render() {
     const state = await send({type: "popup-state"});
+    const lists = (state && state.lists) || [];
+    renderLists(lists);
     if (!state || !state.site) {
-      $("site").textContent = "Open a regular web page to see its rules.";
+      $("site").textContent = "Not a web page";
       for (const id of ["pick", "restore"]) $(id).disabled = true;
+      renderHero([], lists);
       for (const id of ["blocked", "rules", "exceptions"]) empty($(id), "Nothing here.");
-      $("hidden").textContent = "";
+      $("hidden").textContent = "Open a regular web page to see its rules.";
       return;
     }
-    $("site").textContent = `Site: ${state.site}`;
+    $("site").textContent = state.host;
     if (!$("rule-host").value) $("rule-host").value = state.host;
 
     const blocked = $("blocked");
-    if (!state.blocked.length) empty(blocked, "Nothing blocked on this page.");
-    else blocked.replaceChildren(...state.blocked.map((b) => item(
-      [[`${b.host}${b.path}`, "code"], [`${b.type}${b.count > 1 ? ` ×${b.count}` : ""}`, "meta"]],
-      [[`Allow ${EXCEPTION_MINUTES} min`, () => act({type: "add-exception", host: b.host, path: b.path, resourceType: b.type, minutes: EXCEPTION_MINUTES}),
-        `Allow ${b.host}${b.path} (${b.type}) on this site for ${EXCEPTION_MINUTES} minutes`]],
-    )));
+    const items = [...state.blocked].sort((a, b) => LIST_ORDER.indexOf(a.list || "user") - LIST_ORDER.indexOf(b.list || "user") || b.count - a.count);
+    renderHero(items, lists);
+    if (!items.length) empty(blocked, state.feedback === false ? "This build cannot list blocked requests; the toolbar badge shows the count." : "Nothing blocked on this page.");
+    else blocked.replaceChildren(...items.map((b) => {
+      const list = b.list || "user";
+      const tags = [[`${b.type}${b.count > 1 ? ` ×${b.count}` : ""}`, ""], [listLabel(list, lists), list]];
+      const buttons = b.type === "main_frame" ? [] : [[`Allow ${EXCEPTION_MINUTES} min`,
+        () => act({type: "add-exception", host: b.host, path: b.path, resourceType: b.type, minutes: EXCEPTION_MINUTES}),
+        `Allow ${b.host}${b.path} (${b.type}) on this site for ${EXCEPTION_MINUTES} minutes`]];
+      return row({host: b.host, path: b.path, tags}, buttons);
+    }));
 
     const page = await tabMessage({type: "status"});
-    if (!page) $("hidden").textContent = "This page has not loaded the companion (reload it after installing).";
+    if (!page) $("hidden").textContent = "The companion has not loaded on this page yet. Reload it after installing.";
     else if (page.paused) $("hidden").textContent = `${page.reason} Hiding is off until you resume.`;
     else {
       const notes = [];
@@ -89,17 +149,17 @@
     const rules = $("rules");
     const all = [...state.requestRules, ...state.cosmeticRules];
     if (!all.length) empty(rules, "No rules for this site yet.");
-    else rules.replaceChildren(...all.map((r) => item(
+    else rules.replaceChildren(...all.map((r) => row(
       r.kind === "request"
-        ? [["Block", "meta"], [`${r.host}${r.path}`, "code"], [r.types.join(", "), "meta"]]
-        : [["Hide", "meta"], [r.selector, "code"]],
+        ? {verb: "Block", host: r.host, path: r.path, tags: r.types.map((t) => [t, ""])}
+        : {verb: "Hide", text: r.selector},
       [["Remove", () => act({type: "remove-rule", id: r.id}), `Remove rule ${r.kind === "request" ? r.host + r.path : r.selector}`]],
     )));
 
     const exceptions = $("exceptions");
     if (!state.exceptions.length) empty(exceptions, "No exceptions.");
-    else exceptions.replaceChildren(...state.exceptions.map((e) => item(
-      [["Allow", "meta"], [`${e.host}${e.path}`, "code"], [`${e.type} · ${minutesLeft(e.msLeft)}`, "meta"]],
+    else exceptions.replaceChildren(...state.exceptions.map((e) => row(
+      {verb: "Allow", host: e.host, path: e.path, tags: [[`${e.type} · ${minutesLeft(e.msLeft)}`, ""]]},
       [["Remove", () => act({type: "remove-exception", id: e.id}), `Remove exception for ${e.host}${e.path}`]],
     )));
   }
@@ -122,9 +182,18 @@
     }
   }
 
+  /** The active tab, or (for development captures) the tab named by ?tab=<id>. */
+  async function currentTab() {
+    const search = root.location && typeof root.location.search === "string" ? root.location.search : "";
+    const named = /^\?tab=([0-9]{1,12})$/.exec(search);
+    if (named && B.tabs.get) return B.tabs.get(Number(named[1]));
+    const [active] = await B.tabs.query({active: true, currentWindow: true});
+    return active;
+  }
+
   async function init() {
     buildTypeBoxes();
-    [tab] = await B.tabs.query({active: true, currentWindow: true});
+    tab = await currentTab();
     $("pick").addEventListener("click", async () => { await tabMessage({type: "start-picker"}); root.close(); });
     $("restore").addEventListener("click", async () => {
       const page = await tabMessage({type: "status"});

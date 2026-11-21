@@ -3,33 +3,39 @@
 <head>
 <meta charset="utf-8">
 <title>Egress Guard</title>
+<link rel="stylesheet" href="ui.css">
 <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-<header>
-  <h1>Egress Guard</h1>
-  <p id="site" class="muted">Loading…</p>
+<header class="top">
+  <p class="brand"><span class="brand-symbol" aria-hidden="true"></span>Egress Guard</p>
+  <p id="site" class="site">Loading…</p>
 </header>
 <p id="error" class="error" role="alert" hidden></p>
 
-<section aria-labelledby="blocked-h">
-  <h2 id="blocked-h">Blocked before sending</h2>
-  <p class="muted">Requests stopped on this page since it loaded.</p>
-  <ul id="blocked"></ul>
+<section class="hero" aria-labelledby="blocked-h">
+  <p class="eyebrow" id="blocked-h">Blocked on this page</p>
+  <p class="count"><span id="blocked-count">0</span> <span id="blocked-unit">requests</span></p>
+  <ul id="breakdown" class="breakdown"></ul>
 </section>
 
-<section aria-labelledby="hidden-h">
-  <h2 id="hidden-h">Hidden after loading</h2>
-  <p id="hidden" class="muted"></p>
+<section class="block" aria-labelledby="list-h">
+  <h2 id="list-h">What was blocked</h2>
+  <ul id="blocked" class="rows"></ul>
+</section>
+
+<section class="block" aria-labelledby="hidden-h">
+  <h2 id="hidden-h">Hidden on this page</h2>
+  <p id="hidden" class="note"></p>
   <div class="actions">
     <button id="pick" type="button">Block an element…</button>
     <button id="restore" type="button">Restore this page</button>
   </div>
 </section>
 
-<section aria-labelledby="rules-h">
+<section class="block" aria-labelledby="rules-h">
   <h2 id="rules-h">Rules for this site</h2>
-  <ul id="rules"></ul>
+  <ul id="rules" class="rows"></ul>
   <details>
     <summary>Add an endpoint rule</summary>
     <form id="add-rule">
@@ -38,15 +44,17 @@
       <fieldset id="rule-types">
         <legend>Request types</legend>
       </fieldset>
-      <button type="submit">Block endpoint</button>
+      <button type="submit" class="primary">Block endpoint</button>
     </form>
   </details>
 </section>
 
-<section aria-labelledby="exc-h">
+<section class="block" aria-labelledby="exc-h">
   <h2 id="exc-h">Temporary exceptions</h2>
-  <ul id="exceptions"></ul>
+  <ul id="exceptions" class="rows"></ul>
 </section>
+
+<footer id="lists" class="lists"></footer>
 <script src="popup.js"></script>
 </body>
 </html>
