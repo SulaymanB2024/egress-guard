@@ -7,10 +7,28 @@
 <title>Opening link…</title>
 <link rel="stylesheet" href="ui.css">
 <link rel="stylesheet" href="warning.css">
+<link rel="stylesheet" href="unwrap.css">
 </head>
 <body>
 <main class="warning">
   <p class="brand"><span class="brand-symbol" aria-hidden="true"></span>Egress Guard</p>
+
+  <section class="card scan" aria-labelledby="scan-title" id="scan" hidden>
+    <p class="eyebrow" id="scan-eyebrow">Mail security link</p>
+    <h1 id="scan-title">This link goes through your mail scanner</h1>
+    <p class="label">It leads to</p>
+    <p class="host" id="scan-host">…</p>
+    <p class="idn" id="scan-idn" hidden></p>
+    <p class="url" id="scan-url"></p>
+    <p class="body" id="scan-body">Your organisation's mail security checks this link when you open it. Continuing through the scanner keeps that check.</p>
+    <div class="actions">
+      <button id="through" class="primary" type="button">Continue through the scanner</button>
+      <button id="direct" class="secondary" type="button">Open directly <span class="sub">(skips the mail scan)</span></button>
+    </div>
+    <p class="fine" id="scan-fine">Either way Egress Guard checks the address against its malware and phishing list. To skip this page for every scanned link, use <b>Always open scanned links directly</b> in the Egress Guard popup.</p>
+    <p id="scan-error" class="error" role="alert" hidden></p>
+  </section>
+
   <section class="card unwrap" aria-labelledby="title" id="card" hidden>
     <p class="eyebrow">Link tracker skipped</p>
     <h1 id="title">This link's destination could not be read</h1>

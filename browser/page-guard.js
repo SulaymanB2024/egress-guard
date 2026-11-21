@@ -31,22 +31,27 @@
     }, 250);
   }
 
-  /** The clean address for a link's href, or null when it is already clean or cannot be cleaned safely. */
+  /**
+   * The clean address for a link's href, or null when it is already clean or cannot be cleaned safely. A redirector is
+   * unwrapped only on its own site (core/links.js allowedFrom): a google.com/url link on any other page keeps Google's
+   * own check, and only its tracking parameters go. A mail scanner's link is never touched.
+   */
   function cleanHref(link) {
     let href = link.href;
     if (typeof href !== "string" || !/^https?:/i.test(href)) return null;
     let host = "";
     try { host = new URL(href).hostname; } catch { return null; }
+    if (links.scannerOf(href)) return null;
     if (host === "t.co") {
       const shown = link.getAttribute("data-expanded-url") || link.getAttribute("title") || "";
       const real = links.safeDestination(shown.trim());
-      if (real) href = real;
+      if (real && !links.scannerOf(real)) href = real;
     }
     if (links.wrapperOf(href)) {
-      const r = links.unwrap(href);
+      const r = links.unwrap(href, {from: root.location.hostname});
       if (r.url) href = r.url;
     }
-    href = params.clean(href).url;
+    if (!links.scannerOf(href)) href = params.clean(href).url;
     return href !== link.href ? href : null;
   }
 
@@ -100,17 +105,60 @@
   const hostOf = (u) => { try { return new URL(u, root.location.href).hostname; } catch { return ""; } };
   const providerOf = (u) => { const h = hostOf(u); return embeds.find((e) => e.domains.some((d) => h === d || h.endsWith(`.${d}`))) || null; };
 
+  // ---- click-to-load placeholder: hardened against clickjacking ------------------------------------------------
+  // The page owns the DOM around the placeholder, so it could make it invisible, cover it, or swap something under
+  // the pointer to steal the click that loads a tracker's embed. The host element carries !important inline styles
+  // and `all:initial !important`; a click counts only when the button is really visible (IntersectionObserver v2
+  // `trackVisibility`, for at least MIN_VISIBLE_MS), big enough, under the pointer, and no ancestor is transparent,
+  // hidden or transformed away.
+  const MIN_VISIBLE_MS = 500;
+  const HOST_STYLE = [["display", "block"], ["position", "static"], ["opacity", "1"], ["visibility", "visible"], ["transform", "none"],
+    ["filter", "none"], ["clip-path", "none"], ["mask", "none"], ["pointer-events", "auto"], ["mix-blend-mode", "normal"], ["margin", "8px 0"],
+    ["contain", "none"], ["z-index", "auto"]];
+  const computed = (el) => { try { return typeof root.getComputedStyle === "function" ? root.getComputedStyle(el) : null; } catch { return null; } };
+
+  /**
+   * May this click on the placeholder's button load the embed? `visibleSince` is when IntersectionObserver v2 last
+   * reported the button fully visible (null: not visible now; undefined: the browser has no v2, heuristics only).
+   */
+  function clickAllowed(button, shadow, event, visibleSince, now = Date.now()) {
+    if (!event || !event.isTrusted) return false;
+    if (visibleSince !== undefined && (visibleSince === null || now - visibleSince < MIN_VISIBLE_MS)) return false;
+    const rect = button.getBoundingClientRect();
+    if (!rect || rect.width < 24 || rect.height < 16) return false;
+    // Up the tree, across the shadow boundary to the host and the page's own ancestors.
+    let n = button, depth = 0;
+    while (n && depth++ < 128) {
+      const cs = n.nodeType === 1 ? computed(n) : null;
+      if (cs) {
+        if (cs.display === "none" || (cs.visibility && cs.visibility !== "visible")) return false;
+        if (parseFloat(cs.opacity) < 0.99) return false;
+        if (cs.filter && cs.filter !== "none") return false;
+      }
+      n = n.parentNode || n.host || null;
+    }
+    // The pointer must be on the button itself, not on something layered over it.
+    if (typeof event.clientX === "number" && typeof shadow.elementFromPoint === "function") {
+      const hit = shadow.elementFromPoint(event.clientX, event.clientY);
+      if (!hit || !(hit === button || button.contains(hit))) return false;
+    }
+    return true;
+  }
+
   function placeholder(provider, onLoad, sizeFrom) {
     const box = document.createElement("div");
     box.setAttribute(PLACEHOLDER, provider.id);
+    for (const [k, v] of HOST_STYLE) box.style.setProperty(k, v, "important");
     const shadow = box.attachShadow({mode: "closed"});
     const style = document.createElement("style");
-    style.textContent = `:host{all:initial;display:block;margin:8px 0}
-      .b{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px;box-sizing:border-box;min-height:120px;padding:16px;border:1px dashed #8a948c;border-radius:8px;background:#f4f4f0;color:#1b1f1d;font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+    style.textContent = `:host{all:initial !important;display:block !important;position:static !important;opacity:1 !important;visibility:visible !important;transform:none !important;filter:none !important;clip-path:none !important;pointer-events:auto !important;margin:8px 0 !important}
+      .b{display:flex !important;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px;box-sizing:border-box;min-height:120px;padding:16px;border:1px dashed #8a948c;border-radius:8px;background:#f4f4f0;color:#1b1f1d;font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;opacity:1 !important;visibility:visible !important}
       .t{font-weight:650}.n{color:#4d5650;font-size:12.5px}
-      button{font:inherit;font-weight:600;border:1px solid #2f6f58;border-radius:6px;padding:6px 12px;color:#fff;background:#19382e;cursor:pointer}
+      .row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+      button{font:inherit;font-weight:600;border:1px solid #2f6f58;border-radius:6px;padding:6px 12px;color:#fff;background:#19382e;cursor:pointer;opacity:1 !important;visibility:visible !important;min-width:24px;min-height:24px}
+      button.c{background:transparent;color:#2f6f58;border-color:transparent;text-decoration:underline;text-underline-offset:3px;font-weight:500;padding:6px 4px}
       button:focus-visible{outline:3px solid #2f6f58;outline-offset:2px}
-      @media (prefers-color-scheme:dark){.b{background:#1d2421;color:#e8ece9;border-color:#5b665f}.n{color:#a9b3ad}}`;
+      @media (prefers-color-scheme:dark){.b{background:#1d2421;color:#e8ece9;border-color:#5b665f}.n{color:#a9b3ad}button.c{color:#8fc9ac}}`;
     const wrap = document.createElement("div");
     wrap.className = "b";
     if (sizeFrom) {
@@ -119,15 +167,36 @@
       if (h > 0) wrap.style.minHeight = `${Math.min(h, 2000)}px`;
     }
     const title = document.createElement("span"); title.className = "t"; title.textContent = `${provider.name} content held`;
-    const note = document.createElement("span"); note.className = "n"; note.textContent = `Loading it lets ${provider.name} see this visit. Held by Egress Guard (Strict).`;
+    const note = document.createElement("span"); note.className = "n"; note.textContent = `Loading it lets ${provider.name} see this visit, without its cookies. Held by Egress Guard (Strict).`;
     const button = document.createElement("button"); button.type = "button"; button.textContent = `Load from ${provider.name}`;
-    button.addEventListener("click", async (event) => {
-      if (!event.isTrusted) return;   // only a real click
-      button.disabled = true;
-      const reply = await B.runtime.sendMessage({type: "load-embed", embed: provider.id}).catch(() => null);
-      if (reply && reply.ok) { box.remove(); onLoad(); } else button.disabled = false;
-    });
-    wrap.append(title, note, button);
+    const withCookies = document.createElement("button"); withCookies.type = "button"; withCookies.className = "c"; withCookies.textContent = "Load with cookies (signed in)";
+    let visibleSince;   // undefined until IntersectionObserver v2 reports; see clickAllowed
+    if (typeof root.IntersectionObserver === "function") {
+      try {
+        const io = new root.IntersectionObserver((entries) => {
+          for (const e of entries) {
+            if (typeof e.isVisible !== "boolean") { visibleSince = undefined; continue; }
+            visibleSince = e.isVisible ? (visibleSince || Date.now()) : null;
+          }
+        }, {threshold: [1], trackVisibility: true, delay: 100});
+        io.observe(wrap);
+        visibleSince = null;   // not visible until the observer says so
+      } catch { visibleSince = undefined; }
+    }
+    const load = (cookies, from) => async (event) => {
+      if (!clickAllowed(from, shadow, event, visibleSince)) {
+        note.textContent = "Not loaded: the button was covered, hidden or had just appeared. Scroll it fully into view and click again.";
+        return;
+      }
+      button.disabled = true; withCookies.disabled = true;
+      const reply = await B.runtime.sendMessage({type: "load-embed", embed: provider.id, cookies}).catch(() => null);
+      if (reply && reply.ok) { box.remove(); onLoad(); } else { button.disabled = false; withCookies.disabled = false; }
+    };
+    button.addEventListener("click", load(false, button));
+    withCookies.addEventListener("click", load(true, withCookies));
+    const row = document.createElement("div"); row.className = "row";
+    row.append(button, withCookies);
+    wrap.append(title, note, row);
     shadow.append(style, wrap);
     return box;
   }
@@ -189,5 +258,5 @@
     if ((reply.mode === "strict" || reply.mode === "noscript") && Array.isArray(reply.embeds)) { embeds = reply.embeds; startStrict(); }
   }).catch(() => {});
 
-  root.__EGPageGuard = Object.freeze({status: () => ({enabled, cleaned, pingsRemoved, held: document.querySelectorAll(`[${PLACEHOLDER}]`).length}), cleanHref});
+  root.__EGPageGuard = Object.freeze({status: () => ({enabled, cleaned, pingsRemoved, held: document.querySelectorAll(`[${PLACEHOLDER}]`).length}), cleanHref, clickAllowed, placeholder});
 })(globalThis);

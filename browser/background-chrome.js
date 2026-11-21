@@ -41,13 +41,12 @@
   // load and on every change; compiled into dynamic rules by dnr.compileModes.
   const MODES_KEY = "egressGuardModes";
   const MAX_MODE_SITES = 2000, MAX_ALLOWED_HOSTS = 50;
-  let modes = {defaultMode: "standard", sites: {}, allowHosts: {}, cleanOff: [], noise: false, noiseOff: []};
+  let modes = {defaultMode: "standard", sites: {}, allowHosts: {}, cleanOff: [], scannedDirect: false};
   let modeKinds = {};               // dynamic rule id -> popup category (or null)
   function cleanModes(value) {
-    const out = {defaultMode: value && value.defaultMode === "strict" ? "strict" : "standard", sites: {}, allowHosts: {}, cleanOff: [], noise: false, noiseOff: []};
-    out.noise = Boolean(value && value.noise === true);
-    const noiseOff = value && Array.isArray(value.noiseOff) ? value.noiseOff : [];
-    out.noiseOff = [...new Set(noiseOff.filter((s) => hosts.siteOf(s) === s))].slice(0, MAX_MODE_SITES).sort();
+    const out = {defaultMode: value && value.defaultMode === "strict" ? "strict" : "standard", sites: {}, allowHosts: {}, cleanOff: [], scannedDirect: false};
+    // "Always open scanned links directly": off unless the user switched it on.
+    out.scannedDirect = Boolean(value && value.scannedDirect === true);
     const off = value && Array.isArray(value.cleanOff) ? value.cleanOff : [];
     out.cleanOff = [...new Set(off.filter((s) => hosts.siteOf(s) === s))].slice(0, MAX_MODE_SITES).sort();
     const sites = value && typeof value.sites === "object" && value.sites ? value.sites : {};
@@ -67,35 +66,74 @@
   const modeFor = (site) => (site && modes.sites[site]) || modes.defaultMode;
   const cleaningOn = (site) => !(site && modes.cleanOff.includes(site));
 
-  // ---- experimental fingerprint noise: page-noise.js is registered only while it is switched on ----------------
-  const NOISE_ID = "eg-noise";
-  async function syncNoise() {
-    if (!C.scripting || !C.scripting.registerContentScripts) return;
-    const ids = [NOISE_ID, `${NOISE_ID}-key`];
-    const existing = await C.scripting.getRegisteredContentScripts({ids}).catch(() => []);
+  // ---- retired: experimental fingerprint noise ----------------------------------------------------------------
+  // Removed in 0.3.1: keyed by the frame's own site, it gave third-party frames a stable cross-site value, and its key
+  // was reachable by page script. Installs that had it on still hold persistent registrations; they are removed here.
+  async function retireNoise() {
+    if (!C.scripting || !C.scripting.getRegisteredContentScripts) return;
+    const existing = await C.scripting.getRegisteredContentScripts({ids: ["eg-noise", "eg-noise-key"]}).catch(() => []);
     if (existing.length) await C.scripting.unregisterContentScripts({ids: existing.map((x) => x.id)});
-    if (!modes.noise) return;
-    const excludeMatches = modes.noiseOff.flatMap((s) => [`*://${s}/*`, `*://*.${s}/*`]);
-    const common = {matches: ["http://*/*", "https://*/*"], ...(excludeMatches.length ? {excludeMatches} : {}), runAt: "document_start", allFrames: true, persistAcrossSessions: true};
-    await C.scripting.registerContentScripts([{id: `${NOISE_ID}-key`, js: ["core/hosts.js", "page-noise-key.js"], ...common},
-      {id: NOISE_ID, js: ["page-noise.js"], world: "MAIN", ...common}]);
   }
 
   // ---- click-to-load embeds: a session allow for one provider in one tab, ended when the tab navigates ----------
   const EMBED_BASE = 300000;
-  function loadEmbed(embedId, tabId) {
+  function loadEmbed(embedId, tabId, withCookies = false) {
     return serial(async () => {
       const list = (await C.storage.session.get("embeds")).embeds || [];
       const prior = list.find((e) => e.tabId === tabId && e.embed === embedId);
-      if (prior) return prior;
+      if (prior && (prior.withCookies || !withCookies)) return prior;
       const used = new Set(list.map((e) => e.id));
-      let id = EMBED_BASE;
-      while (used.has(id)) id++;
-      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [id], addRules: [dnr.embedRule(id, embedId, tabId)]});
-      const entry = {id, tabId, embed: embedId};
-      await C.storage.session.set({embeds: [...list, entry]});
+      let id = prior ? prior.id : EMBED_BASE;
+      while (!prior && used.has(id)) id++;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [id], addRules: [dnr.embedRule(id, embedId, tabId, {withCookies})]});
+      const entry = {id, tabId, embed: embedId, withCookies};
+      await C.storage.session.set({embeds: [...list.filter((e) => e !== prior), entry]});
       return entry;
     });
+  }
+
+  // ---- "Continue through the scanner": one session allow for one scanner host in one tab ------------------------
+  const PASS_BASE = 200000;
+  const PASS_MS = 60000;
+  function addScannerPass(host, tabId) {
+    return serial(async () => {
+      const list = (await C.storage.session.get("passes")).passes || [];
+      const kept = list.filter((p) => !(p.tabId === tabId));
+      const used = new Set(kept.map((p) => p.id));
+      let id = PASS_BASE;
+      while (used.has(id)) id++;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [...list.filter((p) => p.tabId === tabId).map((p) => p.id), id], addRules: [dnr.scannerPassRule(id, host, tabId)]});
+      const entry = {id, tabId, host, expiresAt: Date.now() + PASS_MS};
+      await C.storage.session.set({passes: [...kept, entry]});
+      return entry;
+    });
+  }
+  function dropPasses(test) {
+    return serial(async () => {
+      const list = (await C.storage.session.get("passes")).passes || [];
+      const gone = list.filter(test);
+      if (!gone.length) return;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.map((p) => p.id)});
+      await C.storage.session.set({passes: list.filter((p) => !gone.includes(p))});
+    });
+  }
+
+  // ---- No scripts / Strict: a site's service workers could serve cached pages and scripts that no rule sees ------
+  // Switching a site to No scripts or Strict unregisters its service workers and clears its Cache Storage for the
+  // origins we can name: the site, www., and every origin of that site open in a tab. Other subdomains that are not
+  // open keep theirs until they are visited with the site open, and the popup says so.
+  async function clearWorkers(site) {
+    if (!C.browsingData || !C.browsingData.remove) return {ok: false, origins: []};
+    const origins = new Set(["https:", "http:"].flatMap((scheme) => [`${scheme}//${site}`, `${scheme}//www.${site}`]));
+    const tabs = await C.tabs.query({url: ["http://*/*", "https://*/*"]}).catch(() => []);
+    for (const t of tabs) {
+      let u;
+      try { u = new URL(t.url); } catch { continue; }
+      if (hosts.siteOf(u.hostname) === site) origins.add(u.origin);
+    }
+    const list = [...origins].sort();
+    await C.browsingData.remove({origins: list}, {serviceWorkers: true, cacheStorage: true});
+    return {ok: true, origins: list};
   }
   function dropEmbeds(tabId) {
     return serial(async () => {
@@ -130,7 +168,7 @@
   async function onCookie(change) {
     if (!change || change.removed || !change.cookie || !cookieRules) return;
     const c = change.cookie;
-    const action = cookieRules.classify(c.name);
+    const action = cookieRules.classify(c.name, c.domain);
     if (!action) return;
     const site = hosts.siteOf(c.domain.replace(/^\./, ""));
     await ready;
@@ -149,9 +187,14 @@
 
   // ---- "Copy clean link" (context menu) through an offscreen document, so the page never sees the copy ----------
   const MENU = "eg-copy-clean";
-  function cleanLink(href) {
+  /** The clean form of a link on a page at `fromHost`: a tracker is unwrapped only where the page is that tracker's own
+   * site (core/links.js allowedFrom); a mail scanner's link is never changed, not even its parameters. */
+  function cleanLink(href, fromHost = null) {
+    const L = root.EGLinks;
+    if (L && L.scannerOf(href)) return href;
     let out = href;
-    if (root.EGLinks && root.EGLinks.wrapperOf(out)) { const r = root.EGLinks.unwrap(out); if (r.url) out = r.url; }
+    if (L && L.wrapperOf(out)) { const r = L.unwrap(out, {from: fromHost}); if (r.url) out = r.url; }
+    if (L && L.scannerOf(out)) return out;
     return root.EGParams ? root.EGParams.clean(out).url : out;
   }
   async function copyText(text) {
@@ -160,9 +203,9 @@
     if (!has) await C.offscreen.createDocument({url: "offscreen.html", reasons: ["CLIPBOARD"], justification: "Copy a cleaned link to the clipboard."});
     try { return await C.runtime.sendMessage({type: "offscreen-copy", text}); } finally { C.offscreen.closeDocument().catch(() => {}); }
   }
-  async function copyClean(linkUrl) {
+  async function copyClean(linkUrl, pageUrl = null) {
     if (typeof linkUrl !== "string" || !/^https?:/i.test(linkUrl)) return {ok: false};
-    const text = cleanLink(linkUrl);
+    const text = cleanLink(linkUrl, hosts.hostOfUrl(pageUrl || ""));
     const result = await copyText(text);
     return {ok: Boolean(result && result.ok), text};
   }
@@ -170,10 +213,10 @@
     C.runtime.onInstalled.addListener(() => {
       C.contextMenus.removeAll(() => C.contextMenus.create({id: MENU, title: "Copy clean link", contexts: ["link"]}));
     });
-    C.contextMenus.onClicked.addListener((info) => { if (info.menuItemId === MENU) copyClean(info.linkUrl).catch(() => {}); });
+    C.contextMenus.onClicked.addListener((info) => { if (info.menuItemId === MENU) copyClean(info.linkUrl, info.frameUrl || info.pageUrl).catch(() => {}); });
   }
 
-  const ready = Promise.all([store.load(), loadGenericOff(), loadModes().then(() => syncNoise().catch(() => {}))]).then(async () => {
+  const ready = Promise.all([store.load(), loadGenericOff(), loadModes(), retireNoise().catch(() => {})]).then(async () => {
     for (const msg of store.rejected) console.warn("Egress Guard dropped a stored entry:", msg);
     await sync();
   });
@@ -197,7 +240,8 @@
 
   async function schedule() {
     await C.alarms.clear(ALARM);
-    const times = [store.nextExpiry(), ...(await continues()).map((c) => c.expiresAt)].filter((t) => t !== null);
+    const passes = (await C.storage.session.get("passes")).passes || [];
+    const times = [store.nextExpiry(), ...(await continues()).map((c) => c.expiresAt), ...passes.map((x) => x.expiresAt)].filter((t) => t !== null && t !== undefined);
     if (times.length) C.alarms.create(ALARM, {when: Math.max(Math.min(...times), Date.now() + 1000)});
   }
 
@@ -368,6 +412,8 @@
       // A "continue once" exception ends when the tab leaves the host it was granted for.
       const host = hosts.hostOfUrl(info.url);
       dropContinues((c) => c.tabId === tabId && !(host && hosts.withinScope(host, c.host))).catch(() => {});
+      // A scanner pass is for one navigation: once the tab commits any web address (the scanner itself, normally), it is used.
+      dropPasses((x) => x.tabId === tabId).catch(() => {});
     }
   });
   C.tabs.onRemoved.addListener((tabId) => {
@@ -377,6 +423,7 @@
     C.storage.session.remove([`log:${tabId}`, `nav:${tabId}`]).catch(() => {});
     dropContinues((c) => c.tabId === tabId).catch(() => {});
     dropEmbeds(tabId).catch(() => {});
+    dropPasses((x) => x.tabId === tabId).catch(() => {});
   });
   // ---- noticing a rebuilt extension folder ---------------------------------------------------
   // An unpacked extension's files are read from its folder live. When `node scripts/build-browser.mjs` rewrites that
@@ -405,6 +452,7 @@
     await ready;
     const now = Date.now();
     await dropContinues((c) => c.expiresAt <= now);
+    await dropPasses((x) => x.expiresAt <= now);
     if (await store.prune()) { await sync(); await broadcast(); } else await schedule();
   });
 
@@ -413,6 +461,17 @@
   // The popup normally has no tab; opened as popup.html?tab=<id> (development captures) it does.
   const fromPopup = (sender) => extensionUrl(sender, "popup.html");
   const fromWarning = (sender) => sender.tab && Number.isInteger(sender.tab.id) && extensionUrl(sender, "warning.html");
+  const fromUnwrap = (sender) => sender.tab && Number.isInteger(sender.tab.id) && sender.frameId === 0 && extensionUrl(sender, "unwrap.html");
+  /** The scanner link the unwrap page in `sender` shows: its own link, or the scanner a link tracker led to. */
+  function scannerShownBy(sender) {
+    let hash;
+    try { hash = new URL(sender.url).hash.slice(1); } catch { return null; }
+    const L = root.EGLinks;
+    if (L.scannerOf(hash)) return hash;
+    const first = L.wrapperOf(hash);
+    const r = L.unwrap(hash, {from: first && !first.open ? first.sites[0] : null});
+    return r.url && L.scannerOf(r.url) ? r.url : null;
+  }
   const senderTopHost = (sender) => (sender.tab && sender.frameId === 0 && !extensionUrl(sender, "") ? hosts.hostOfUrl(sender.url || sender.tab.url) : null);
   const plain = (rule) => ({...rule, ...(rule.types ? {types: [...rule.types]} : {})});
 
@@ -457,7 +516,31 @@
       case "load-embed": {
         if (!pageHost || !sender.tab || !Number.isInteger(sender.tab.id)) return {error: "Not a page."};
         if (!dnr.EMBEDS.some((e) => e.id === message.embed)) return {error: "Bad message."};
-        await loadEmbed(message.embed, sender.tab.id);
+        await loadEmbed(message.embed, sender.tab.id, message.cookies === true);
+        return {ok: true};
+      }
+      case "unwrap-config": {
+        if (!fromUnwrap(sender)) return {error: "Not allowed from a page."};
+        return {scannedDirect: modes.scannedDirect};
+      }
+      case "check-destination": {
+        // The unwrap page asks before it opens anything: a destination on the malware and phishing list goes to the
+        // warning page, whether it came from a link tracker or from "Open directly".
+        if (!fromUnwrap(sender)) return {error: "Not allowed from a page."};
+        const url = root.EGLinks.safeDestination(message.url);
+        const host = url && hosts.hostOfUrl(url);
+        if (!host) return {error: "Not a web address."};
+        return {ok: true, threat: await isThreat(host)};
+      }
+      case "scanner-continue": {
+        if (!fromUnwrap(sender)) return {error: "Not allowed from a page."};
+        const shown = scannerShownBy(sender);
+        // The page names the link it showed; if the address changed since, the user agreed to something else.
+        if (!shown || message.url !== shown) return {error: "The address changed after this page loaded. Reload it and read it again."};
+        const host = hosts.hostOfUrl(shown);
+        if (!host) return {error: "Bad message."};
+        await addScannerPass(host, sender.tab.id);
+        await schedule();
         return {ok: true};
       }
       case "links-cleaned": {
@@ -501,7 +584,7 @@
           categories: Object.fromEntries(Object.entries(dnr.CATEGORIES).filter(([, v]) => v.label).map(([k, v]) => [k, v.label])),
           mode: modeFor(hosts.siteOf(host)), siteMode: modes.sites[hosts.siteOf(host)] || null, defaultMode: modes.defaultMode,
           strictAllowed: [...(modes.allowHosts[hosts.siteOf(host)] || [])],
-          noise: {on: modes.noise, site: !modes.noiseOff.includes(hosts.siteOf(host))},
+          scannedDirect: modes.scannedDirect,
           cleaning: {on: cleaningOn(hosts.siteOf(host)), links: await countsReady.then(() => counts.links.get(message.tabId) || 0),
             cookies: counts.cookies.get(hosts.siteOf(host)) || 0},
         };
@@ -517,18 +600,12 @@
         for (const t of tabs) if (hosts.siteOf(hosts.hostOfUrl(t.url) || "") === site) C.tabs.sendMessage(t.id, {type: "clean-enabled", on: message.on}).catch(() => {});
         return {ok: true, on: message.on};
       }
-      case "copy-clean": return copyClean(message.url);
-      case "set-noise": {
+      case "copy-clean": return copyClean(message.url, message.tabUrl);
+      case "set-scanned-direct": {
         if (typeof message.on !== "boolean") return {error: "Bad message."};
-        if (message.site) {
-          const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
-          if (!site) return {error: "Open a web page first."};
-          const off = new Set(modes.noiseOff);
-          if (message.on) off.delete(site); else off.add(site);
-          modes.noiseOff = [...off].sort().slice(0, MAX_MODE_SITES);
-        } else modes.noise = message.on;
-        await saveModes(); await syncNoise();
-        return {ok: true};
+        modes.scannedDirect = message.on;
+        await saveModes();
+        return {ok: true, on: modes.scannedDirect};
       }
       case "set-mode": {
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
@@ -538,7 +615,10 @@
         else if (Object.keys(modes.sites).length >= MAX_MODE_SITES && !modes.sites[site]) return {error: "Too many sites have their own mode."};
         else modes.sites[site] = message.mode;
         await saveModes(); await sync();
-        return {ok: true, site, mode: modeFor(site)};
+        // Rules cannot see what a service worker answers from its cache: clear the site's workers and caches.
+        const mode = modeFor(site);
+        const cleared = mode === "noscript" || mode === "strict" ? await clearWorkers(site).catch(() => ({ok: false, origins: []})) : null;
+        return {ok: true, site, mode, cleared};
       }
       case "set-default-mode": {
         if (message.mode !== "standard" && message.mode !== "strict") return {error: "Bad message."};

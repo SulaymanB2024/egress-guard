@@ -55,14 +55,14 @@ const paramRules = require("../../browser/core/params.js");
 const OLD_PARAMS = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "utm_name", "utm_cid", "utm_reader", "utm_referrer",
   "utm_social", "utm_social-type", "utm_brand", "utm_place", "utm_pubreferrer", "utm_swu", "fbclid", "gclid", "gclsrc", "dclid", "gbraid", "wbraid", "msclkid",
   "yclid", "twclid", "ttclid", "igshid", "li_fat_id", "mc_eid", "oly_anon_id", "oly_enc_id", "vero_id", "rb_clickid", "s_cid", "wickedid", "epik", "_openstat", "srsltid"]);
-function linkStats(hrefs) {
+function linkStats(hrefs, pageHost = null) {
   let before = 0, after = 0, unwrapped = 0;
   for (const href of hrefs) {
     let u; try { u = new URL(href); } catch { continue; }
     if (!/^https?:$/.test(u.protocol)) continue;
     if ([...u.searchParams.keys()].some((k) => OLD_PARAMS.has(k))) before++;
     let dest = href;
-    if (linkRules.wrapperOf(dest)) { const r = linkRules.unwrap(dest); if (r.url) { dest = r.url; unwrapped++; } }
+    if (linkRules.wrapperOf(dest)) { const r = linkRules.unwrap(dest, {from: pageHost}); if (r.url) { dest = r.url; unwrapped++; } }
     if (dest !== href || paramRules.clean(dest).removed.length) after++;
   }
   return {before, after, unwrapped, total: hrefs.length};
@@ -168,7 +168,7 @@ async function runMode(mode, {chromeBin, ext, extensionId, sites, shots, settle,
         const page = await evaluate(session, `({url: location.href, title: document.title.slice(0, 80), text: (document.body && document.body.innerText || "").length})`);
         Object.assign(rec, page, await evaluate(session, AD_PROBE));
         if (mode === "extension") rec.css = await evaluate(session, CSS_COST);
-        rec.links = linkStats(await evaluate(session, "[...document.querySelectorAll('a[href]')].slice(0, 3000).map((a) => a.href)"));
+        rec.links = linkStats(await evaluate(session, "[...document.querySelectorAll('a[href]')].slice(0, 3000).map((a) => a.href)"), await evaluate(session, "location.hostname"));
         const {cookies} = await cdp("Network.getCookies", {}, session);
         rec.trackerCookies = cookies.filter((c) => cookieRules.classify(c.name)).map((c) => c.name);
       } catch (error) { rec.probeError = String(error.message || error); }

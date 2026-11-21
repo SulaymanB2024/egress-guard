@@ -44,6 +44,8 @@ async function worker({stored = fixture, packed = false} = {}) {
     alarms: {create: (name, info) => alarms.set(name, info), clear: async (name) => alarms.delete(name), get: async (name) => alarms.get(name), onAlarm: event()},
     tabs: {onUpdated: event(), onRemoved: event(), sendMessage: async (tabId, msg) => { tabMessages.push({tabId, msg}); }, query: async () => [{id: 1, url: "https://publisher.example/article"}]},
     action: {setBadgeBackgroundColor: async () => {}},
+    cookies: {onChanged: event(), remove: async (d) => { cookieCalls.push({op: "remove", ...d}); }, set: async (d) => { cookieCalls.push({op: "set", ...d}); }},
+    browsingData: {remove: async (options, types) => { browsingCalls.push(JSON.parse(JSON.stringify({options, types}))); }},
     declarativeNetRequest: {
       getDynamicRules: async () => dynamicRules.map((r) => ({...r})),
       updateDynamicRules: async ({removeRuleIds = [], addRules = []}) => { dynamicRules = JSON.parse(JSON.stringify([...dynamicRules.filter((r) => !removeRuleIds.includes(r.id)), ...addRules])); },
@@ -56,6 +58,7 @@ async function worker({stored = fixture, packed = false} = {}) {
     },
   };
   const matchedInfo = [];
+  const cookieCalls = [], browsingCalls = [];
   const fetched = [];
   if (packed) { delete chrome.declarativeNetRequest.onRuleMatchedDebug; delete chrome.declarativeNetRequest.testMatchOutcome; }
   // Only the worker's own packaged ruleset may be fetched (the CSP allows connect-src 'self' and nothing else).
@@ -81,7 +84,8 @@ async function worker({stored = fixture, packed = false} = {}) {
   // What the warning page sends: the address it is showing.
   const cont = (blocked = "https://login.bad.example/x?y=1", tabId = 4, shown = blocked, frameId = 0) => warning({type: "continue-once", url: shown}, blocked, tabId, frameId);
   const matched = (tabId, url, type, rulesetId, ruleId = 1) => chrome.declarativeNetRequest.onRuleMatchedDebug.fire({request: {tabId, url, type}, rule: {ruleId, rulesetId}});
-  return {disk, reloads, ctx, chrome, clock, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground,
+  const unwrapPage = (msg, link, tabId = 6, frameId = 0) => { const url = `${EXT}unwrap.html#${link}`; return send(msg, {url, frameId, tab: {id: tabId, url}}); };
+  return {disk, reloads, ctx, chrome, clock, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground, cookieCalls, browsingCalls, unwrapPage,
     dynamic: () => dynamicRules, sessionRules: () => sessionRules};
 }
 
@@ -89,7 +93,7 @@ test("manifest (Chrome): MV3 service worker, DNR rulesets, minimal permissions, 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.background.service_worker, "background.js");
   // cookies: tracking cookies removed as they are set; contextMenus + offscreen + clipboardWrite: "Copy clean link".
-  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "clipboardWrite", "contextMenus", "cookies", "declarativeNetRequest", "declarativeNetRequestFeedback", "offscreen", "scripting", "storage"]);
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "browsingData", "clipboardWrite", "contextMenus", "cookies", "declarativeNetRequest", "declarativeNetRequestFeedback", "offscreen", "scripting", "storage"]);
   assert.deepEqual(manifest.host_permissions, ["http://*/*", "https://*/*"]);
   // Rulesets are written by the build (scripts/build-browser.mjs); the source manifest lists none.
   assert.deepEqual(manifest.declarative_net_request.rule_resources, []);
@@ -320,4 +324,101 @@ test("pages cannot use popup actions; the warning page cannot either; strangers 
   assert.equal((await w.page({type: "page-rules"}, "https://publisher.example/", 1)).site, "publisher.example");
   const stranger = await new Promise((resolve) => w.chrome.runtime.onMessage.fns[0]({type: "page-rules"}, {id: "other", url: "https://publisher.example/"}, resolve));
   assert.match(stranger.error, /Unknown sender/);
+});
+
+// ---- hardening (review findings 1, 5, 7, 12) ----------------------------------------------------------------------
+test("onCookie: vendor-scoped names only on their vendor's domains; opt-out and consent cookies never; DSID on a VPN never", async () => {
+  const w = await worker();
+  const fire = (cookie) => w.api.onCookie({removed: false, cookie: {path: "/", secure: true, storeId: "0", session: false, ...cookie}});
+  await fire({name: "_ga", domain: ".shop.example"});
+  await fire({name: "IDE", domain: ".doubleclick.net"});
+  await fire({name: "DSID", domain: "vpn.university.example"});
+  await fire({name: "DSID", domain: ".doubleclick.net"});
+  await fire({name: "test_cookie", domain: "intranet.corp.example"});
+  await fire({name: "_hjOptOut", domain: ".shop.example"});
+  await fire({name: "taboola_optout", domain: ".taboola.com"});
+  await fire({name: "_cs_c", domain: ".shop.example"});
+  await fire({name: "uuid2", domain: ".shop.example"});
+  await fire({name: "uuid2", domain: ".adnxs.com"});
+  const removed = w.cookieCalls.filter((c) => c.op === "remove").map((c) => `${c.name}@${c.url}`);
+  assert.deepEqual(removed, ["_ga@https://shop.example/", "IDE@https://doubleclick.net/", "DSID@https://doubleclick.net/", "uuid2@https://adnxs.com/"]);
+  // The brake keeps a site's own tracking cookies.
+  await w.popup({type: "set-clean", on: false, tabUrl: "https://braked.example/"});
+  await fire({name: "_ga", domain: ".braked.example"});
+  assert.equal(w.cookieCalls.filter((c) => c.name === "_ga").length, 1);
+});
+
+test("unwrap page messages: only the unwrap page in a tab's top frame may check a destination, read the setting or pass a scanner", async () => {
+  const w = await worker();
+  const scanner = "https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.org%2Fdoc&data=x";
+  assert.deepEqual(await w.unwrapPage({type: "check-destination", url: "https://login.bad.example/x"}, scanner), {ok: true, threat: true});
+  assert.deepEqual(await w.unwrapPage({type: "check-destination", url: "https://example.org/doc"}, scanner), {ok: true, threat: false});
+  assert.ok((await w.unwrapPage({type: "check-destination", url: "javascript:alert(1)"}, scanner)).error);
+  assert.deepEqual(await w.unwrapPage({type: "unwrap-config"}, scanner), {scannedDirect: false});
+  // Pages, frames, the warning page and the popup are refused.
+  for (const reply of [await w.page({type: "check-destination", url: "https://example.org/"}), await w.page({type: "scanner-continue", url: scanner}),
+    await w.unwrapPage({type: "scanner-continue", url: scanner}, scanner, 6, 1), await w.warning({type: "unwrap-config"}),
+    await w.popup({type: "scanner-continue", url: scanner})]) assert.ok(reply.error, JSON.stringify(reply));
+  // The pass is for the scanner the page shows, in that tab, once.
+  assert.match((await w.unwrapPage({type: "scanner-continue", url: scanner + "&changed=1"}, scanner)).error, /changed/);
+  assert.deepEqual(await w.unwrapPage({type: "scanner-continue", url: scanner}, scanner, 6), {ok: true});
+  const pass = w.sessionRules().find((r) => r.priority === dnr.PRIORITY.scannerPass);
+  assert.deepEqual(pass.condition, {requestDomains: ["nam02.safelinks.protection.outlook.com"], resourceTypes: ["main_frame"], tabIds: [6]});
+  assert.equal(pass.action.type, "allow");
+  // A tracker that led to a scanner: the page shows the scanner link, and that is what may pass.
+  const viaGoogle = "https://www.google.com/url?q=" + encodeURIComponent(scanner);
+  assert.deepEqual(await w.unwrapPage({type: "scanner-continue", url: scanner}, viaGoogle, 7), {ok: true});
+  // Used up when the tab commits the navigation; gone with the tab too.
+  await w.chrome.tabs.onUpdated.fire(6, {url: "https://nam02.safelinks.protection.outlook.com/?url=x"}, {});
+  await settle();
+  assert.ok(!w.sessionRules().some((r) => r.condition.tabIds && r.condition.tabIds[0] === 6 && r.priority === dnr.PRIORITY.scannerPass));
+  await w.chrome.tabs.onRemoved.fire(7);
+  await settle();
+  assert.ok(!w.sessionRules().some((r) => r.priority === dnr.PRIORITY.scannerPass));
+  // The popup setting, off by default.
+  assert.equal((await w.popup({type: "popup-state", tabUrl: "https://publisher.example/"})).scannedDirect, false);
+  assert.deepEqual(await w.popup({type: "set-scanned-direct", on: true}), {ok: true, on: true});
+  assert.deepEqual(await w.unwrapPage({type: "unwrap-config"}, scanner), {scannedDirect: true});
+  assert.ok((await w.popup({type: "set-noise", on: true})).error, "the fingerprint-noise switch is gone");
+});
+
+test("No scripts and Strict clear the site's service workers and Cache Storage for the origins the extension can name", async () => {
+  const w = await worker();
+  const reply = await w.popup({type: "set-mode", mode: "noscript", tabUrl: "https://publisher.example/article"});
+  assert.equal(reply.mode, "noscript");
+  assert.ok(reply.cleared.ok);
+  assert.equal(w.browsingCalls.length, 1);
+  assert.deepEqual(w.browsingCalls[0].types, {serviceWorkers: true, cacheStorage: true});
+  assert.deepEqual(w.browsingCalls[0].options.origins, ["http://publisher.example", "http://www.publisher.example", "https://publisher.example", "https://www.publisher.example"]);
+  await w.popup({type: "set-mode", mode: "strict", tabUrl: "https://publisher.example/article"});
+  assert.equal(w.browsingCalls.length, 2);
+  const standard = await w.popup({type: "set-mode", mode: "standard", tabUrl: "https://publisher.example/article"});
+  assert.equal(standard.cleared, null);
+  assert.equal(w.browsingCalls.length, 2);
+});
+
+test("Copy clean link: a tracker is unwrapped only from its own site; a scanner link is copied exactly", async () => {
+  const w = await worker();
+  const g = "https://www.google.com/url?q=" + encodeURIComponent("https://shop.example/p?id=9&utm_campaign=x");
+  assert.equal(w.api.cleanLink(g, "www.google.com"), "https://shop.example/p?id=9");
+  assert.equal(w.api.cleanLink(g, "mail.example"), g, "from elsewhere: Google's own check stays");
+  const scanner = "https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.org%2F&data=x&utm_source=y";
+  assert.equal(w.api.cleanLink(scanner, "outlook.office.com"), scanner);
+});
+
+test("offscreen copy: only the extension's own worker may write the clipboard", () => {
+  const listeners = [];
+  const copies = [];
+  const box = {value: "", select() {}};
+  const ctx = vm.createContext({chrome: {runtime: {id: ID, onMessage: {addListener: (fn) => listeners.push(fn)}}},
+    document: {getElementById: () => box, execCommand: () => { copies.push(box.value); return true; }}});
+  vm.runInContext(read("browser/offscreen.js"), ctx);
+  const ask = (sender) => { let reply = null; listeners[0]({type: "offscreen-copy", text: "https://example.org/"}, sender, (r) => { reply = JSON.parse(JSON.stringify(r)); }); return reply; };
+  assert.equal(ask({id: "other"}), null);
+  assert.equal(ask({id: ID, url: "https://evil.example/", tab: {id: 1}}), null, "a content script in a tab");
+  assert.equal(ask({id: ID, url: `${EXT}popup.html`, tab: {id: 2}}), null, "an extension page in a tab");
+  assert.equal(ask({id: ID, url: "https://evil.example/"}), null, "not the extension's own origin");
+  assert.equal(ask({id: ID}), null, "no sender URL");
+  assert.deepEqual(ask({id: ID, url: `${EXT}background.js`}), {ok: true});
+  assert.deepEqual(copies, ["https://example.org/"]);
 });

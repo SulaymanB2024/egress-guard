@@ -4,7 +4,8 @@
 (function () {
   "use strict";
   var w = window;
-  var later = function (fn, arg) { if (typeof fn === "function") setTimeout(function () { try { fn(arg); } catch (e) { /* page's own error */ } }, 0); };
+  // The page callback runs straight from the timer, so no surrogate frame (no extension address) is on its stack.
+  var later = function (fn, arg) { if (typeof fn === "function") setTimeout(fn, 0, arg); };
   var handle = function (item) {
     if (!item || typeof item !== "object") return;
     later(item.eventCallback);
