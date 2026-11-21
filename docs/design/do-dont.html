@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Egress Guard: do and don't</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .wrap { max-width: 1280px; margin: 0 auto; padding: var(--s6) var(--s6) var(--s8); }
+  header p { color: var(--muted); margin-top: var(--s2); max-width: 72ch; }
+  section { margin-top: var(--s7); padding-top: var(--s5); border-top: 1px solid var(--line); }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s6); margin-top: var(--s4); align-items: start; }
+  .col > p { font-weight: var(--w-strong); margin-bottom: var(--s2); }
+  .col.dont > p { color: var(--unprotected); }
+  .col.do > p { color: var(--protected); }
+  .shot { position: relative; display: inline-block; max-width: calc(100% - 24px); margin-left: 24px; }
+  .shot img { display: block; max-width: 100%; height: auto; box-shadow: 0 0 0 1px var(--line); border-radius: 4px; }
+  .pin { position: absolute; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: var(--unprotected); color: #fff; font: var(--w-strong) 12px/24px var(--font-sans); text-align: center; box-shadow: 0 0 0 2px var(--paper); }
+  ol.notes { margin-top: var(--s3); display: flex; flex-direction: column; gap: var(--s1); }
+  ol.notes li { display: grid; grid-template-columns: 24px 1fr; gap: var(--s2); }
+  ol.notes li b { color: var(--unprotected); }
+  .rule { color: var(--muted); margin-top: var(--s3); }
+  @media (max-width: 800px) { .wrap { padding: var(--s5) var(--s4); } .pair { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1 class="t-headline">Do and don't</h1>
+  <p>Crops from the v0.5.0 captures, annotated, beside the redesigned equivalent. Rules referenced are in <a href="DESIGN.md">DESIGN.md</a>.</p>
+</header>
+
+<section>
+  <h2 class="t-title">Colour as decoration, chips as hierarchy (popup)</h2>
+  <div class="pair">
+    <div class="col dont"><p>Don't</p>
+      <div class="shot" style="width:360px"><img src="review/crops/dont-popup-hero.png" alt="Forest block with uppercase eyebrow and wrapped category chips"><span class="pin" style="left:-16px;top:9%">1</span><span class="pin" style="left:-16px;top:40%">2</span><span class="pin" style="left:-16px;top:80%">3</span></div>
+      <ol class="notes"><li><b>1</b>Tracked uppercase mono eyebrow: mono used as decoration.</li><li><b>2</b>Forest block: a colour that is not a state, carrying the hierarchy.</li><li><b>3</b>Four pills of equal weight wrapping raggedly; categories belong on a second level.</li></ol>
+    </div>
+    <div class="col do"><p>Do</p>
+      <div class="shot" style="width:360px"><img src="review/after/popup-main-light.png" alt="Redesigned popup main view"></div>
+      <p class="rule">Principles 1–3: one display number on paper, three facts in a metric row, one control.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="t-title">The same action on every row, clipped at the edge (popup)</h2>
+  <div class="pair">
+    <div class="col dont"><p>Don't</p>
+      <div class="shot" style="width:360px"><img src="review/crops/dont-popup-allow.png" alt="Blocked list with Allow 15 min on every row"><span class="pin" style="left:-16px;top:10%">1</span><span class="pin" style="left:-16px;top:94%">2</span><span class="pin" style="left:-16px;top:31%">3</span></div>
+      <ol class="notes"><li><b>1</b>"Allow 15 min" repeated on every row at rest.</li><li><b>2</b>The last one is cut by the scroll edge: a clipped control.</li><li><b>3</b>Two tags per row, one wrapping under the other.</li></ol>
+    </div>
+    <div class="col do"><p>Do</p>
+      <div class="shot" style="width:360px"><img src="review/after/popup-blocked-light.png" alt="Redesigned Blocked tab"></div>
+      <p class="rule">Section 6, trailing action: shown only on hover, focus or selection. Categories are group titles; one type word per row.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="t-title">Truncated mid-word (Mac popover)</h2>
+  <div class="pair">
+    <div class="col dont"><p>Don't</p>
+      <div class="shot" style="width:376px"><img src="review/crops/dont-popover-clip.png" alt="Layer rows with truncated details"><span class="pin" style="left:-16px;top:12%">1</span><span class="pin" style="left:-16px;top:67%">2</span><span class="pin" style="left:-16px;top:88%">3</span></div>
+      <ol class="notes"><li><b>1</b>"Example City…· lockdown on": the place name cut mid-word.</li><li><b>2</b>"In 11 of 1…e profiles": the number itself is cut.</li><li><b>3</b>"EXIT" eyebrow and "Test…d": decoration plus another cut.</li></ol>
+    </div>
+    <div class="col do"><p>Do</p>
+      <div class="shot" style="width:404px"><img src="review/after/popover-reduced-light.png" alt="Redesigned popover"></div>
+      <p class="rule">Section 8: details that can be long get their own line; relay names never break.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="t-title">A graphic that needs a caption (Mac Overview)</h2>
+  <div class="pair">
+    <div class="col dont"><p>Don't</p>
+      <div class="shot" style="width:400px"><img src="review/crops/dont-perimeter.png" alt="Perimeter rings with caption"><span class="pin" style="left:-16px;top:40%">1</span><span class="pin" style="left:-16px;top:16%">2</span><span class="pin" style="left:-16px;top:93%">3</span></div>
+      <ol class="notes"><li><b>1</b>Four unlabelled rings: which one is the DNS filter?</li><li><b>2</b>24 radial ticks: lengths on a circle cannot be compared.</li><li><b>3</b>A three-line caption explaining how to read it.</li></ol>
+    </div>
+    <div class="col do"><p>Do</p>
+      <div class="shot"><img src="review/crops/do-path.png" alt="The Path: four labelled walls between This Mac and the internet" style="width:590px"></div>
+      <p class="rule">Principle 4 and section 12: the Path labels each wall in place; a reduced wall is dashed, a wall that is down has a hole.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="t-title">Three big-number treatments on one screen (Mac Overview)</h2>
+  <div class="pair">
+    <div class="col dont"><p>Don't</p>
+      <div class="shot" style="width:425px"><img src="review/crops/dont-numbers.png" alt="Three differently styled hero numbers"><span class="pin" style="left:-16px;top:12%">1</span><span class="pin" style="left:-16px;top:60%">2</span><span class="pin" style="left:-16px;top:91%">3</span></div>
+      <ol class="notes"><li><b>1</b>Number alone with a sentence of breakdown under it.</li><li><b>2</b>Number with a pill beside it and a paragraph below.</li><li><b>3</b>Number with an inline label and an explanatory sentence.</li></ol>
+    </div>
+    <div class="col do"><p>Do</p>
+      <div class="shot"><img src="review/crops/do-numbers.png" alt="One metric row" style="width:590px"></div>
+      <p class="rule">Section 6, metric: value above label, one role per row, no pills, no explanations.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="t-title">Hero cards and excess precision (scorecard)</h2>
+  <div class="pair">
+    <div class="col dont"><p>Don't</p>
+      <div class="shot"><img src="review/crops/dont-scorecard-hero.png" alt="Two forest KPI hero cards" style="width:620px"><span class="pin" style="left:-16px;top:35%">1</span><span class="pin" style="left:-16px;top:16%">2</span><span class="pin" style="left:-16px;top:73%">3</span></div>
+      <ol class="notes"><li><b>1</b>"100.00%": two decimals that say nothing.</li><li><b>2</b>Pill state chips inside forest blocks: colour and container doing the hierarchy.</li><li><b>3</b>Paragraphs inside each card explaining the method.</li></ol>
+    </div>
+    <div class="col do"><p>Do</p>
+      <div class="shot"><img src="review/crops/do-scorecard.png" alt="Redesigned scorecard summary" style="width:620px"></div>
+      <p class="rule">Section 12: the focal count names what is off target; every KPI is one aligned row.</p>
+    </div>
+  </div>
+</section>
+</div>
+</body>
+</html>
