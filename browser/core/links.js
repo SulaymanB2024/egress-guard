@@ -58,11 +58,11 @@
   // (decodable or not); params / decode read the destination where the address carries it; hostParam names a parameter
   // that reports only the destination host (Mimecast).
   const SCANNERS = Object.freeze([
-    {id: "safelinks", name: "Microsoft Safe Links", domains: ["safelinks.protection.outlook.com"], prefix: `^${B}[a-z0-9-]+\\.safelinks\\.protection\\.outlook\\.com/`, params: ["url"]},
-    {id: "proofpoint2", name: "Proofpoint URL Defense", domains: ["urldefense.proofpoint.com"], prefix: `^${B}urldefense\\.proofpoint\\.com/v2/url`, params: ["u"], decode: "proofpoint2"},
-    {id: "proofpoint3", name: "Proofpoint URL Defense", domains: ["urldefense.com"], prefix: `^${B}urldefense\\.com/v3/__`, decode: "proofpoint3"},
-    {id: "mimecast", name: "Mimecast", domains: ["mimecast.com"], prefix: `^${B}protect[a-z0-9-]*\\.mimecast\\.com/s/`, hostParam: "domain"},
-    {id: "barracuda", name: "Barracuda Link Protection", domains: ["linkprotect.cudasvc.com"], prefix: `^${B}linkprotect\\.cudasvc\\.com/url`, params: ["a"]},
+    {id: "safelinks", name: "Microsoft Safe Links", domains: ["safelinks.protection.outlook.com"], prefix: `^${B}[a-z0-9-]+\\.safelinks\\.protection\\.outlook\\.com(:[0-9]+)?/`, params: ["url"]},
+    {id: "proofpoint2", name: "Proofpoint URL Defense", domains: ["urldefense.proofpoint.com"], prefix: `^${B}urldefense\\.proofpoint\\.com(:[0-9]+)?/v2/url`, params: ["u"], decode: "proofpoint2"},
+    {id: "proofpoint3", name: "Proofpoint URL Defense", domains: ["urldefense.com"], prefix: `^${B}urldefense\\.com(:[0-9]+)?/v3/__`, decode: "proofpoint3"},
+    {id: "mimecast", name: "Mimecast", domains: ["mimecast.com"], prefix: `^${B}protect[a-z0-9-]*\\.mimecast\\.com(:[0-9]+)?/s/`, hostParam: "domain"},
+    {id: "barracuda", name: "Barracuda Link Protection", domains: ["linkprotect.cudasvc.com"], prefix: `^${B}linkprotect\\.cudasvc\\.com(:[0-9]+)?/url`, params: ["a"]},
     {id: "trendmicro", name: "Trend Micro Click Time Protection", domains: ["trendmicro.com", "trendmicro.eu"], prefix: `^${B}[a-z0-9-]+\\.trendmicro\\.(com|eu)(:[0-9]+)?/wis/clicktime/v1/query`, params: ["url"]},
   ].map((w) => Object.freeze({...w, dnr: `${w.prefix}.*$`})));
   const MAX_DEPTH = 4;

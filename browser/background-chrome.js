@@ -530,7 +530,16 @@
         const url = root.EGLinks.safeDestination(message.url);
         const host = url && hosts.hostOfUrl(url);
         if (!host) return {error: "Not a web address."};
-        return {ok: true, threat: await isThreat(host)};
+        const threat = await isThreat(host);
+        // The page that opens next shows the link tracker it skipped (the DNR match itself may land in the log of the
+        // page the click came from, depending on event timing).
+        const shown = hosts.hostOfUrl(new URL(sender.url).hash.slice(1));
+        if (shown && !threat) {
+          let path = "/";
+          try { path = new URL(new URL(sender.url).hash.slice(1)).pathname.slice(0, MAX_PATH); } catch { /* keep "/" */ }
+          carried.set(sender.tab.id, {at: Date.now(), item: {host: shown, path, type: "main_frame", list: "links", ruleId: null, count: 1}});
+        }
+        return {ok: true, threat};
       }
       case "scanner-continue": {
         if (!fromUnwrap(sender)) return {error: "Not allowed from a page."};
