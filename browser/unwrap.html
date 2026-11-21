@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Opening link…</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="warning.css">
+</head>
+<body>
+<main class="warning">
+  <p class="brand"><span class="brand-symbol" aria-hidden="true"></span>Egress Guard</p>
+  <section class="card unwrap" aria-labelledby="title" id="card" hidden>
+    <p class="eyebrow">Link tracker skipped</p>
+    <h1 id="title">This link's destination could not be read</h1>
+    <p class="url" id="url"></p>
+    <p class="body" id="reason"></p>
+    <p class="body">Egress Guard did not contact the tracker. Go back, or copy the address above if you know where it should lead.</p>
+    <div class="actions"><button id="back" class="primary" type="button">Go back</button></div>
+  </section>
+</main>
+<script src="core/links.js"></script>
+<script src="unwrap.js"></script>
+</body>
+</html>

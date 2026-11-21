@@ -94,11 +94,11 @@ test("a list too large for one Chrome ruleset file is split, and the manifest an
     const cm = JSON.parse(fs.readFileSync(path.join(chrome, "manifest.json"), "utf8"));
     const ids = cm.declarative_net_request.rule_resources.map((r) => r.id);
     assert.equal(ids.filter((id) => /^threats(-\d+)?$/.test(id)).length, summary.lists.threats.files);
-    assert.equal(ids[ids.length - 1], "params");
+    assert.ok(ids.includes("params") && ids.includes("links") && ids.includes("gpc"));
     const names = ids.filter((id) => /^threats/.test(id)).flatMap((id) => JSON.parse(fs.readFileSync(path.join(chrome, `rules/${id}.json`), "utf8")))
       .filter((r) => r.action.type === "block").flatMap((r) => r.condition.requestDomains);
     assert.equal(new Set(names).size, 30, "every name lands in exactly one part");
-    for (const r of cm.declarative_net_request.rule_resources.filter((x) => x.id !== "params")) assert.ok(fs.statSync(path.join(chrome, r.path)).size <= 600 || JSON.parse(fs.readFileSync(path.join(chrome, r.path))).length === 1, r.path);
+    for (const r of cm.declarative_net_request.rule_resources.filter((x) => /^(threats|trackers|cname)/.test(x.id))) assert.ok(fs.statSync(path.join(chrome, r.path)).size <= 600 || JSON.parse(fs.readFileSync(path.join(chrome, r.path))).length === 1, r.path);
     const worker = fs.readFileSync(path.join(chrome, "background.js"), "utf8");
     assert.ok(worker.includes('"rules/threats-2.json"'), "the worker can read every threat part");
   } finally { fs.rmSync(out, {recursive: true, force: true}); }
@@ -177,4 +177,54 @@ test("build emits Chrome and Firefox from shared sources; Chrome gets rulesets, 
     assert.ok(JSON.parse(fs.readFileSync(path.join(chrome, "rules/params.json"), "utf8")).length > 0);
     assert.deepEqual(fs.readdirSync(out).sort(), ["chrome", "firefox"], "staging folder cleaned up");
   } finally { fs.rmSync(out, {recursive: true, force: true}); }
+});
+
+test("URL filter lists: downloaded once a day into the build's own cache, verified, hash-recorded; tampering and wrong files refused", async () => {
+  const {loadFilters, compileFilterRulesets, FILTER_LISTS, build} = await load();
+  const dir = tmp();
+  const body = (title) => `[Adblock Plus 2.0]\n! Version: 202611210000\n! Title: ${title}\n! Licence: https://easylist.to/pages/licence.html\n` +
+    Array.from({length: 20001}, (_, i) => `||t${i}.example^`).join("\n") + "\n/g/collect?\n@@||ok.example/g/collect?\n||ads.example^\n";
+  const domains = Array.from({length: 6000}, (_, i) => `c${i}.click.example`).concat(["mkt_vis.example"]).join("\n") + "\n";
+  const textFor = (url) => { const spec = FILTER_LISTS.find((f) => f.url === url); return spec.kind === "domains" ? domains : body(spec.name); };
+  const reply = (url, text) => ({ok: true, status: 200, url, headers: {get: () => null}, arrayBuffer: async () => Buffer.from(text)});
+  let calls = 0;
+  const fetchImpl = async (url) => { calls++; return reply(url, textFor(url)); };
+  try {
+    const first = await loadFilters(dir, {fetchImpl});
+    assert.equal(calls, FILTER_LISTS.length);
+    assert.deepEqual(Object.keys(first).sort(), FILTER_LISTS.map((f) => f.id).sort());
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, "easyprivacy.json"), "utf8"));
+    assert.equal(meta.sha256, require("node:crypto").createHash("sha256").update(fs.readFileSync(path.join(dir, "easyprivacy.txt"))).digest("hex"));
+    assert.equal(meta.version, "202611210000");
+    await loadFilters(dir, {fetchImpl});
+    assert.equal(calls, FILTER_LISTS.length, "a fresh cache is not downloaded again");
+    await loadFilters(dir, {fetchImpl, now: Date.now() / 1000 + 2 * 86400});
+    assert.equal(calls, 2 * FILTER_LISTS.length, "a day-old cache is refreshed");
+    // Tampering with the cached body is refused; offline, nothing replaces it.
+    fs.appendFileSync(path.join(dir, "easylist.txt"), "@@||evil-allow.example^\n");
+    const logs = [];
+    const offline = await loadFilters(dir, {offline: true, log: (m) => logs.push(m)});
+    assert.ok(!offline.easylist && logs.some((m) => /SHA-256/.test(m)));
+    // A wrong file (no header, wrong title, licence line gone) is never cached.
+    for (const text of ["<html>not a list</html>", body("Something"), body("EasyList").replace(/! Licence:.*\n/, "")]) {
+      const bad = tmp();
+      const got = await loadFilters(bad, {fetchImpl: async (url) => reply(url, url.endsWith("/easylist.txt") ? text : textFor(url)), log: () => {}});
+      assert.ok(!got.easylist && !fs.existsSync(path.join(bad, "easylist.txt")));
+      fs.rmSync(bad, {recursive: true, force: true});
+    }
+    // Placement: path filters on any host -> fp-trackers, exceptions -> filter-allow, host-only -> trackerDomains.
+    const compiled = compileFilterRulesets(first);
+    assert.ok(compiled.rulesets["fp-trackers"].some((r) => r.condition.urlFilter === "/g/collect?"));
+    assert.ok(compiled.rulesets["filter-allow"].length >= 2);
+    assert.ok(compiled.trackerDomains.includes("ads.example"));
+    const out = tmp();
+    const summary = build({out, filters: first});
+    const notice = fs.readFileSync(path.join(out, "chrome/NOTICE.txt"), "utf8");
+    assert.match(notice, /EasyPrivacy[\s\S]*GPL-3\.0 or CC BY-SA 3\.0[\s\S]*sha256: [0-9a-f]{64}/);
+    assert.match(notice, /AdGuard disguised click-throughs[\s\S]*MIT/);
+    assert.ok(summary.staticRules <= 30000 && summary.regexRules <= 1000);
+    const bounce = JSON.parse(fs.readFileSync(path.join(out, "chrome/rules/bounce.json"), "utf8")).flatMap((r) => r.condition.requestDomains);
+    assert.ok(bounce.includes("c1.click.example") && !bounce.includes("mkt_vis.example"), "invalid host names are left out");
+    fs.rmSync(out, {recursive: true, force: true});
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });

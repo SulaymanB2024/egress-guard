@@ -5,9 +5,12 @@ The proxy sees only the hostname of each connection. It cannot tell
 cannot strip `?utm_source=` from a link, and cannot touch page elements. The
 companion in `browser/` can. One set of sources builds two extensions:
 
-- **Chrome** (primary): built-in ad, tracker and malware lists, tracking
-  parameter stripping, a local warning page for malware and phishing sites,
-  plus your own per-site rules. Built on `declarativeNetRequest`.
+- **Chrome** (primary): built-in ad, tracker and malware lists, URL filters
+  (EasyPrivacy and EasyList) that catch first-party and proxied trackers,
+  link and cookie cleaning, Global Privacy Control, per-site protection levels
+  (Relaxed, Standard, Strict, No scripts) with click-to-load embeds, a local
+  warning page for malware and phishing sites, plus your own per-site rules.
+  Built on `declarativeNetRequest`.
 - **Firefox**: your own per-site rules through blocking `webRequest`. The
   built-in lists are Chrome-only for now.
 
@@ -39,6 +42,17 @@ or without the proxy running.
    proxy's default), `--no-lists` (your own rules and parameter stripping
    only), `--out DIR` (default `dist-browser/`, which git ignores).
 
+   The build also keeps its own cache of the URL filter lists,
+   `<data>/browser-filters/` (EasyPrivacy, EasyList, AdGuard's disguised
+   click-through list). It downloads a list only when the cached copy is
+   missing or more than a day old, checks it (HTTPS, size, header, title,
+   licence line, minimum size, host-name syntax) and records its SHA-256, size,
+   fetch time and upstream version. `--offline` never downloads,
+   `--no-filters` leaves them out, `--filters DIR` uses another cache. The
+   proxy's feed cache and `feeds.py` are not touched. Behind an HTTP proxy, run
+   the build with `NODE_USE_ENV_PROXY=1` so Node's `fetch` uses
+   `HTTPS_PROXY`.
+
 3. **Load it once**: open `chrome://extensions`, turn on **Developer mode**
    (top right), choose **Load unpacked** and select `dist-browser/chrome`.
    Pin the shield from the puzzle-piece menu if you want the blocked count
@@ -66,7 +80,16 @@ to the Chrome Web Store as is.
 | Disguised (CNAME-cloaked) trackers | Same, for first-party subdomains that alias a tracker | AdGuard CNAME-cloaked ads and trackers |
 | Malware and phishing | Every request type, and navigations go to a local warning page | URLhaus (malware-filter), Phishing Army, HaGeZi Threat Intelligence (Full; Medium with `--threat-tier medium` or when only Medium is cached) |
 | Empty ad slots | One stylesheet hides common ad containers (AdSense and Google Publisher Tag slots, ad-server frames, AMP ads, Taboola and Outbrain widgets, labelled ad containers). Switch it off per site in the popup | First-party list in `browser/core/cosmetic.js` |
-| Tracking parameters | Removed from page and frame navigations before the request is sent | Built-in list in `browser/core/dnr.js` |
+| First-party and proxied trackers | URL filters: `gtm.js`, `gtag/js`, `/g/collect`, `/j/collect`, `fbevents.js`, `/tr?id=…&ev=`, Segment `analytics.js/v1/`, Matomo `matomo.js`/`piwik.php`, Adobe `/b/ss/`, Plausible, Umami, PostHog and thousands more, on any host including the site's own | EasyPrivacy network filters (path rules match on every host), plus a short hand-written set in `browser/core/dnr.js` |
+| Ads by address | URL filters for ad paths that host lists cannot name | EasyList network filters |
+| Fingerprinting and session replay | FingerprintJS / Fingerprint Pro custom-subdomain and proxy loaders, ThreatMetrix `fp/` paths, iovation, proxied Hotjar, FullStory, LogRocket, Clarity, Mouseflow, Contentsquare, PostHog recorder, Smartlook | Hand-written paths in `browser/core/dnr.js`, plus EasyPrivacy |
+| Third-party beacons | `navigator.sendBeacon` and `<a ping>` to another site are blocked; `ping` attributes are removed before a click can fire them | `beacons` ruleset, `page-guard.js` |
+| Link trackers | Known redirectors (Google `/url`, Facebook and Messenger `l.php`, Instagram, Threads, Reddit `out.`, Tumblr, VK, YouTube `/redirect`, Slack, LinkedIn, DuckDuckGo, Bing `ck/a`, Yahoo `RU=`, Google AMP, Disqus, href.li, Skimlinks, Rakuten, Awin, Mandrill, Microsoft Safe Links, Proofpoint) are skipped: the navigation goes straight to the destination | `browser/core/links.js` |
+| Tracking parameters | 156 names removed everywhere and 220 more on the 67 sites that use generic names for tracking, on every navigation and at click time; Amazon's `/ref=` path segment | `browser/core/params.js` |
+| Tracking cookies | 41 name patterns (`_ga*`, `_gcl_*`, `_fbp`, `_fbc`, `_uet*`, `_ttp`, `_scid`, `_hj*`, `ajs_*`, `mp_*`, `amplitude_id_*`, `_clck`, `IDE`, …) deleted the moment they are set; third-party cookies stripped for tracker hosts and opaque redirectors | `browser/core/cookies.js`, `cookies` and `bounce` rulesets |
+| Global Privacy Control | `Sec-GPC: 1` on every request and `navigator.globalPrivacyControl === true` | `gpc` ruleset, `page-gpc.js` |
+| Full-address referrers | A page or frame whose `Referrer-Policy` would send full addresses cross-site (`unsafe-url`, `no-referrer-when-downgrade`, `origin-when-cross-origin`) gets Chrome's default instead | `referrer` ruleset |
+| Trackers pages depend on | `ga()`, `gtag()`/`dataLayer` callbacks, `fbq()`, `analytics.*`, `_satellite`, `googletag` answered by inert local stubs | `browser/surrogates/` |
 
 These are the proxy's own feeds and tiers. URLhaus also lists IP addresses;
 those are skipped (DNR matches host names). The proxy's DoH list is not used:
@@ -108,20 +131,38 @@ page refuses to offer Continue (and the extension CSP sets `frame-ancestors
 `testMatchOutcome` in unpacked builds, the packaged ruleset otherwise).
 Threat-listed requests never get a one-click **Allow** in the popup.
 
-**Parameters removed** (exact names): `utm_source`, `utm_medium`,
-`utm_campaign`, `utm_term`, `utm_content`, `utm_id` and other `utm_*` names
-listed in the source, `fbclid`, `gclid`, `gclsrc`, `dclid`, `gbraid`,
-`wbraid`, `msclkid`, `yclid`, `twclid`, `ttclid`, `igshid`, `li_fat_id`,
-`mc_eid`, `oly_anon_id`, `oly_enc_id`, `vero_id`, `rb_clickid`, `s_cid`,
-`wickedid`, `epik`, `_openstat`, `srsltid`. Functional parameters such as
-`id`, `q`, `ref` or `v` are kept, and so are Marketo's `mkt_tok` and
-HubSpot's `_hsenc` and `_hsmi`: unsubscribe and email-preference links stop
-working without them.
+**Parameters removed.** The list lives in `browser/core/params.js` and was
+built from what each vendor documents its parameters for, then checked for
+coverage against ClearURLs, Brave's and Firefox's query stripping and
+AdGuard's URL tracking filter (names only; nothing copied). Global (156):
+campaign tags (`utm_*`, `pk_*`, `piwik_*`, `mtm_*`, `hsa_*`, `mc_cid`,
+`mc_eid`, `oly_*`, `vero_*`, `_openstat`, `yclid`, `ysclid`, `s_kwcid`,
+`ef_id`, `cmpid`, Eloqua and Silverpop ids), click ids (`gclid`, `gclsrc`,
+`gbraid`, `wbraid`, `dclid`, `gad_source`, `gad_campaignid`, `fbclid`,
+`msclkid`, `twclid`, `ttclid`, `li_fat_id`, `igshid`, `igsh`, `epik`,
+`sccid`, `rdt_cid`, `irclickid`, `srsltid`, `_gl`, Branch, Taboola,
+Outbrain), email-platform subscriber ids (Klaviyo, Drip, ActiveCampaign,
+ConvertKit, MailerLite, beehiiv, Bronto) and HubSpot's analytics ids.
+Per site (220 names on 67 sites): generic names that are tracking only there,
+for example `si` and `feature` on YouTube and Spotify, `s`/`t`/`ref_src` on
+X, `trk` and `trackingId` on LinkedIn, `ref`, `tag`, `linkCode`,
+`ascsubtag`, `pd_rd_*`, `pf_rd_*`, `psc` and the `/ref=` path on Amazon,
+`spm`/`scm` on AliExpress and Taobao, `ved`/`ei`/`sxsrf`/`oq` on Google
+search, `cvid`/`form` on Bing, `source` on Medium, eBay's `mk*` ids. Never
+removed anywhere: `mkt_tok`, `_hsenc`, `_hsmi` (unsubscribe and preference
+links), OAuth and session parameters (`code`, `state`, `token`, `session`,
+`nonce`, `client_id`, `redirect_uri`, SAML), search queries and pagination.
+A `ref` on any site outside the per-site sets (a GitHub branch, say) is kept.
 
-**Popup.** It leads with what was blocked on this page: the count, a
-breakdown by list, then each endpoint with its type and list and **Allow 15
-min** (never for malware and phishing hosts, navigations, or WebSocket-like
-types). Below that: elements hidden on the page, the built-in ad-slot count
+**Popup.** It leads with what was blocked on this page: the count and a
+breakdown by named category (Ads and trackers, Disguised trackers, Malware and
+phishing, First-party tracker script, Tracking request, Ad request,
+Fingerprinting or session replay, Third-party beacon, Link tracker unwrapped,
+Tracker answered by a stub, Strict mode, Scripts off, Your rules). Then the
+link and cookie cleaning counts with **Stop cleaning on this site**, the
+site's protection level, and each blocked endpoint with its type and category
+and **Allow 15 min** (never for malware and phishing hosts, navigations, or
+WebSocket-like types; Strict blocks also offer **Allow host**). Below that: elements hidden on the page, the built-in ad-slot count
 with **Show ad slots on this site** / **Hide ad slots on this site**, this
 site's rules with **Remove**, timed exceptions, and the list versions the
 build contains. It follows the system light or dark setting. The toolbar
@@ -165,6 +206,236 @@ Guard runs; CORS hides the body but timing does not), while DNS rebinding and
 CSRF checks would have to stay perfect on a new unauthenticated route. The
 rebuild-and-reload path gets the same freshness with none of that.
 
+## URL filters (EasyPrivacy, EasyList)
+
+Host lists cannot see a tracker that lives on a host which must stay
+reachable: server-side Google Tag Manager on `sgtm.example.com`, Meta's
+pixel proxied through the site, self-hosted Matomo, Plausible or PostHog
+behind `/js/` or `/ingest/`. Their paths give them away. The build compiles
+EasyPrivacy's and EasyList's **network** filters (not their cosmetic ones)
+with `scripts/lib/abp-dnr.cjs`:
+
+- converted: URL patterns (`||`, `|`, `^`, `*`), regular expressions RE2 can
+  run, `$third-party` and first-party, resource types (including negated
+  ones), `domain=`/`from=`, `to=`, `denyallow=`, `method=`, `match-case`,
+  `important`, exceptions (`@@`; with `$document` they become
+  `allowAllRequests`) and `$badfilter`. Host-only filters with the same
+  options fold into one `requestDomains` rule, so 47,000 EasyPrivacy hosts cost
+  85 rules.
+- dropped, and counted by reason: anything that would block a top-level
+  navigation, `$popup`, `$csp`, `$removeparam`, `$rewrite`,
+  `$redirect-rule`, entity domains (`example.*`) where dropping them would
+  widen a filter, non-ASCII patterns, regexes RE2 cannot run.
+
+With the 2026-11-21 lists: EasyPrivacy 56,730 network filters, 56,722
+converted into 9,267 rules, 8 dropped (2 `$csp`, 2 entity-domain
+exclusions that would have widened the filter, 1 `$rewrite`, 1
+`$redirect-rule`, 1 negated `$document`, 1 that matched every request);
+EasyList 53,735 network filters, 50,026 converted into 3,768 rules, 3,709
+dropped (2,969 `$popup`, 563 `$document` blocks, 166 cosmetic-only
+exceptions, 7 `$rewrite`, 4 `$csp`). They land in four rulesets:
+`fp-trackers` (EasyPrivacy path filters that match on any host, which is
+what catches first-party and proxied trackers, 3,513 rules), `easyprivacy`
+(4,920), `easylist` (3,251) and `filter-allow` (1,360 exceptions). With the
+host lists, parameters and everything else the build has 13,545 static rules
+of Chrome's guaranteed 30,000 and 104 regular-expression rules of 1,000 (the
+build refuses to exceed either; limits from Chrome's
+`declarativeNetRequest` reference).
+
+**Exceptions** (`@@`) sit one step above the filters and below everything
+else: a list's exception lifts only that list's URL filters. It never
+unblocks a host on the HaGeZi or CNAME lists, a threat, or one of your own
+block rules, and `$important` filters beat it. Your timed exceptions and a
+site set to Relaxed still win over the filters.
+
+## Link and cookie cleaning
+
+Every link is cleaned in two places. On **every top-level or frame
+navigation** (so a link opened from Mail, Slack or any other app is cleaned
+too) the `params` and `links` rulesets strip the parameters above, cut
+Amazon's `/ref=` segment and send a known redirector to the local unwrap
+page, which decodes the destination and replaces itself with it: the
+redirector never sees the click, and Back returns to where the link was.
+**At click time** (`page-guard.js`, on mousedown, click, middle click, the
+context menu and Enter) the link's `href` is rewritten to its clean,
+unwrapped destination before Chrome reads it, so "Copy link address" copies
+the clean address; a page that swaps the `href` during the same mousedown
+(Google's `rwt`, Facebook's `l.php` and `lynx`) is undone before the click;
+X's `t.co` links become the real address the page itself shows
+(`data-expanded-url` or the title). The right-click menu also has **Copy
+clean link**, which writes through an offscreen extension page so the site
+never sees the copy. After a page loads, global tracking parameters that a
+client-side redirect put back into the address bar are removed with
+`history.replaceState` (never a reload).
+
+The unwrap page (`unwrap.html`, `core/links.js`) only ever opens an absolute
+`http:` or `https:` address without credentials. `javascript:`, `data:`,
+`file:`, extension addresses, control characters, credentials, a lookalike
+host and a redirector whose payload fails to decode are refused at every
+nesting depth (up to four), and the address is shown as text instead. A
+destination that is not `http(s)` never even matches the redirect rule.
+Redirectors that keep the destination on their server (`t.co`, `bit.ly`,
+most email-platform click links, Mimecast) cannot be unwrapped without a
+network lookup, which the extension never makes; the `bounce` ruleset lets
+the hop happen but strips its cookies both ways (63 short-link, email and
+affiliate redirectors plus AdGuard's 37,000 disguised click-through
+subdomains).
+
+**Mail security rewriters are unwrapped** (Microsoft Safe Links, Proofpoint
+URL Defense v2 and v3 when the address is complete) because the owner asked
+for it. That skips the click-time scan an employer's mail security would have
+made. Switch cleaning off for those hosts if that scan matters.
+
+**Tracking cookies** (`core/cookies.js`, 41 name patterns, using the
+`cookies` permission) are deleted the moment they are set, first or third
+party: Google Analytics and Ads (`_ga*`, `_gid`, `_gat*`, `_gcl_*`,
+`_gac_*`, `__utm*`, `__gads`, `IDE`, `test_cookie`, first-party tagging
+`FPID`), Meta (`_fbp`, `_fbc`), Microsoft Advertising (`_uetsid`, `_uetvid`,
+`_uetmsclkid`), TikTok, Snap, Pinterest, Reddit, LinkedIn (`li_fat_id`), X,
+Hotjar (`_hj*`), Segment (`ajs_*`), Mixpanel, Amplitude, Clarity, Matomo,
+Snowplow, Heap, Yandex, Parse.ly, HubSpot (`__hstc`, `hubspotutk`), Marketo,
+PostHog, LogRocket, FullStory, Contentsquare, Taboola, Outbrain, Quantcast,
+Chartbeat and the cookies that click ids are written into. Microsoft's `MUID`
+is left alone: cutting it to a session cookie made Bing search render no
+results in the real-site run, and Microsoft sign-in reads it too.
+Nothing else is touched: sessions, carts, consent records and preferences
+keep working. A script that sets the cookie again gets a fresh, unlinked id
+every time. Third-party requests to tracker hosts that stay reachable
+(social embeds, ad hosts a list's exception lets through) go without cookies
+(`cookies` ruleset); payment, sign-in and captcha providers are excepted.
+
+The popup shows **links cleaned in this tab** and **tracking cookies removed
+on this site**. **Stop cleaning on this site** is the only brake: links to
+that site keep their parameters and are not unwrapped, its tracking cookies
+stay, and its third-party requests keep their cookies. URL filters and
+everything else stay on.
+
+## Privacy signals and leak reducers
+
+| Measure | Protects against | Could break | Escape hatch |
+| --- | --- | --- | --- |
+| `Sec-GPC: 1` and `navigator.globalPrivacyControl` | Sites that honour GPC (it is a legal opt-out of sale/sharing in California, Colorado and others) | Nothing observed | None needed; no allow rule can switch it off |
+| Third-party beacons blocked | `sendBeacon` and `<a ping>` reporting to another site | A site whose own analytics lives on a separate registrable domain | Relaxed, or a timed exception |
+| `ping` attributes removed | First-party click tracking via hyperlink auditing | Nothing: the link still navigates | Cleaning off for the site |
+| `Referrer-Policy` tightened | A page that opted into sending full addresses (with query strings) to every third party | Partner sites that check a full `Referer`; rare | Relaxed |
+| Referer removed from third-party frames (Strict) | The frame's server learning which page embeds it | Embeds that check the Referer (YouTube does; it is excepted) | Standard, or Allow host |
+
+The Referer is cut to the origin only where a page asked for more: Chrome's
+default policy already sends only the origin cross-site, and DNR cannot
+rewrite a header to a computed value. A page can still override the policy
+per element or with a `<meta>` tag. Removing the Referer header from a frame
+request does not empty that frame's `document.referrer`, and Chrome also
+gives every frame `location.ancestorOrigins`, which no extension can change:
+a third-party frame's own script can still learn the embedding site. No
+tracking request headers were stripped: the ones that matter are cookies
+(handled above) and Chrome's `X-Client-Data`, which extensions cannot see.
+
+## Fingerprinting
+
+Fingerprinting and session-replay scripts are **blocked by address**, which
+works when they are served first-party or through a vendor's custom
+subdomain: the loaders keep telltale paths and parameters
+(`?apiKey=…&loaderVersion=`, `?ci=js/`, `/fp/tags?org_id=`,
+`/hotjar-<id>.js?sv=`, `/s/fs.js`, `/rec/bundle`). Fraud-prevention
+fingerprinting (ThreatMetrix, iovation) is on that list too; a bank or a
+checkout that requires it may ask for extra verification. Set that site to
+Relaxed.
+
+The browser APIs themselves (canvas, WebGL, audio, fonts, screen) are **not
+changed by default**. Overriding them in a content script is fragile, easy
+to detect and makes this one browser stand out from every other Chrome. An
+**experimental** switch in the popup (off by default) adds small,
+deterministic noise to canvas, WebGL and audio readouts, keyed per site and
+per browser session: one site sees the same values all session, another site
+sees different ones, so a canvas fingerprint cannot be matched across sites.
+The trade-off, plainly: a script can detect the noise by drawing a known
+image; one user adding noise does not hide in a crowd the way Brave's or
+Tor's users do; and canvas-dependent sites (drawing tools, some captchas) can
+misbehave. Fonts, screen size and the user agent are not touched. It
+registers its scripts only while switched on (`scripting` permission) and can
+be excluded per site.
+
+Egress Guard never generates fake traffic to trackers or advertisers (no
+automatic ad clicks, fake page views or decoy searches): that sends deceptive
+requests to third parties, costs them money, can break site terms, and makes
+this browser more conspicuous, not less.
+
+## Site modes and click-to-load
+
+The popup's **Protection on this site** sets one of four levels, and
+**Default for other sites** sets Standard or Strict for every site without its
+own level:
+
+| Mode | What it does |
+| --- | --- |
+| Relaxed | Host lists, malware protection, GPC and your rules only. URL filters, beacon blocking, link unwrapping, Strict and the Referrer-Policy fix stand down (`allowAllRequests` below the threat list, so threats stay blocked) |
+| Standard | Everything described above |
+| Strict | Standard, plus third-party scripts, frames, fonts and plugins blocked except a short list of payment, sign-in, captcha and public script CDN providers (`FUNCTIONAL_HOSTS` in `core/dnr.js`, each justified there); third-party `Cookie` and `Set-Cookie` removed on its subresources; the Referer removed from third-party frames; third-party `preconnect`, `dns-prefetch`, `prefetch` and `prerender` hints removed from the page (best effort: Chrome may act on a hint before the page script sees it, and DNR cannot see connection hints); YouTube, X, Instagram, Facebook, TikTok and Disqus embeds held |
+| No scripts | Strict, plus every script the site's pages request is blocked and a `script-src 'none'` Content-Security-Policy is appended to them, so inline scripts do not run either |
+
+**Click-to-load.** Under Strict and No scripts a held embed is replaced by a
+local placeholder naming the provider. One real click (synthetic clicks are
+ignored) adds a session rule for that provider in that tab only and loads it;
+the allowance ends when the tab navigates. For script-built embeds (tweets,
+Instagram posts) the page's own provider script is added back.
+
+**One-click repair.** A request Strict blocked shows **Allow host** in the
+popup's list; that host is then allowed on this site under Strict until you
+remove it there.
+
+**Strict is not the default.** Measured on the 23-site real-site run
+(2026-11-21, headless Chrome 157, below): of the 18 sites that render in the
+control run, Strict broke or degraded these, while Standard broke none:
+
+| Site | What Strict did | One-click repair |
+| --- | --- | --- |
+| tomsguide.com | Page hung (main thread busy, nothing painted): its own scripts on `vanilla.futurecdn.net` were blocked, and with them allowed its ad-recovery scripts (`html-load.com`, `content-loader.com`) still loop | Set the site to Standard. **Allow host** for `vanilla.futurecdn.net` was not enough |
+| login.live.com | Sign-in form blank: its scripts are on `msftauth.net` / `msauth.net` | Fixed: both are now on the functional list; the form renders under Strict |
+| theguardian.com | Renders, but 20 of its own scripts and fonts on `assets.guim.co.uk` blocked (no menus, comments or live updates; fallback fonts) | **Allow host** `assets.guim.co.uk` |
+| foodnetwork.com | Renders, 17 own scripts and fonts on `food.fnr.sndimg.com` blocked (5 new page errors) | **Allow host** `food.fnr.sndimg.com` |
+| checkout.stripe.dev | Renders and the payment frame works; 29 Google Fonts requests blocked, so fallback fonts | None needed |
+
+Most large sites serve their own code from a separately registered CDN
+domain, which Strict treats as third party, so as a default it would degrade
+most news and shopping sites and silently break some. It ships as an opt-in
+level per site (or as the default, for someone who accepts the repairs);
+Standard stays the default.
+
+## Surrogates
+
+When a blocked tracker is something the page calls into, blocking it can
+break the page: a link that waits for `dataLayer`'s `eventCallback` never
+navigates, `googletag.cmd` never runs. Eleven requests for Google Analytics
+(`analytics.js`, `ga.js`), Google Tag Manager (`gtm.js`, `gtag/js`), the Meta
+pixel, Segment, Adobe Launch and Google Publisher Tag / AdSense are redirected
+to small stubs in `browser/surrogates/` (written for this project, no network,
+no storage, web-accessible only by a per-session address). They define the
+same API, call the callbacks pages wait for, and do nothing else. The tracker
+receives nothing: the request never leaves the browser. A surrogate sits above
+the host lists and below your own rules, so your block rule or timed exception
+still decides.
+
+## CNAME-cloaked trackers: what else was evaluated
+
+The build already ships AdGuard's CNAME-cloaked ads and trackers lists (the
+first-party subdomains themselves, which is what a browser sees). Measured on
+2026-11-20 against HaGeZi PRO++ and those lists:
+
+- **NextDNS cname-cloaking-blocklist**: about 120 entries, and they are the
+  CNAME *targets* (`eulerian.net`, `omtrdc.net`, …), useful to a resolver that
+  follows CNAMEs, useless to a browser rule that sees only the first-party
+  name. Its raw file now returns 404. Not added.
+- **AdGuard disguised mail trackers** (308,642 names, 308,380 not on the
+  shipped lists): mostly Salesforce Marketing Cloud and similar subdomains,
+  including the landing and preference-centre pages subscribers need. Webmail
+  proxies images anyway. Blocking their subresources would break unsubscribe
+  pages for little gain. Not added.
+- **AdGuard disguised click-throughs** (37,348 names, 37,105 new): navigations,
+  which the lists never block, so blocking adds nothing; but they are exactly
+  the bounce redirectors whose cookies should not survive the hop. Added to
+  the `bounce` ruleset (cookies stripped, never blocked), MIT, recorded in
+  `NOTICE.txt`.
+
 ### What it does not do (Chrome)
 
 - **No YouTube or other in-stream video ads.** In-stream ads are chosen in
@@ -181,8 +452,7 @@ rebuild-and-reload path gets the same freshness with none of that.
 - **Cosmetic hiding is a small built-in set plus your own rules.** No
   third-party cosmetic lists, no `:has()`, no text matching: an
   "Advertisement" label in plain text next to a hidden slot can remain.
-- **No path-level list filtering.** The lists are domain lists. A tracker
-  served from a site's own domain is only blocked if you add an endpoint rule.
+- **No anti-adblock or consent-wall handling.** Out of scope; no scriptlets.
 - Lists update when the folder is rebuilt (see above); nothing in the
   extension downloads them. The build warns when a list is more than 48 hours
   old.
@@ -219,16 +489,24 @@ priority ladder (`browser/core/dnr.js`):
 
 | Priority | Rules |
 | --- | --- |
-| 7 | Timed exceptions (allow) |
-| 6 | Your allow rules |
-| 5 | Your block rules |
-| 4 | Ad, tracker and CNAME lists |
-| 3 | Continue once (session `allow`, one tab, one host and its own requests) |
-| 2 | Malware and phishing lists |
-| 1 | Tracking-parameter stripping |
+| 14 | `Sec-GPC: 1` (header only; above every allow so nothing switches it off) |
+| 13 | Timed exceptions (allow) |
+| 12 | Your allow rules |
+| 11 | Your block rules |
+| 10 | Surrogates (stub instead of block) |
+| 9 | Ad, tracker and CNAME host lists |
+| 8 | Continue once (session `allow`, one tab, one host and its own requests) |
+| 7 | Malware and phishing lists |
+| 6 | Relaxed sites (`allowAllRequests`), a clicked-to-load embed |
+| 5 | Strict and No scripts site modes |
+| 4 | `$important` URL filters |
+| 3 | The URL filter lists' own exceptions (`@@`) |
+| 2 | URL filters, fingerprinting and replay paths, beacons, link unwrapping, Referrer-Policy fix |
+| 1 | Tracking-parameter stripping, cookie stripping for tracker hosts and redirectors |
 
-So an exception really wins over every list, and continuing to a flagged site
-does not unblock that site's trackers.
+So an exception really wins over every list, continuing to a flagged site
+does not unblock that site's trackers, and nothing a filter list or a site
+mode allows can reach the threat list.
 
 ### Rule limits
 
@@ -273,8 +551,11 @@ Firefox quits.
 | `http://*/*`, `https://*/*` | Both | Run the hiding script on pages and apply rules to them |
 | `storage` | Both | Keep rules and exceptions locally |
 | `alarms` | Both | Remove exceptions and rules when they expire |
+| `cookies` | Chrome | Delete tracking cookies (by name, `core/cookies.js`) the moment they are set |
+| `contextMenus`, `offscreen`, `clipboardWrite` | Chrome | "Copy clean link": the offscreen extension page writes the clipboard so the site never sees the copy |
+| `scripting` | Chrome | Register the experimental fingerprint-noise scripts only while that switch is on |
 
-No `tabs`, `scripting`, `cookies`, `history` or native messaging. There is
+No `tabs`, `history`, `webRequest` or native messaging. There is
 no remote code: extension pages allow only their own scripts. In Chrome,
 `connect-src 'self'` lets the worker read its own packaged threat ruleset
 (packed builds, to check a host before Continue); it makes no network
@@ -284,8 +565,9 @@ extension at build time.
 ## Licences of bundled list data
 
 The extension code is MIT licensed. A Chrome build contains rulesets derived
-from HaGeZi DNS Blocklists (GPL-3.0) and the AdGuard CNAME tracker lists
-(MIT). The build writes `NOTICE.txt` with each source URL, licence, entry
+from HaGeZi DNS Blocklists (GPL-3.0), EasyPrivacy and EasyList (dual GPL-3.0
+or CC BY-SA 3.0, used under GPL-3.0) and the AdGuard CNAME tracker and
+disguised click-through lists (MIT). The build writes `NOTICE.txt` with each source URL, licence, entry
 count, publication time and SHA-256. Building and using it yourself needs
 nothing more. If you give a built copy to someone else, include that notice,
 the GPL-3.0 text and the list sources. See
@@ -301,7 +583,11 @@ the GPL-3.0 text and the list sources. See
 - First-party, server-side processing is out of reach.
 - Sites change markup and paths; remove a rule that breaks a page.
 - This complements uBlock Origin Lite rather than replacing it: no cosmetic
-  filter lists, scriptlets or per-site filter syntax.
+  filter lists, scriptlets or per-site filter syntax. EasyList's and
+  EasyPrivacy's network filters are compiled; their element-hiding rules are
+  not.
+- YouTube in-stream ads remain out of scope: no method was verified in
+  headless Chrome, so none is claimed.
 
 ## Code layout
 
@@ -322,7 +608,43 @@ chunking, priority ladder, exceptions against lists, continue-once, regex
 equivalence with the Firefox glob, parameter stripping), the build (snapshot
 tampering, feed metadata in sync with `feeds.py`, output layout), content
 script, picker and popup, and a source scan for `innerHTML`, `eval`, remote
-URLs and networking calls.
+URLs and networking calls. `filters.test.cjs` adds the filter compiler
+(conversion, drops and their reasons, folding, `$badfilter`, exception
+precedence against host lists, threats, your rules and `$important`),
+link unwrapping with hostile inputs (nested, double-encoded, IDN, repeated
+and empty parameters, `javascript:`/`data:`/`file:`/extension destinations,
+credentials, control characters, lookalike hosts, too-deep nesting), the
+link cleaner (global versus per-site names, a legitimate `ref` elsewhere,
+OAuth and unsubscribe parameters kept, encoding preserved) and its agreement
+with the navigation rules, tracking-cookie names (and the session, login,
+cart and consent cookies that must not match), cookie and bounce rules and
+the per-site brake, GPC, beacons, the Referrer-Policy patterns, site modes,
+click-to-load rules, and the surrogates (run in a VM: callbacks fire, queues
+drain, no network or storage APIs). With the build tests, 91 tests.
+
+`node tests/browser/chrome-privacy.mjs [--real-filters] [--shots DIR]`
+(headless Chrome, throwaway profile, loopback fixture, 44 checks): a
+first-party `gtm.js` and `/g/collect` blocked while the list's own exception
+loads; proxied Hotjar and a Fingerprint Pro agent blocked; Relaxed lifts URL
+filters but not host lists; `Sec-GPC: 1` on page and subresource requests and
+`navigator.globalPrivacyControl`; third-party `sendBeacon` blocked and a
+first-party one sent; no ping request from a clicked `<a ping>`;
+`Referrer-Policy: unsafe-url` cut to the origin; `google.com/url` opens the
+destination without contacting Google, a credentialed or `javascript:`
+destination is refused and the latter never redirected; GA, GTM and GPT
+surrogates run the page's callbacks; click-time cleaning (mousedown, right
+click, a page that swaps the href on mousedown, `t.co` with
+`data-expanded-url`, a functional `ref` kept), navigation-time cleaning with
+unsubscribe tokens kept, address-bar cleaning after a client-side
+`replaceState`, Copy clean link through the offscreen page, `_ga` and `_fbp`
+removed while a preference cookie stays, the popup's counts, the per-site
+brake; Strict blocking a third-party script while the site's own and inline
+code run, holding a Disqus frame and dropping connection hints, attributing
+the block, loading the embed on one real click and ending that allowance on
+navigation, **Allow host**, removing the Referer from a third-party frame;
+No scripts stopping own and inline scripts; fingerprint noise off by default,
+stable within a site and session, different across sites, and gone when
+switched off.
 
 Real Chrome (157, headless, throwaway profile, loopback fixture only):
 `node tests/browser/chrome-headless.mjs [--feeds DIR] [--shots DIR]`. It
@@ -356,47 +678,61 @@ expiry; a rebuilt folder is noticed and the popup asks for a reload.
 
 ### Real websites
 
-`node tests/browser/real-sites.mjs [--feeds DIR] [--sites a,b]` (opt-in; it
-contacts the public sites). Each site is loaded twice in headless Chrome 157
-with a throwaway profile and no proxy, without and with the extension. It
-only navigates and reads: no clicks, logins, forms or cookie banners. Run on
-2026-11-20 with HaGeZi PRO++, HaGeZi Threat Intelligence Medium and AdGuard
-CNAME (the Full threat tier, Phishing Army and URLhaus were not in the local
-cache). "Blocked" is the extension's own log; "ad slots" counts visible
-elements matching the built-in slot selectors plus visible text labels that
-read exactly "Advertisement" or "Sponsored".
+`node tests/browser/real-sites.mjs [--feeds DIR] [--sites a,b] [--modes control,extension,strict]`
+(opt-in; it contacts the public sites). Each site is loaded in headless
+Chrome 157 with a throwaway profile and no proxy: without the extension, with
+it (Standard), and with Strict as the default. It only navigates and reads:
+no clicks, logins, forms or cookie banners. Before = the v0.4.0 build (same
+lists, same day); after = this build. Run 2026-11-21 with HaGeZi PRO++,
+HaGeZi Threat Intelligence Full, URLhaus, Phishing Army, AdGuard CNAME,
+EasyPrivacy and EasyList. Blocked counts vary from load to load with ad
+auctions (cnn.com: 7,220 host-list blocks before, 1,763 after, the same
+lists). "Links with tracking" counts the page's links that carry tracking
+parameters v0.4.0 would strip, then the links this build cleans or unwraps;
+"tracker cookies" are cookies matching `core/cookies.js` present after the
+load.
 
-| Site | Kind | Blocked (trackers / CNAME / threats) | JS errors control → ext | Visible text control → ext | Ad slots control → ext | Result |
-| --- | --- | --- | --- | --- | --- | --- |
-| cnn.com | news | 607 / 0 / 0 | 9 → 10 | 10,106 → 10,106 | 9 → 0 | renders |
-| theguardian.com | news | 28 / 0 / 0 | 18 → 18 | 17,906 → 17,899 | 13 → 0 | renders |
-| foxnews.com | news | 42 / 2 / 0 | 2 → 14 | 22,525 → 22,537 | 0 → 0 | renders; extra errors are its own "Error loading script" for blocked ad and analytics scripts |
-| dailymail.co.uk | news | 0 / 0 / 0 | 0 → 0 | 216 → 216 | 0 → 0 | bot interstitial in both runs |
-| weather.com | news | 40 / 0 / 0 | 1 → 2 | 1,999 → 3,822 | 20 → 0 | renders |
-| allrecipes.com | recipe | 0 / 0 / 0 | 0 → 0 | 0 → 0 | 0 → 0 | blank in both runs (headless challenge) |
-| foodnetwork.com | recipe | 21 / 1 / 0 | 0 → 0 | 2,322 → 2,322 | 0 → 0 | renders |
-| theverge.com | tech | 13 / 0 / 0 | 1 → 1 | 22,387 → 22,387 | 0 → 0 | renders |
-| techcrunch.com | tech | 23 / 0 / 0 | 1 → 1 | 11,098 → 11,098 | 18 → 0 | renders |
-| tomsguide.com | tech | 1 / 0 / 0 | 3 → 3 | 20,577 → 20,577 | 0 → 0 | renders |
-| bing.com search | search | 0 / 0 / 0 | 0 → 0 | 2,913 → 0 | 0 → 0 | probe hit Bing's own redirect (`rdr=1`) mid-load; a separate run with the extension rendered 11 results |
-| html.duckduckgo.com | search | 0 / 0 / 0 | 0 → 0 | 205 → 205 | 0 → 0 | bot challenge in both runs (left untouched) |
-| github.com/login | sign-in | 3 / 0 / 0 | 0 → 0 | 282 → 282 | 0 → 0 | form renders |
-| accounts.google.com | sign-in | 0 / 0 / 0 | 0 → 0 | 1,038 → 1,038 | 0 → 0 | form renders |
-| login.live.com | sign-in | 0 / 0 / 0 | 0 → 0 | 231 → 231 | 0 → 0 | form renders |
-| paypal.com/signin | sign-in | 0 / 0 / 0 | 2 → 2 | 0 → 0 | 0 → 0 | captcha in both runs |
-| checkout.stripe.dev | checkout | 0 / 0 / 0 | 0 → 0 | 584 → 584 | 0 → 0 | renders |
-| allbirds.com/cart (Shopify) | checkout | 10 / 1 / 0 | 0 → 0 | 2,479 → 2,479 | 0 → 0 | renders |
+| Site | Kind | Host lists before → after (trackers/CNAME) | New categories after | Links with tracking v0.4 / now | Tracker cookies control → ext | JS errors control → before → after | Text control → after | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cnn.com | news | 7220/0 → 1763/0 | easylist 3 | 13 / 53 | 0 → 0 | 10 → 10 → 9 | 10,148 → 9,905 | renders |
+| theguardian.com | news | 27/0 → 18/0 | fp-trackers 1, surrogates 1 | 0 / 0 | 0 → 0 | 18 → 17 → 16 | 18,236 → 18,236 | renders |
+| foxnews.com | news | 37/2 → 36/2 | easyprivacy 1, easylist 1, beacons 1, surrogates 3 | 2 / 18 | 0 → 0 | 13 → 13 → 14 | 22,339 → 22,337 | renders |
+| dailymail.co.uk | news | 0/0 → 0/0 | – | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 216 → 214 | bot interstitial in all runs |
+| weather.com | news | 33/0 → 7/0 | fp-trackers 1 (Vercel speed insights), easyprivacy 1 (mParticle identify), easylist 1 | 1 / 1 | 0 → 0 | 1 → 2 → 1 | 1,999 → 1,966 | renders (forecast loads slowly in headless in every mode) |
+| allrecipes.com | recipe | 0/0 → 0/0 | – | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 316 → 316 | headless challenge in all runs |
+| foodnetwork.com | recipe | 20/1 → 17/1 | easyprivacy 5, surrogates 2 | 2 / 2 | 0 → 0 | 0 → 0 → 0 | 2,303 → 2,303 | renders |
+| theverge.com | tech | 13/0 → 0/0 | fp-trackers 1 | 3 / 7 | 3 → 0 | 1 → 1 → 1 | 22,104 → 23,088 | renders |
+| techcrunch.com | tech | 8/0 → 7/0 | surrogates 2 | 0 / 0 | 0 → 0 | 0 → 1 → 0 | 11,081 → 11,081 | renders |
+| tomsguide.com | tech | 1/0 → 0/0 | fp-trackers 2 | 0 / 0 | 0 → 0 | 3 → 3 → 3 | 20,546 → 20,548 | renders |
+| bing.com search | search | 0/0 → 0/0 | easyprivacy 1 (`/fd/ls/l` logging) | 0 / 22 (22 unwrappable `ck/a` links) | 0 → 0 | 0 → 0 → 0 | 104 → 104 | Bing's own `rdr=1` hop mid-load in both runs; separate runs rendered 2,880–3,183 characters |
+| html.duckduckgo.com | search | 0/0 → 0/0 | easyprivacy 1 | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 205 → 205 | bot challenge in all runs |
+| github.com/login | sign-in | 2/0 → 2/0 | – | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 282 → 282 | form renders |
+| accounts.google.com | sign-in | 0/0 → 0/0 | fp-trackers 1 | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 1,038 → 1,038 | form renders |
+| login.live.com | sign-in | 0/0 → 0/0 | easyprivacy 2 (OneCollector telemetry) | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 231 → 231 | form renders |
+| paypal.com/signin | sign-in | 0/0 → 0/0 | easyprivacy 1 | 0 / 0 | 0 → 0 | 2 → 2 → 2 | 0 → 0 | captcha in all runs |
+| checkout.stripe.dev | checkout | 0/0 → 0/0 | – | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 584 → 584 | renders |
+| allbirds.com/cart (Shopify) | checkout | 10/1 → 4/1 | fp-trackers 31, easyprivacy 6, surrogates 1 | 0 / 0 | 1 → 0 | 1 → 1 → 2 | 2,479 → 2,479 | renders |
+| stape.io | server-side GTM | – | – | – | – | – | – | connection closed to headless Chrome in all runs |
+| simoahava.com | server-side GTM | 2/0 → 2/0 | – | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 3,129 → 3,129 | renders |
+| plausible.io | self-hosted | – | – | – | – | – | – | connection closed to headless Chrome in all runs |
+| posthog.com | self-hosted | 0/0 → 0/0 | easyprivacy 2 | 0 / 0 | 0 → 0 | 1 → 0 → 3 | 10,058 → 10,006 | renders; the extra errors are PostHog's own loader reporting its blocked SDK |
+| matomo.org | self-hosted | 0/0 → 19/0 | fp-trackers 1 | 0 / 0 | 0 → 0 | 0 → 0 → 0 | 7,627 → 7,627 | renders |
 
-No breakage was found that needed an allow rule or a priority fix: on every
-site that rendered in the control run, the extension run rendered the same
-text (within 1%, more on weather.com, where blocked ads stopped a layout
-shift). The built-in ad-slot stylesheet removed every visible slot the probe
-found (60 across four sites). Its style-recalculation cost, measured as a
-forced full recalc with the sheet on and off (median of 7): cnn.com 30.0 vs
-30.8 ms (5,273 elements), tomsguide.com 33 vs 32 ms (4,415), theguardian.com
-12.6 vs 12.4 ms, foxnews.com 11.2 vs 11.2 ms: within noise. Three sites
-showed bot interstitials to headless Chrome in both runs, so they say nothing
-about the extension.
+What this layer adds: 73 requests caught by the new categories on the 23
+sites (first-party tracker scripts 38, EasyPrivacy 20, surrogates 9,
+EasyList 5, beacons 1), none of which the host lists catch; 103 tracking-
+decorated links cleaned or unwrapped across the pages against 21 that v0.4.0
+would have cleaned; tracker cookies left after a load 4 → 0. Standard broke
+nothing: every site that rendered in the control run rendered the same text
+with the extension (weather.com and Bing vary between runs in every mode).
+Two problems were found and fixed: cutting Microsoft's `MUID` cookie to a
+session cookie made Bing render no results (Bing rendered again once `MUID`
+was left alone), and Strict blanked the login.live.com form (Microsoft's
+sign-in CDNs are now on the functional list). The Strict results are above,
+under "Site modes". Server-side GTM sites in the set either use a renamed
+loader that EasyPrivacy does not name (simoahava.com, whose two host-list
+blocks are its Google hosts) or refused headless Chrome, so first-party sGTM
+paths were verified on the fixture, not on a live site.
 
 Not verified in a real browser: the popup opened from the toolbar (captures
 open `popup.html?tab=<id>` in a tab), a packed build (the counts fallback is

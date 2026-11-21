@@ -20,6 +20,28 @@
   <p id="hero-note" class="note" hidden></p>
 </section>
 
+<section class="cleaning" id="cleaning" aria-label="Link and cookie cleaning" hidden>
+  <p class="stats"><span><b id="links-cleaned">0</b> <span id="links-unit">links cleaned</span></span><span><b id="cookies-removed">0</b> <span id="cookies-unit">tracking cookies removed</span></span></p>
+  <p id="clean-note" class="note"></p>
+  <button id="clean-toggle" type="button" aria-pressed="false">Stop cleaning on this site</button>
+</section>
+
+<section class="block" id="protection" aria-labelledby="mode-h">
+  <h2 id="mode-h">Protection on this site</h2>
+  <div id="modes" class="modes" role="radiogroup" aria-labelledby="mode-h"></div>
+  <p id="mode-note" class="note"></p>
+  <ul id="strict-allowed" class="rows" hidden></ul>
+  <label class="default-mode">Default for other sites
+    <select id="default-mode"><option value="standard">Standard</option><option value="strict">Strict</option></select>
+  </label>
+  <details class="experimental">
+    <summary>Experimental</summary>
+    <label class="check"><input type="checkbox" id="noise"> Fingerprint noise on all sites</label>
+    <label class="check"><input type="checkbox" id="noise-site"> …including this site</label>
+    <p class="note">Adds small per-site, per-session noise to canvas, WebGL and audio readouts. Detectable, and can break drawing apps or some captchas. Off by default.</p>
+  </details>
+</section>
+
 <section class="block" aria-labelledby="list-h">
   <h2 id="list-h">What was blocked</h2>
   <ul id="blocked" class="rows"></ul>
