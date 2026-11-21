@@ -10,145 +10,156 @@
   <script src="/app.js" defer></script>
 </head>
 <body data-ready-pending>
-  <a class="skip-link" href="#main">Skip to today’s summary</a>
-  <header class="top">
-    <div class="wrap top-inner">
-      <span class="brand"><span class="brand-symbol" aria-hidden="true"></span> Egress Guard</span>
-      <span class="local"><span aria-hidden="true"></span> This Mac only</span>
-      <button id="refresh" type="button" class="button quiet small" hidden>Refresh</button>
-    </div>
-  </header>
+  <a class="skip-link btn" href="#main">Skip to today’s summary</a>
+  <div class="wrap">
+    <header class="bar">
+      <span class="mark" aria-hidden="true"></span><span class="name">Egress Guard</span><span class="scope">This Mac</span>
+      <span class="sp"></span><span id="updated" class="updated t-caption num"></span><button id="refresh" type="button" class="btn" hidden>Refresh</button>
+    </header>
 
-  <main id="main" tabindex="-1">
-    <div class="wrap">
-      <noscript><p class="notice">Enable JavaScript to read the local protection service and use its controls.</p></noscript>
-      <p id="connection" class="notice" role="status">Connecting to the local protection service…</p>
-      <p id="notification" class="notice" role="status" hidden></p>
-    </div>
+    <main id="main" tabindex="-1">
+      <noscript><p class="inline-error">Enable JavaScript to read the local protection service and use its controls.</p></noscript>
 
-    <div id="dashboard" hidden>
-      <section id="health" class="health wrap" aria-labelledby="health-title" data-state="unknown">
-        <div class="health-line">
-          <h1 id="health-title" class="health-summary"><span class="dot" aria-hidden="true"></span><span id="health-state">Checking</span></h1>
-          <p id="health-facts" class="health-facts"></p>
-          <div class="health-actions">
-            <button id="pause" class="button quiet small" type="button" hidden>Pause ad filtering</button>
-            <button id="resume" class="button primary small" type="button" hidden>Resume now</button>
-            <button id="health-toggle" class="button quiet small disclosure" type="button" aria-expanded="false" aria-controls="health-detail">Details</button>
+      <div class="status-row">
+        <h1 class="status" id="status" data-state="neutral"><span class="dot hollow" aria-hidden="true"></span><span class="sr-only">Protection: </span><span class="word" id="status-word">Checking…</span><span class="fact" id="status-fact"></span></h1>
+        <span class="acts">
+          <button id="refresh-filters" class="btn" type="button" hidden>Update lists</button>
+          <button id="pause" class="btn" type="button" hidden>Pause ad filtering</button>
+          <button id="resume" class="btn primary" type="button" hidden>Resume filtering</button>
+          <button id="health-toggle" class="btn quiet chevron" type="button" aria-expanded="false" aria-controls="health-detail" hidden>Details</button>
+        </span>
+      </div>
+      <p id="notification" class="inline-error" role="status" hidden></p>
+
+      <section id="health-detail" class="health-detail" aria-label="Protection details" hidden>
+        <ol id="setup" class="setup" aria-label="Setup steps" hidden></ol>
+        <div class="checks">
+          <div>
+            <div class="check-head"><h2 class="t-body strong">Proxy</h2></div>
+            <ul class="list" id="proxies"></ul>
+            <div class="check-head"><h2 class="t-body strong">Setup and recovery</h2></div>
+            <ul class="list" id="maintenance"></ul>
+          </div>
+          <div>
+            <div class="check-head"><h2 class="t-body strong">Block lists</h2><button id="refresh-filters-detail" class="btn quiet" type="button" hidden>Update lists</button></div>
+            <ul class="list" id="filters"></ul>
+            <div class="check-head"><h2 class="t-body strong">Canary alerts</h2><span>
+              <button id="pause-canaries" class="btn quiet" type="button" hidden>Pause alerts</button>
+              <button id="resume-canaries" class="btn quiet" type="button" hidden>Resume alerts</button></span></div>
+            <ul class="list" id="canaries"></ul>
+            <div id="security-section" hidden>
+              <div class="check-head"><h2 class="t-body strong">Mac security settings</h2></div>
+              <ul class="list" id="security"></ul>
+            </div>
           </div>
         </div>
-        <div id="health-detail" class="health-detail" hidden>
-          <ol id="setup" class="setup" hidden></ol>
-          <div class="check-columns">
-            <div>
-              <h2 class="label">Proxy</h2>
-              <ul class="check-list" id="proxies"></ul>
-              <h2 class="label">Setup and recovery</h2>
-              <ul class="check-list" id="maintenance"></ul>
+      </section>
+
+      <section id="signed-out" class="empty" hidden>
+        <p class="t-title">Session ended</p>
+        <p class="muted">Open the Egress Guard launcher on this Mac to start a new dashboard session.</p>
+      </section>
+
+      <div id="dashboard">
+        <section id="outcome" aria-label="Today">
+          <div class="hero" id="hero">
+            <div class="metric focal" id="focal">
+              <span class="value t-display skeleton" id="hero-number">000</span>
+              <span class="label" id="hero-label">blocked today</span>
+              <span class="sub num" id="hero-sub"></span>
             </div>
-            <div>
-              <div class="label-row"><h2 class="label">Filter feeds</h2><button id="refresh-filters" class="button quiet small" type="button" hidden>Refresh feeds</button></div>
-              <ul class="check-list" id="filters"></ul>
-              <div class="label-row"><h2 class="label">Canary alerts</h2><span class="button-group">
-                <button id="pause-canaries" class="button quiet small" type="button" hidden>Pause alerts</button>
-                <button id="resume-canaries" class="button quiet small" type="button" hidden>Resume alerts</button></span></div>
-              <ul class="check-list" id="canaries"></ul>
-              <div id="security-section" hidden>
-                <h2 class="label">Mac security settings</h2>
-                <ul class="check-list" id="security"></ul>
+            <figure class="chart" id="timeline">
+              <div class="chart-head t-caption">
+                <span id="chart-title">Blocked per hour, last 24 hours</span>
+                <span class="chart-side"><span id="chart-fact" class="num"></span>
+                  <span class="seg" id="range" role="group" aria-label="Time range">
+                    <button type="button" id="range-day" aria-pressed="true">24 hours</button><button type="button" id="range-week" aria-pressed="false">7 days</button>
+                  </span></span>
+              </div>
+              <div class="bars day" id="bars" role="group" aria-label="Blocked per hour"></div>
+              <div class="bars-axis" id="axis" aria-hidden="true"></div>
+              <div class="sr-only"><table id="chart-table"><caption id="chart-caption">Blocked and allowed connections</caption><thead><tr><th scope="col">Period</th><th scope="col">Blocked</th><th scope="col">Allowed</th></tr></thead><tbody></tbody></table></div>
+            </figure>
+          </div>
+          <div class="hero-empty" id="hero-empty" hidden>
+            <p class="t-headline" id="empty-title"></p>
+            <p class="muted" id="empty-text"></p>
+          </div>
+          <div class="metric-row reasons" id="reasons">
+            <div class="metric threat-metric" id="metric-threats"><span class="value num" id="count-threats">0</span><span class="label" id="label-threats">threats stopped</span></div>
+            <div class="metric"><span class="value num" id="count-ads">0</span><span class="label">ads and trackers</span></div>
+            <div class="metric"><span class="value num" id="count-cname">0</span><span class="label">cloaked trackers</span></div>
+            <div class="metric"><span class="value num" id="count-manual">0</span><span class="label">by your rules</span></div>
+          </div>
+        </section>
+
+        <section class="drill" aria-label="Details">
+          <div class="tabs" role="tablist" aria-label="Details">
+            <button type="button" role="tab" id="tab-activity" data-tab="activity" aria-controls="panel-activity" aria-selected="true">Activity</button>
+            <button type="button" role="tab" id="tab-top" data-tab="top" aria-controls="panel-top" aria-selected="false" tabindex="-1">Top blocked</button>
+            <button type="button" role="tab" id="tab-threats" data-tab="threats" aria-controls="panel-threats" aria-selected="false" tabindex="-1">Threats <span class="count num" id="threat-tab-count"></span></button>
+          </div>
+
+          <div role="tabpanel" id="panel-activity" aria-labelledby="tab-activity">
+            <div class="tools">
+              <form id="lookup" class="search" role="search">
+                <input id="hostname" class="field host-input" name="host" type="search" placeholder="Domain" aria-label="Search activity or check a domain" aria-describedby="search-help" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="253">
+              </form>
+              <span class="sp"></span>
+              <div class="seg" id="decisions" role="group" aria-label="Show">
+                <button type="button" data-decision="all" aria-pressed="true">All</button><button type="button" data-decision="blocked" aria-pressed="false">Blocked</button><button type="button" data-decision="allowed" aria-pressed="false">Allowed</button>
+              </div>
+            </div>
+            <p id="search-help" class="sr-only">Typing filters the list. Press Enter to check how the proxy would handle the domain.</p>
+            <div id="lookup-result" class="lookup" role="status" hidden></div>
+            <div id="exceptions" class="exceptions" hidden>
+              <h2 class="t-body strong" id="exceptions-title" tabindex="-1">Temporarily allowed</h2>
+              <ul class="list" id="temporary-allows"></ul>
+            </div>
+            <p id="activity-note" class="muted t-caption activity-note" hidden></p>
+            <ul id="activity-rows" class="list table" aria-label="Recent decisions"></ul>
+            <div id="activity-empty" class="empty" hidden><p class="t-title" id="activity-empty-title"></p><p class="muted" id="activity-empty-text"></p></div>
+            <div class="more"><button id="activity-more" class="btn" type="button" hidden>Show more</button></div>
+          </div>
+
+          <div role="tabpanel" id="panel-top" aria-labelledby="tab-top" hidden>
+            <div class="split">
+              <div>
+                <h2 class="t-title list-title">By reason <span class="muted range-word" id="reason-range"></span></h2>
+                <ul class="list" id="categories"></ul>
+              </div>
+              <div>
+                <h2 class="t-title list-title">Top blocked domains <span class="muted range-word" id="top-range"></span></h2>
+                <ul class="list" id="top-domains"></ul>
+                <div id="top-empty" class="empty" hidden><p class="t-title">Nothing blocked yet</p><p class="muted" id="top-empty-text"></p></div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
 
-      <section class="outcome wrap" aria-labelledby="outcome-label">
-        <div class="hero">
-          <p class="label" id="outcome-label">Blocked today</p>
-          <p class="hero-number" id="hero-number">—</p>
-          <p class="hero-share" id="hero-share"></p>
-          <p class="hero-change" id="hero-change"></p>
-          <div id="threats" class="threats" hidden>
-            <p class="threats-title" id="threats-title"></p>
-            <ul id="threat-list"></ul>
+          <div role="tabpanel" id="panel-threats" aria-labelledby="tab-threats" hidden>
+            <h2 class="t-title list-title" id="threats-title"></h2>
+            <ul class="list" id="threat-list"></ul>
+            <div id="threats-empty" class="empty" hidden><p class="t-title" id="threats-empty-title"></p><p class="muted" id="threats-empty-text"></p></div>
           </div>
-          <p id="threats-clear" class="threats-clear" hidden></p>
-          <div id="history-note" class="history-note" hidden></div>
-        </div>
+        </section>
+      </div>
+    </main>
+  </div>
 
-        <figure class="timeline" id="timeline" aria-labelledby="timeline-title">
-          <div class="figure-top">
-            <figcaption><h2 id="timeline-title" class="section-title">Connections</h2>
-              <p class="legend"><span class="key blocked"></span>Blocked <span class="key allowed"></span>Allowed</p></figcaption>
-            <div class="segmented" role="group" aria-label="Time range">
-              <button type="button" id="range-day" aria-pressed="true">24 hours</button>
-              <button type="button" id="range-week" aria-pressed="false">7 days</button>
-            </div>
-          </div>
-          <p id="chart-readout" class="chart-readout" aria-live="polite"></p>
-          <div id="chart" class="chart"></div>
-          <div class="visually-hidden"><table id="chart-table"><caption>Blocked and allowed connections</caption><thead><tr><th scope="col">Period</th><th scope="col">Blocked</th><th scope="col">Allowed</th></tr></thead><tbody></tbody></table></div>
-        </figure>
-      </section>
-
-      <section id="breakdown" class="breakdown wrap" aria-labelledby="breakdown-title">
-        <div class="section-head"><h2 id="breakdown-title" class="section-title">What was blocked <span id="breakdown-range" class="muted"></span></h2></div>
-        <div class="breakdown-grid">
-          <div>
-            <h3 class="label">By reason</h3>
-            <ul id="categories" class="bars"></ul>
-          </div>
-          <div>
-            <h3 class="label">Top blocked domains</h3>
-            <ol id="top-domains" class="bars ranked"></ol>
-          </div>
-        </div>
-      </section>
-
-      <section id="activity" class="activity wrap" aria-labelledby="activity-title">
-        <div class="section-head activity-head">
-          <h2 id="activity-title" class="section-title">Activity <span id="activity-live" class="muted"></span></h2>
-          <div class="activity-controls">
-            <form id="lookup" class="search" role="search">
-              <label class="visually-hidden" for="hostname">Search activity or check a domain</label>
-              <input id="hostname" name="host" type="search" placeholder="Search or check a domain" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="253" aria-describedby="search-help">
-              <button class="button quiet small" type="submit">Check</button>
-            </form>
-            <div class="segmented" role="group" aria-label="Decisions">
-              <button type="button" data-decision="all" aria-pressed="true">All</button>
-              <button type="button" data-decision="blocked" aria-pressed="false">Blocked</button>
-              <button type="button" data-decision="allowed" aria-pressed="false">Allowed</button>
-            </div>
-          </div>
-        </div>
-        <p id="search-help" class="visually-hidden">Typing filters the list. Press Enter to check how the proxy would handle the hostname.</p>
-        <div id="lookup-result" class="lookup-result" role="status" hidden></div>
-        <div id="exceptions" class="exceptions" hidden>
-          <h3 class="label" id="exceptions-title" tabindex="-1">Temporarily allowed</h3>
-          <ul id="temporary-allows"></ul>
-        </div>
-        <p id="activity-summary" class="activity-summary"></p>
-        <ul id="activity-rows" class="rows" aria-describedby="activity-summary"></ul>
-        <p id="activity-message" class="empty" hidden></p>
-        <div class="more"><button id="activity-more" class="button quiet small" type="button" hidden>Show more</button></div>
-      </section>
-
-      <footer class="wrap" id="page-footer"><p id="footnote">Counts come from this Mac’s local ledger. Egress Guard sees hostnames only, so it does not measure data or time saved.</p></footer>
-    </div>
-  </main>
+  <div class="toast-slot"><p id="toast" class="toast" role="status" hidden></p></div>
 
   <dialog id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
     <form id="confirm-form">
-      <h2 id="confirm-title"></h2>
-      <p id="confirm-detail"></p>
-      <div id="duration-control" hidden>
+      <h2 id="confirm-title" class="t-title"></h2>
+      <p id="confirm-detail" class="muted"></p>
+      <div id="duration-control" class="duration" hidden>
         <label for="duration">Duration</label>
-        <select id="duration"></select>
+        <select id="duration" class="field"></select>
       </div>
-      <p id="action-status" class="notice" role="status" hidden></p>
-      <div class="button-group dialog-actions">
-        <button id="cancel" class="button quiet" type="button" autofocus>Cancel</button>
-        <button id="confirm-action" class="button primary" type="submit">Confirm</button>
+      <p id="action-status" role="status" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel" class="btn" type="button" autofocus>Cancel</button>
+        <button id="confirm-action" class="btn" type="submit">Confirm</button>
       </div>
     </form>
   </dialog>
