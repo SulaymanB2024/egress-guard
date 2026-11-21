@@ -30,12 +30,33 @@ export const TIERS = {
   "pro.plus": {name: "HaGeZi Multi PRO++", minimum: 50000},
   "ultimate": {name: "HaGeZi Multi Ultimate", minimum: 50000},
 };
-export function feedSpecs(tier) {
+export const THREAT_TIERS = {
+  full: {id: "hagezi-threat-intel-full", name: "HaGeZi Threat Intelligence (Full)", url: HAGEZI + "tif-onlydomains.txt", minimum: 500000},
+  medium: {id: "hagezi-threat-intel", name: "HaGeZi Threat Intelligence (Medium)", url: HAGEZI + "tif.medium-onlydomains.txt", minimum: 100000},
+};
+const PHISHING_ARMY = {id: "phishing-army", name: "Phishing Army", url: "https://phishing.army/download/phishing-army-domains.txt",
+  minimum: 20000, license: {name: "Phishing Army terms (upstream sources' terms apply)", url: "https://phishing.army/license/"}};
+const URLHAUS = {id: "urlhaus-filter", name: "URLhaus malware hosts (malware-filter)",
+  url: "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-domains.txt", minimum: 1000, ips: true,
+  license: {name: "CC0-1.0 and MIT", url: "https://gitlab.com/malware-filter/urlhaus-filter#license"}};
+
+/**
+ * Feeds per list kind. Threats mirror the proxy's threat group (feeds.selected_feeds): URLhaus, Phishing Army and a
+ * HaGeZi Threat Intelligence tier. `threatTier` "full" (the proxy's default) falls back to "medium" when only the
+ * medium snapshot is cached. The DoH list is not used: DNR cannot see Chrome's own secure-DNS lookups, and blocking
+ * page requests to resolver hosts protects nothing.
+ */
+export function feedSpecs(tier, threatTier = "full") {
   const t = TIERS[tier];
   if (!t) throw new Error(`unknown tier ${tier}; use ${Object.keys(TIERS).join(", ")}`);
+  if (!THREAT_TIERS[threatTier]) throw new Error(`unknown threat tier ${threatTier}; use full or medium`);
+  const hagezi = (key, extra = {}) => ({...THREAT_TIERS[key], file: `${THREAT_TIERS[key].id}.txt`, license: HAGEZI_LICENSE, hagezi: true, ...extra});
   return {
-    threats: [{id: "hagezi-threat-intel", file: "hagezi-threat-intel.txt", name: "HaGeZi Threat Intelligence (Medium)",
-      url: HAGEZI + "tif.medium-onlydomains.txt", minimum: 100000, license: HAGEZI_LICENSE}],
+    threats: [
+      {...URLHAUS, file: `${URLHAUS.id}.txt`, optional: true},
+      {...PHISHING_ARMY, file: `${PHISHING_ARMY.id}.txt`, optional: true},
+      threatTier === "full" ? hagezi("full", {fallback: hagezi("medium")}) : hagezi("medium"),
+    ],
     trackers: [{id: `hagezi-${tier}`, file: `hagezi-${tier}.txt`, name: t.name, url: HAGEZI + `${tier}-onlydomains.txt`,
       minimum: t.minimum, license: HAGEZI_LICENSE}],
     cname: ["ads", "trackers"].map((category) => ({id: `adguard-cname-${category}`, file: `adguard-cname-${category}.exact`,
@@ -44,7 +65,7 @@ export function feedSpecs(tier) {
   };
 }
 
-const MAX_FEED_BYTES = 32 * 1024 * 1024;
+const MAX_FEED_BYTES = 64 * 1024 * 1024;   // feeds.MAX_FEED_BYTES
 const DNS_LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 const DNS_NAME = new RegExp(`^(?:${DNS_LABEL}\\.)+${DNS_LABEL}$`);
 
@@ -55,8 +76,28 @@ export function dnsName(value) {
 }
 
 /** Read and re-verify one proxy snapshot ("# {json}\n" + sorted names). Throws with a reason. */
-export function readSnapshot(file, {minimum = 0} = {}) {
-  const data = fs.readFileSync(file);
+/** IPv4 dotted quad or a bracket-free IPv6 literal, as feeds.ip_literal() stores them. */
+export function ipLiteral(value) {
+  if (/^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/.test(value)) return value;
+  return /^[0-9a-f:]+$/.test(value) && value.includes(":") && value.length <= 39 ? value : null;
+}
+
+/**
+ * Read and re-verify one proxy snapshot. With `ips`, IP literals are accepted and returned separately: Chrome's
+ * requestDomains takes host names, so the extension uses only the names.
+ */
+export function readSnapshot(file, {minimum = 0, ips = false} = {}) {
+  // Check what the path is before reading it: no symlinks, devices or directories, nothing oversized.
+  const info = fs.lstatSync(file);
+  if (!info.isFile()) throw new Error(`${path.basename(file)} is not a regular file`);
+  if (info.size > MAX_FEED_BYTES) throw new Error("snapshot exceeds the size limit");
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let data;
+  try {
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile() || opened.ino !== info.ino) throw new Error(`${path.basename(file)} is not a regular file`);
+    data = fs.readFileSync(fd);
+  } finally { fs.closeSync(fd); }
   if (data.length > MAX_FEED_BYTES) throw new Error("snapshot exceeds the size limit");
   const newline = data.indexOf(0x0a);
   if (newline < 0 || data[0] !== 0x23 || data[1] !== 0x20) throw new Error("snapshot has no metadata header");
@@ -64,12 +105,17 @@ export function readSnapshot(file, {minimum = 0} = {}) {
   const body = data.subarray(newline + 1);
   const digest = crypto.createHash("sha256").update(body).digest("hex");
   if (!meta || digest !== meta.sha256) throw new Error("snapshot SHA-256 does not match its header");
-  const names = body.toString("ascii").split("\n").filter(Boolean);
-  if (names.length !== meta.entries) throw new Error("snapshot entry count does not match its header");
-  for (const name of names) if (!dnsName(name)) throw new Error(`snapshot contains an invalid hostname: ${JSON.stringify(name.slice(0, 80))}`);
-  if (names.length < minimum) throw new Error(`snapshot has ${names.length} domains, fewer than the proxy's minimum of ${minimum}`);
+  const entries = body.toString("ascii").split("\n").filter(Boolean);
+  if (entries.length !== meta.entries) throw new Error("snapshot entry count does not match its header");
+  const names = [], addresses = [];
+  for (const entry of entries) {
+    if (dnsName(entry)) names.push(entry);
+    else if (ips && ipLiteral(entry)) addresses.push(entry);
+    else throw new Error(`snapshot contains an invalid hostname: ${JSON.stringify(entry.slice(0, 80))}`);
+  }
+  if (entries.length < minimum) throw new Error(`snapshot has ${entries.length} entries, fewer than the proxy's minimum of ${minimum}`);
   const stamp = (v) => (typeof v === "number" && v > 0 ? v : null);
-  return {names, sha256: digest, published_at: stamp(meta.published_at), updated_at: stamp(meta.updated_at)};
+  return {names, addresses, sha256: digest, published_at: stamp(meta.published_at), updated_at: stamp(meta.updated_at)};
 }
 
 export function defaultFeedsDir() {
@@ -79,18 +125,33 @@ export function defaultFeedsDir() {
   return path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local/state"), "egress-guard");
 }
 
-/** Load every list for `tier` from `feedsDir/blocklists`. Missing files are reported, never guessed. */
-export function loadLists(feedsDir, {tier = "pro.plus", allowSmall = false, log = () => {}} = {}) {
+/**
+ * Load every list for `tier` from `feedsDir/blocklists`. Missing files are reported, never guessed. A missing
+ * malware and phishing feed is fatal unless `allowMissing`: a build without it would silently protect nothing.
+ */
+export function loadLists(feedsDir, {tier = "pro.plus", threatTier = "full", allowSmall = false, allowMissing = false, log = () => {}} = {}) {
   const dir = path.join(feedsDir, "blocklists");
+  const exists = (file) => { try { fs.lstatSync(file); return true; } catch { return false; } };
   const out = {};
-  for (const [kind, specs] of Object.entries(feedSpecs(tier))) {
+  for (const [kind, specs] of Object.entries(feedSpecs(tier, threatTier))) {
     const names = [];
     const sources = [];
-    for (const spec of specs) {
+    for (let spec of specs) {
+      if (!exists(path.join(dir, spec.file)) && spec.fallback && exists(path.join(dir, spec.fallback.file))) {
+        log(`${spec.file} not cached; using ${spec.fallback.name}`);
+        spec = spec.fallback;
+      }
       const file = path.join(dir, spec.file);
-      if (!fs.existsSync(file)) { log(`missing ${spec.file}: ${kind} list will be empty`); continue; }
-      const snap = readSnapshot(file, {minimum: allowSmall ? 0 : spec.minimum});
+      if (!exists(file)) {
+        // HaGeZi Threat Intelligence is the backbone of the malware and phishing list; without it the build would
+        // protect almost nothing, so its absence is fatal. The smaller threat feeds and the other lists only warn.
+        if (kind === "threats" && spec.hagezi && !allowMissing) throw new Error(`the malware and phishing feed ${spec.file} is missing from ${dir}; refresh the proxy's feeds, or pass --allow-missing to build without it`);
+        log(`missing ${spec.file}: ${kind} list will not include ${spec.name}`);
+        continue;
+      }
+      const snap = readSnapshot(file, {minimum: allowSmall ? 0 : spec.minimum, ips: Boolean(spec.ips)});
       for (const name of snap.names) names.push(name);
+      if (snap.addresses.length) log(`${spec.file}: ${snap.addresses.length} IP addresses not used (Chrome rules match host names)`);
       sources.push({id: spec.id, name: spec.name, url: spec.url, license: spec.license, entries: snap.names.length,
         sha256: snap.sha256, published_at: snap.published_at, updated_at: snap.updated_at});
     }
@@ -103,7 +164,7 @@ function chromeExtensionId(manifest) {
   return dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 }
 
-const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/dnr.js",
+const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/dnr.js", "core/cosmetic.js",
   "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const CHROME_ONLY = ["warning.html", "warning.css", "warning.js"];
 const CHROME_WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/dnr.js"];
@@ -141,8 +202,24 @@ function notice(lists) {
   return lines.join("\n");
 }
 
+export const MAX_RULESET_BYTES = 32 * 1024 * 1024;  // per ruleset file; see build()
+const MAX_ENABLED_RULESETS = 50;                       // Chrome's MAX_NUMBER_OF_ENABLED_STATIC_RULESETS
+
+/** Split rules into consecutive groups whose JSON stays under `limit` bytes (always at least one group). */
+export function splitRules(rules, limit = MAX_RULESET_BYTES) {
+  const parts = [[]];
+  let size = 2;
+  for (const rule of rules) {
+    const n = JSON.stringify(rule).length + 1;
+    if (parts[parts.length - 1].length && size + n > limit) { parts.push([]); size = 2; }
+    parts[parts.length - 1].push(rule);
+    size += n;
+  }
+  return parts;
+}
+
 /** Build both browsers. Returns a summary. `lists` null means "no built-in lists". */
-export function build({out = path.join(ROOT, "dist-browser"), lists = null, chunk = dnr.DEFAULT_CHUNK} = {}) {
+export function build({out = path.join(ROOT, "dist-browser"), lists = null, chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
   const chromeManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.chrome.json"), "utf8"));
   const firefoxManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8"));
   const id = chromeExtensionId(chromeManifest);
@@ -156,22 +233,46 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, chun
     copy([...SHARED, ...CHROME_ONLY], chrome);
     fs.mkdirSync(path.join(chrome, "rules"));
     const meta = {};
+    const resources = [];
     for (const kind of ["threats", "trackers", "cname"]) {
       const data = lists && lists[kind] ? lists[kind] : {names: [], sources: []};
       const compiled = dnr.compileList(kind, data.names, {chunk, warningUrl});
-      fs.writeFileSync(path.join(chrome, "rules", `${kind}.json`), JSON.stringify(compiled.rules));
+      // Chrome documents no per-file size limit, and Chrome 157 indexed a 68 MB, 1.5 million-name threat file in our
+      // headless test. Files are still capped at MAX_RULESET_BYTES so a growing list becomes more files (each tested
+      // to load) rather than one ever larger file.
+      const parts = splitRules(compiled.rules, maxRulesetBytes);
+      let bytes = 0;
+      parts.forEach((part, i) => {
+        const rid = i === 0 ? kind : `${kind}-${i + 1}`;
+        const body = JSON.stringify(part);
+        bytes += body.length;
+        fs.writeFileSync(path.join(chrome, "rules", `${rid}.json`), body);
+        resources.push({id: rid, enabled: true, path: `rules/${rid}.json`});
+      });
       const src = data.sources;
       const stamps = (key) => src.map((s) => s[key]).filter((t) => typeof t === "number");
       meta[kind] = {label: dnr.LIST_KINDS[kind].label, name: joinNames(src.map((s) => s.name)),
+        files: parts.map((_, i) => `rules/${i === 0 ? kind : `${kind}-${i + 1}`}.json`),
         domains: compiled.domains, rules: compiled.rules.length, sources: src.map((s) => ({name: s.name, url: s.url, license: s.license.name})),
         published_at: stamps("published_at").length ? Math.min(...stamps("published_at")) : null,
         updated_at: stamps("updated_at").length ? Math.min(...stamps("updated_at")) : null};
-      summary.lists[kind] = {domains: compiled.domains, rules: compiled.rules.length,
-        bytes: fs.statSync(path.join(chrome, "rules", `${kind}.json`)).size};
+      summary.lists[kind] = {domains: compiled.domains, rules: compiled.rules.length, bytes, files: parts.length};
     }
+    if (resources.length + 1 > MAX_ENABLED_RULESETS) throw new Error(`${resources.length + 1} rulesets exceed Chrome's limit of ${MAX_ENABLED_RULESETS} enabled rulesets`);
+    chromeManifest.declarative_net_request.rule_resources = [...resources,
+      ...chromeManifest.declarative_net_request.rule_resources.filter((r) => !dnr.LIST_KINDS[r.id])];
     fs.writeFileSync(path.join(chrome, "rules", "params.json"), JSON.stringify(dnr.compileParams()));
+    // Build identity: a hash of every ruleset and of the list metadata. An unpacked extension reads its own folder
+    // live, so the running worker compares this with rules/build.json on disk and reloads itself after a rebuild.
+    const hash = crypto.createHash("sha256");
+    for (const r of resources) hash.update(fs.readFileSync(path.join(chrome, r.path)));
+    hash.update(JSON.stringify(meta));
+    for (const f of [...SHARED, ...CHROME_ONLY, "background-chrome.js", "manifest.chrome.json"]) hash.update(fs.readFileSync(path.join(SRC, f)));
+    const buildId = hash.digest("hex").slice(0, 32);
+    fs.writeFileSync(path.join(chrome, "rules", "build.json"), JSON.stringify({build: buildId, built_at: Math.floor(Date.now() / 1000)}));
+    summary.build = buildId;
     const worker = [...CHROME_WORKER.map((f) => `// ---- ${f}\n${fs.readFileSync(path.join(SRC, f), "utf8")}`),
-      `// ---- lists (generated)\nglobalThis.EGLists = Object.freeze(${JSON.stringify({extensionId: id, lists: meta})});\n`,
+      `// ---- lists (generated)\nglobalThis.EGLists = Object.freeze(${JSON.stringify({extensionId: id, build: buildId, lists: meta})});\n`,
       `// ---- background-chrome.js\n${fs.readFileSync(path.join(SRC, "background-chrome.js"), "utf8")}`].join("\n");
     fs.writeFileSync(path.join(chrome, "background.js"), worker);
     fs.writeFileSync(path.join(chrome, "manifest.json"), JSON.stringify(chromeManifest, null, 2) + "\n");
@@ -199,11 +300,13 @@ function parseArgs(argv) {
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
     if (a === "--feeds") args.feeds = path.resolve(next());
     else if (a === "--tier") args.tier = next();
+    else if (a === "--threat-tier") args.threatTier = next();
     else if (a === "--out") args.out = path.resolve(next());
     else if (a === "--chunk") args.chunk = Number(next());
     else if (a === "--no-lists") args.lists = false;
     else if (a === "--allow-small") args.allowSmall = true;
-    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--out DIR] [--no-lists]"); process.exit(0); }
+    else if (a === "--allow-missing") args.allowMissing = true;
+    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing]"); process.exit(0); }
     else throw new Error(`unknown argument ${a}`);
   }
   return args;
@@ -218,7 +321,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (!fs.existsSync(path.join(feeds, "blocklists"))) {
         throw new Error(`no feed cache at ${path.join(feeds, "blocklists")}. Run \`egress-guard refresh\` (or pass --feeds DIR), or build with --no-lists.`);
       }
-      lists = loadLists(feeds, {tier: args.tier, allowSmall: args.allowSmall, log: (m) => console.warn(`warning: ${m}`)});
+      lists = loadLists(feeds, {tier: args.tier, threatTier: args.threatTier || "full", allowSmall: args.allowSmall, allowMissing: args.allowMissing, log: (m) => console.warn(`warning: ${m}`)});
       const day = 48 * 3600;
       for (const [kind, data] of Object.entries(lists)) for (const s of data.sources) {
         const stamp = s.published_at || s.updated_at;

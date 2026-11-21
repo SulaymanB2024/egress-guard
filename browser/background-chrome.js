@@ -14,8 +14,13 @@
   const KEY = "egressGuard";
   const ALARM = "eg-expiry";
   const MAX_LOG = 100;
+  const MAX_PATH = 256;             // characters of a blocked request's path kept in the per-tab log
   const CONTINUE_MINUTES = 10;
   const CONTINUE_BASE = 100000;   // session rule ids for "continue once"
+  // The extension's own origin. Not runtime.getURL(): with use_dynamic_url (warning.html is web-accessible only by a
+  // per-session URL, so sites cannot detect the extension) getURL returns that dynamic origin, while our own pages
+  // (popup, warning page after the DNR redirect) still run at the fixed-id origin.
+  const OWN = `chrome-extension://${C.runtime.id}/`;
   const EXCEPTION_MINUTES_MAX = rulesApi.MAX_EXCEPTION_MINUTES;
 
   const store = new RuleStore({persist: {
@@ -24,7 +29,15 @@
   }});
   let sources = {};                 // dynamic rule id -> store id
   let allowIds = new Set();         // dynamic rule ids whose action is allow
-  const ready = store.load().then(async () => {
+  // Sites where the built-in ad-slot hiding is switched off (popup). Only validated site names are kept.
+  const GENERIC_KEY = "egressGuardGenericOff";
+  const MAX_GENERIC_OFF = 500;
+  let genericOff = new Set();
+  async function loadGenericOff() {
+    const stored = (await C.storage.local.get(GENERIC_KEY))[GENERIC_KEY];
+    genericOff = new Set((Array.isArray(stored) ? stored : []).map((s) => hosts.siteOf(s)).filter(Boolean).slice(0, MAX_GENERIC_OFF));
+  }
+  const ready = Promise.all([store.load(), loadGenericOff()]).then(async () => {
     for (const msg of store.rejected) console.warn("Egress Guard dropped a stored entry:", msg);
     await sync();
   });
@@ -53,26 +66,63 @@
   // ---- "continue once" session rules --------------------------------------------
   async function continues() { return (await C.storage.session.get("continues")).continues || []; }
   async function saveContinues(list) { await C.storage.session.set({continues: list}); }
+  const ruleIds = (c) => [c.id, c.id + 1];       // each continue is two session rules (dnr.continueRules)
 
-  async function addContinue(host, tabId) {
-    const list = (await continues()).filter((c) => !(c.host === host && c.tabId === tabId));
-    const used = new Set(list.map((c) => c.id));
-    let id = CONTINUE_BASE;
-    while (used.has(id)) id++;
-    const rule = dnr.continueRule(id, host, tabId);
-    await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [id], addRules: [rule]});
-    list.push({id, host, tabId, expiresAt: Date.now() + CONTINUE_MINUTES * 60000});
-    await saveContinues(list);
-    await schedule();
-    return list[list.length - 1];
+  // Read-modify-write of the continue list is serialised, so two clicks never pick the same rule id.
+  let continuing = Promise.resolve();
+  function serial(fn) {
+    const run = continuing.catch(() => {}).then(fn);
+    continuing = run;
+    return run;
   }
 
-  async function dropContinues(test) {
-    const list = await continues();
-    const gone = list.filter(test);
-    if (!gone.length) return;
-    await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.map((c) => c.id)});
-    await saveContinues(list.filter((c) => !gone.includes(c)));
+  function addContinue(host, tabId) {
+    return serial(async () => {
+      const list = await continues();
+      const replaced = list.filter((c) => c.host === host && c.tabId === tabId);
+      const kept = list.filter((c) => !replaced.includes(c));
+      const used = new Set(kept.flatMap(ruleIds));
+      let id = CONTINUE_BASE;
+      while (used.has(id) || used.has(id + 1)) id += 2;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [...replaced.flatMap(ruleIds), id, id + 1], addRules: dnr.continueRules(id, host, tabId)});
+      const entry = {id, host, tabId, expiresAt: Date.now() + CONTINUE_MINUTES * 60000};
+      await saveContinues([...kept, entry]);
+      await schedule();
+      return entry;
+    });
+  }
+
+  function dropContinues(test) {
+    return serial(async () => {
+      const list = await continues();
+      const gone = list.filter(test);
+      if (!gone.length) return;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.flatMap(ruleIds)});
+      await saveContinues(list.filter((c) => !gone.includes(c)));
+    });
+  }
+
+  // ---- is a host on the bundled malware and phishing list? ---------------------------------
+  // Unpacked builds ask Chrome itself (testMatchOutcome). Packed builds lack that API, so the worker reads its own
+  // packaged threat ruleset once (the CSP allows connect-src 'self' and nothing else).
+  let threatNames = null;
+  async function isThreat(host) {
+    const D = C.declarativeNetRequest;
+    if (D.testMatchOutcome) {
+      try {
+        const outcome = await D.testMatchOutcome({url: `https://${host}/`, type: "main_frame"});
+        return outcome.matchedRules.some((m) => listKind(m.rulesetId) === "threats");
+      } catch { /* fall through to the packaged list */ }
+    }
+    if (!threatNames) {
+      const files = ((LISTS.lists || {}).threats || {}).files || ["rules/threats.json"];
+      threatNames = Promise.all(files.filter((f) => /^rules\/threats(-[0-9]+)?\.json$/.test(f)).map((file) => fetch(OWN + file).then((r) => r.json())))
+        .then((sets) => new Set(sets.flat().filter((r) => r.action.type === "block").flatMap((r) => r.condition.requestDomains || [])));
+      threatNames.catch(() => { threatNames = null; });
+    }
+    const names = await threatNames;
+    for (let name = host; name.includes("."); name = name.slice(name.indexOf(".") + 1)) if (names.has(name)) return true;
+    return false;
   }
 
   // ---- per-tab blocked log (unpacked builds report matches through onRuleMatchedDebug) ----
@@ -93,11 +143,14 @@
     }, 200);
   }
 
+  // A large list is split across rulesets "threats", "threats-2", …; they are one list to the user.
+  function listKind(rulesetId) { return typeof rulesetId === "string" ? rulesetId.replace(/-[0-9]+$/, "") : rulesetId; }
+
   function listOf(rule) {
     // Allow rules (your allow rules and timed exceptions) also report matches; they blocked nothing.
     if (rule.rulesetId === "_dynamic") return allowIds.has(rule.ruleId) ? null : {list: "user", ruleId: sources[rule.ruleId] || null};
     if (rule.rulesetId === "_session") return null;
-    return {list: rule.rulesetId};
+    return {list: listKind(rule.rulesetId)};
   }
 
   async function onMatched(info) {
@@ -111,7 +164,7 @@
     if (!host) return;
     const type = request.type === "main_frame" ? "main_frame" : (dnr.CHROME_TO_CORE[request.type] || "other");
     const log = await tabLog(request.tabId);
-    const path = parsed.pathname || "/";
+    const path = (parsed.pathname || "/").slice(0, MAX_PATH);
     const prior = log.items.find((x) => x.host === host && x.path === path && x.type === type && x.list === source.list);
     if (prior) prior.count++;
     else if (log.items.length < MAX_LOG) log.items.push({host, path, type, list: source.list, ruleId: source.ruleId || null, count: 1});
@@ -121,6 +174,33 @@
   async function resetTab(tabId) {
     logs.set(tabId, Promise.resolve({items: []}));
     await C.storage.session.remove(`log:${tabId}`);
+    await C.storage.session.set({[`nav:${tabId}`]: Date.now()});
+  }
+
+  /**
+   * What the popup can honestly show about blocked requests on a tab:
+   *   "debug"  (unpacked builds) every blocked endpoint, from onRuleMatchedDebug;
+   *   "counts" (packed builds) per-list counts from getMatchedRules, which reports rules, never addresses;
+   *   "badge"  when neither is available (or Chrome's getMatchedRules quota is spent): the toolbar badge only.
+   */
+  async function blockedReport(tabId) {
+    const D = C.declarativeNetRequest;
+    if (!Number.isInteger(tabId)) return {feedback: D.onRuleMatchedDebug ? "debug" : "badge", blocked: []};
+    if (D.onRuleMatchedDebug) return {feedback: "debug", blocked: (await tabLog(tabId)).items.map((x) => ({...x}))};
+    if (!D.getMatchedRules) return {feedback: "badge", blocked: []};
+    try {
+      const since = (await C.storage.session.get(`nav:${tabId}`))[`nav:${tabId}`];
+      const {rulesMatchedInfo = []} = await D.getMatchedRules({tabId, ...(Number.isFinite(since) ? {minTimeStamp: since} : {})});
+      const counts = {};
+      for (const info of rulesMatchedInfo) {
+        const source = listOf(info.rule);
+        if (!source || source.list === "params") continue;
+        counts[source.list] = (counts[source.list] || 0) + 1;
+      }
+      return {feedback: "counts", blocked: [], counts};
+    } catch {
+      return {feedback: "badge", blocked: []};
+    }
   }
 
   // ---- events (registered synchronously so they wake the worker) ----------------
@@ -130,7 +210,7 @@
 
   C.tabs.onUpdated.addListener((tabId, info) => {
     if (info.status === "loading") resetTab(tabId).catch(() => {});
-    if (typeof info.url === "string" && !info.url.startsWith(C.runtime.getURL(""))) {
+    if (typeof info.url === "string" && !info.url.startsWith(OWN)) {
       // A "continue once" exception ends when the tab leaves the host it was granted for.
       const host = hosts.hostOfUrl(info.url);
       dropContinues((c) => c.tabId === tabId && !(host && hosts.withinScope(host, c.host))).catch(() => {});
@@ -138,10 +218,32 @@
   });
   C.tabs.onRemoved.addListener((tabId) => {
     logs.delete(tabId);
-    C.storage.session.remove(`log:${tabId}`).catch(() => {});
+    C.storage.session.remove([`log:${tabId}`, `nav:${tabId}`]).catch(() => {});
     dropContinues((c) => c.tabId === tabId).catch(() => {});
   });
+  // ---- noticing a rebuilt extension folder ---------------------------------------------------
+  // An unpacked extension's files are read from its folder live. When `node scripts/build-browser.mjs` rewrites that
+  // folder, rules/build.json changes; the worker notices on its hourly check and the popup asks the user to press
+  // the reload arrow. It does NOT call runtime.reload(): in headless Chrome 157 an unpacked extension that reloaded
+  // itself came back disabled (developer mode on or off), which would silently switch all protection off.
+  // No network: the only read is the extension's own file (connect-src 'self'). Packed builds skip this.
+  const REFRESH_ALARM = "eg-rebuilt";
+  const REFRESH_MINUTES = 60;
+  async function reloadIfRebuilt() {
+    if (!LISTS.build || (C.runtime.getManifest && C.runtime.getManifest().update_url)) return "packed";
+    let onDisk;
+    try { onDisk = await fetch(OWN + "rules/build.json", {cache: "no-store"}).then((r) => r.json()); } catch { return "unreadable"; }
+    if (!onDisk || typeof onDisk.build !== "string" || !/^[0-9a-f]{32}$/.test(onDisk.build)) return "unreadable";
+    const stale = onDisk.build !== LISTS.build;
+    await C.storage.session.set({rebuilt: stale ? {at: Number(onDisk.built_at) || null} : null});
+    return stale ? "rebuilt" : "current";
+  }
+  C.alarms.get(REFRESH_ALARM).then((existing) => {
+    if (!existing) C.alarms.create(REFRESH_ALARM, {delayInMinutes: 1, periodInMinutes: REFRESH_MINUTES});
+  }).catch(() => {});
+
   C.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === REFRESH_ALARM) { await reloadIfRebuilt(); return; }
     if (alarm.name !== ALARM) return;
     await ready;
     const now = Date.now();
@@ -150,7 +252,7 @@
   });
 
   // ---- messaging -------------------------------------------------------------------
-  const extensionUrl = (sender, page) => typeof sender.url === "string" && sender.url.startsWith(C.runtime.getURL(page));
+  const extensionUrl = (sender, page) => typeof sender.url === "string" && sender.url.startsWith(OWN + page);
   // The popup normally has no tab; opened as popup.html?tab=<id> (development captures) it does.
   const fromPopup = (sender) => extensionUrl(sender, "popup.html");
   const fromWarning = (sender) => sender.tab && Number.isInteger(sender.tab.id) && extensionUrl(sender, "warning.html");
@@ -177,7 +279,7 @@
     switch (message.type) {
       case "page-rules":
         if (!pageHost) return {rules: []};
-        return {site: hosts.siteOf(pageHost), rules: store.activeFor(pageHost).cosmeticRules.map(plain)};
+        return {site: hosts.siteOf(pageHost), rules: store.activeFor(pageHost).cosmeticRules.map(plain), generic: !genericOff.has(hosts.siteOf(pageHost))};
       case "add-cosmetic": {
         if (!pageHost) return {error: "Not a page."};
         const result = await attempt(() => store.addRule({kind: "cosmetic", site: hosts.siteOf(pageHost), selector: message.selector, note: "Added with Block this element"}));
@@ -197,8 +299,12 @@
       }
       case "continue-once": {
         if (!fromWarning(sender)) return {error: "Not allowed from a page."};
+        if (sender.frameId !== 0) return {error: "The warning page cannot continue from inside a frame."};
         const target = dnr.parseWarning(sender.url);
         if (!target) return {error: "Nothing to continue to."};
+        // The page names the address it showed; if the fragment changed since, the user agreed to something else.
+        if (message.url !== target.url) return {error: "The address changed after this page loaded. Reload it and read it again."};
+        if (!(await isThreat(target.host))) return {error: "That site is not on the malware and phishing list."};
         await addContinue(target.host, sender.tab.id);
         return {ok: true, url: target.url};
       }
@@ -211,12 +317,13 @@
         if (!host) return {site: null, lists};
         const now = Date.now();
         const active = store.activeFor(host);
-        const log = Number.isInteger(message.tabId) ? await tabLog(message.tabId) : {items: []};
+        const report = await blockedReport(message.tabId);
         return {
-          host, site: hosts.siteOf(host), lists, feedback: Boolean(C.declarativeNetRequest.onRuleMatchedDebug),
+          host, site: hosts.siteOf(host), lists, ...report, generic: !genericOff.has(hosts.siteOf(host)),
+          rebuilt: Boolean((await C.storage.session.get("rebuilt")).rebuilt),
           requestRules: active.requestRules.map(plain), cosmeticRules: active.cosmeticRules.map(plain),
           exceptions: active.exceptions.map((e) => ({...e, msLeft: Math.max(0, e.expiresAt - now)})),
-          blocked: log.items.map((x) => ({...x})), types: rulesApi.RESOURCE_TYPES,
+          types: rulesApi.RESOURCE_TYPES,
         };
       }
       case "add-request-rule": {
@@ -227,10 +334,26 @@
         return result;
       }
       case "remove-rule": { const ok = await store.removeRule(message.id); if (ok) await afterChange(); return {ok}; }
+      case "set-generic": {
+        const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
+        if (!site) return {error: "Open a web page first."};
+        if (typeof message.on !== "boolean") return {error: "Bad message."};
+        if (message.on) genericOff.delete(site);
+        else if (genericOff.size < MAX_GENERIC_OFF) genericOff.add(site);
+        else return {error: "Too many sites have ad-slot hiding switched off."};
+        await C.storage.local.set({[GENERIC_KEY]: [...genericOff].sort()});
+        const tabs = await C.tabs.query({url: ["http://*/*", "https://*/*"]});
+        for (const tab of tabs) {
+          if (hosts.siteOf(hosts.hostOfUrl(tab.url) || "") === site) C.tabs.sendMessage(tab.id, {type: "generic", on: message.on}).catch(() => {});
+        }
+        return {ok: true, site, on: message.on};
+      }
       case "add-exception": {
         const host = hosts.hostOfUrl(message.tabUrl);
         if (!host) return {error: "Open a web page first."};
         if (message.resourceType === "main_frame") return {error: "Navigations are allowed with Continue on the warning page."};
+        const target = hosts.normalizeHost(message.host);
+        if (target && await isThreat(target)) return {error: "This host is on the malware and phishing list; it cannot be allowed from here."};
         const minutes = Math.min(message.minutes, EXCEPTION_MINUTES_MAX);
         const result = await attempt(() => store.addException({site: hosts.siteOf(host), host: message.host, path: message.path, type: message.resourceType, minutes}));
         if (!result.error) await afterChange();
@@ -255,5 +378,5 @@
     handle(message, sender).then(sendResponse, (error) => sendResponse({error: String(error && error.message || error)}));
     return true;
   });
-  root.__EGBackground = Object.freeze({store, ready, handle, sync, onMatched, tabLog, continues, get sources() { return sources; }});
+  root.__EGBackground = Object.freeze({store, ready, handle, sync, onMatched, tabLog, continues, reloadIfRebuilt, get sources() { return sources; }});
 })(globalThis);

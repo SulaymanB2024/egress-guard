@@ -32,7 +32,9 @@ or without the proxy running.
    ```
 
    It prints the Chrome and Firefox folders, the extension id and the size of
-   each list. Options: `--feeds DIR` (a feed cache other than the proxy's
+   each list. A missing malware and phishing feed stops the build (pass
+   `--allow-missing` to build without it on purpose); feed files must be
+   regular files, not links. Options: `--feeds DIR` (a feed cache other than the proxy's
    data directory), `--tier pro|pro.plus|ultimate` (default `pro.plus`, the
    proxy's default), `--no-lists` (your own rules and parameter stripping
    only), `--out DIR` (default `dist-browser/`, which git ignores).
@@ -62,57 +64,138 @@ to the Chrome Web Store as is.
 | --- | --- | --- |
 | Ads and trackers | Every request type except top-level navigation, to the listed domains and their subdomains | HaGeZi Multi PRO++ (or the tier you build) |
 | Disguised (CNAME-cloaked) trackers | Same, for first-party subdomains that alias a tracker | AdGuard CNAME-cloaked ads and trackers |
-| Malware and phishing | Every request type, and navigations go to a local warning page | HaGeZi Threat Intelligence (Medium) |
+| Malware and phishing | Every request type, and navigations go to a local warning page | URLhaus (malware-filter), Phishing Army, HaGeZi Threat Intelligence (Full; Medium with `--threat-tier medium` or when only Medium is cached) |
+| Empty ad slots | One stylesheet hides common ad containers (AdSense and Google Publisher Tag slots, ad-server frames, AMP ads, Taboola and Outbrain widgets, labelled ad containers). Switch it off per site in the popup | First-party list in `browser/core/cosmetic.js` |
 | Tracking parameters | Removed from page and frame navigations before the request is sent | Built-in list in `browser/core/dnr.js` |
 
-These are the proxy's own feeds and tiers. With 2026-11-20 data the build
-holds about 257,000 tracker, 376,000 threat and 178,000 CNAME domains
-(about 25 MB of rules); Chrome indexed and enforced them in the headless
-check below.
+These are the proxy's own feeds and tiers. URLhaus also lists IP addresses;
+those are skipped (DNR matches host names). The proxy's DoH list is not used:
+DNR cannot see Chrome's own secure-DNS lookups, so blocking pages' requests to
+resolver hosts would protect nothing. With 2026-11-20 data the build holds
+about 257,000 tracker, 384,000 threat (Medium tier) and 178,000 CNAME
+domains. The Full threat tier is about 1.47 million names: a synthetic
+1.5 million-name threat list (68 MB) indexed and matched in headless Chrome
+157, both as one file and split. The build caps each ruleset file at 32 MB
+and splits larger lists (`threats`, `threats-2`, …), which the popup shows as
+one list.
+
+**Ad-slot stylesheet.** It is CSS only, added at `document_start`, with no
+per-element script. Selectors must be class, id-prefix or tag-qualified
+attribute selectors (Chrome matches those from a bucket), never `:has()` or a
+bare attribute, at most 80; a test enforces that. EasyList's generic hiding
+rules were evaluated: the licence (GPL-3.0 or CC BY-SA 3.0) fits next to the
+GPL HaGeZi data, but its generic section is thousands of selectors including
+costly universal ones, it is not in the proxy's verified feed cache (adding
+a feed belongs in `feeds.py`), and every selector would need the review this
+small set gets. The first-party set covers the common slot conventions; see
+the real-site results below for what it leaves.
 
 **Warning page.** A navigation to a threat-listed site never reaches it. The
 page shows the host, the full address, the list and its date. **Go back** is
 the default. **I understand the risk…** reveals **Continue to this site
-once**, which adds a session rule for that tab and that host only. Ads and
-trackers stay blocked on the continued page. The exception ends when the tab
-leaves the site, after 10 minutes, or when Chrome restarts.
+once**, which adds two session `allow` rules for that tab and that host only:
+the navigation, and the host's own requests. Ads and trackers stay blocked on
+the continued page, and so does every other threat-listed host the page pulls
+in (an `allowAllRequests` rule would have lifted those for the whole frame
+tree; the headless check proves they stay blocked). The exception ends when
+the tab leaves the site, after 10 minutes, or when Chrome restarts.
+
+The worker only continues to the address the page displayed: the page sends
+it, and it must equal the address in the page's own URL at click time. If
+anything changes the fragment after load the page reloads. Inside a frame the
+page refuses to offer Continue (and the extension CSP sets `frame-ancestors
+'none'`). The host must really be on the bundled threat list (Chrome's
+`testMatchOutcome` in unpacked builds, the packaged ruleset otherwise).
+Threat-listed requests never get a one-click **Allow** in the popup.
 
 **Parameters removed** (exact names): `utm_source`, `utm_medium`,
 `utm_campaign`, `utm_term`, `utm_content`, `utm_id` and other `utm_*` names
 listed in the source, `fbclid`, `gclid`, `gclsrc`, `dclid`, `gbraid`,
 `wbraid`, `msclkid`, `yclid`, `twclid`, `ttclid`, `igshid`, `li_fat_id`,
-`mc_eid`, `_hsenc`, `_hsmi`, `mkt_tok`, `oly_anon_id`, `oly_enc_id`,
-`vero_id`, `rb_clickid`, `s_cid`, `wickedid`, `epik`, `_openstat`,
-`srsltid`. Functional parameters such as `id`, `q`, `ref` or `v` are kept.
+`mc_eid`, `oly_anon_id`, `oly_enc_id`, `vero_id`, `rb_clickid`, `s_cid`,
+`wickedid`, `epik`, `_openstat`, `srsltid`. Functional parameters such as
+`id`, `q`, `ref` or `v` are kept, and so are Marketo's `mkt_tok` and
+HubSpot's `_hsenc` and `_hsmi`: unsubscribe and email-preference links stop
+working without them.
 
 **Popup.** It leads with what was blocked on this page: the count, a
 breakdown by list, then each endpoint with its type and list and **Allow 15
-min**. Below that: elements hidden on the page, this site's rules with
-**Remove**, timed exceptions, and the list versions the build contains. It
-follows the system light or dark setting. The toolbar badge shows Chrome's
-own per-tab count of blocked requests.
+min** (never for malware and phishing hosts, navigations, or WebSocket-like
+types). Below that: elements hidden on the page, the built-in ad-slot count
+with **Show ad slots on this site** / **Hide ad slots on this site**, this
+site's rules with **Remove**, timed exceptions, and the list versions the
+build contains. It follows the system light or dark setting. The toolbar
+badge shows Chrome's own per-tab count of blocked requests.
+
+What the popup can list depends on how the extension is installed, and it
+says which:
+
+| Install | Blocked list in the popup |
+| --- | --- |
+| Unpacked (Load unpacked, today's only route) | Every blocked endpoint with type and list (`onRuleMatchedDebug`) |
+| Packed | Counts by list since the page loaded (`getMatchedRules`, which reports rules, never addresses); the note says addresses are not available |
+| Neither API, or Chrome's `getMatchedRules` quota spent | The toolbar badge only, and the popup says so |
+
+**Fresh lists: one click, not zero.** Chrome reads an unpacked extension's
+files from its folder live. The build writes `rules/build.json` (a hash of
+the rulesets, list metadata and sources); the worker compares it with its own
+build id every hour and, when the folder was rebuilt, the popup says "Newer
+lists have been built" and asks for the reload arrow on
+`chrome://extensions`. It reads only its own file: no network request, no
+server, no local port. Running `node scripts/build-browser.mjs` after each
+proxy feed refresh keeps the folder current; the user still presses reload.
+
+Reloading automatically was built and tested, then withdrawn: in headless
+Chrome 157 an unpacked extension that calls `runtime.reload()` came back
+**disabled** (with developer mode on or off), which would silently turn all
+protection off. Whether a normal profile behaves differently was not
+verified, so the extension never reloads itself. Truly zero-touch updates
+need a packed, signed build with an `update_url` (Chrome's own updater);
+that needs a signing key and a hosted update manifest, which this project
+does not have.
+
+A loopback endpoint on the dashboard serving domain lists as dynamic rules
+was considered and not built. Dynamic and session rules share a 30,000-rule
+budget meant for user rules; Chrome documents no size limit for a dynamic
+rule's `requestDomains`, so a 1.5 million-name list there is untested
+territory; removals cannot be expressed against static rulesets without
+allow rules that could unblock a name still listed elsewhere; and a fixed
+loopback port is visible to every web page (port probing reveals that Egress
+Guard runs; CORS hides the body but timing does not), while DNS rebinding and
+CSRF checks would have to stay perfect on a new unauthenticated route. The
+rebuild-and-reload path gets the same freshness with none of that.
 
 ### What it does not do (Chrome)
 
-- **No YouTube or other in-stream video ads.** Those come from the same
-  hosts as the video and need script-level filtering. Not attempted, not
-  tested.
-- **No cosmetic filter lists.** Only elements you pick are hidden. Empty ad
-  slots may remain where a blocked ad was.
+- **No YouTube or other in-stream video ads.** In-stream ads are chosen in
+  the player's own data (`ytInitialPlayerResponse`, `/youtubei/v1/player`)
+  and served from the same hosts as the video. DNR can block separate ad
+  endpoints (for example `doubleclick.net`, already on the lists) but cannot
+  edit JSON responses. MV3 blockers that do this (uBlock Origin Lite) ship
+  bundled scriptlets injected into the page's main world with the
+  `scripting` permission: bundled code, not remote code, so it is possible,
+  but it needs a scriptlet per site, breaks when YouTube changes its player,
+  and could only be verified on a page that actually serves an ad. Headless
+  Chrome without a signed-in profile or consent state does not reliably get
+  ads, so nothing was implemented and nothing is claimed.
+- **Cosmetic hiding is a small built-in set plus your own rules.** No
+  third-party cosmetic lists, no `:has()`, no text matching: an
+  "Advertisement" label in plain text next to a hidden slot can remain.
 - **No path-level list filtering.** The lists are domain lists. A tracker
   served from a site's own domain is only blocked if you add an endpoint rule.
-- Lists update when you rebuild and reload, not daily on their own. The
-  build warns when a list is more than 48 hours old.
+- Lists update when the folder is rebuilt (see above); nothing in the
+  extension downloads them. The build warns when a list is more than 48 hours
+  old.
 - Domain blocking covers subdomains, so a CNAME entry also blocks names below
   it. The proxy matches those CNAME entries exactly.
 - Your per-site rules are scoped by the requesting frame's site (DNR
   `initiatorDomains`). On the page's own requests this is the page's site;
   requests made inside a third-party iframe are scoped to that iframe's site.
-- The list of blocked endpoints in the popup relies on Chrome's
-  `onRuleMatchedDebug`, which exists only for unpacked extensions. A packed
-  build would show the count badge only.
-- The extension id and `warning.html` are web-accessible, so a site can tell
-  that this extension is installed.
+- Fingerprinting. `warning.html` is web-accessible with `use_dynamic_url`, so
+  a page cannot fetch it at the fixed id (the headless check confirms the
+  fetch is refused); Chrome still performs the DNR redirect to it. A site can
+  still infer that *some* blocker runs from requests that fail, as with any
+  blocker.
 
 ## Your own rules (both browsers)
 
@@ -140,7 +223,7 @@ priority ladder (`browser/core/dnr.js`):
 | 6 | Your allow rules |
 | 5 | Your block rules |
 | 4 | Ad, tracker and CNAME lists |
-| 3 | Continue once (session, one tab, one host) |
+| 3 | Continue once (session `allow`, one tab, one host and its own requests) |
 | 2 | Malware and phishing lists |
 | 1 | Tracking-parameter stripping |
 
@@ -192,9 +275,11 @@ Firefox quits.
 | `alarms` | Both | Remove exceptions and rules when they expire |
 
 No `tabs`, `scripting`, `cookies`, `history` or native messaging. There is
-no remote code: extension pages allow only their own scripts with
-`connect-src 'none'`, and the extension makes no network requests of its
-own. List data is compiled into the extension at build time.
+no remote code: extension pages allow only their own scripts. In Chrome,
+`connect-src 'self'` lets the worker read its own packaged threat ruleset
+(packed builds, to check a host before Continue); it makes no network
+requests. Firefox keeps `connect-src 'none'`. List data is compiled into the
+extension at build time.
 
 ## Licences of bundled list data
 
@@ -261,7 +346,59 @@ Real Firefox (headless, throwaway profile):
 `node tests/browser/firefox-headless.mjs` covers the Firefox build's rules,
 hiding, the picker and Undo.
 
+Service-worker lifecycle (Chrome, headless, loopback fixture, about two
+minutes): `node tests/browser/chrome-lifecycle.mjs`. A user rule, two timed
+exceptions and a continue-once survive the worker being stopped and started;
+Chrome keeps enforcing them while it is stopped; an exception and a continue
+that expire while the worker is stopped are removed because `chrome.alarms`
+wakes it (nothing else touches it); continue-once is stored with a 10-minute
+expiry; a rebuilt folder is noticed and the popup asks for a reload.
+
+### Real websites
+
+`node tests/browser/real-sites.mjs [--feeds DIR] [--sites a,b]` (opt-in; it
+contacts the public sites). Each site is loaded twice in headless Chrome 157
+with a throwaway profile and no proxy, without and with the extension. It
+only navigates and reads: no clicks, logins, forms or cookie banners. Run on
+2026-11-20 with HaGeZi PRO++, HaGeZi Threat Intelligence Medium and AdGuard
+CNAME (the Full threat tier, Phishing Army and URLhaus were not in the local
+cache). "Blocked" is the extension's own log; "ad slots" counts visible
+elements matching the built-in slot selectors plus visible text labels that
+read exactly "Advertisement" or "Sponsored".
+
+| Site | Kind | Blocked (trackers / CNAME / threats) | JS errors control → ext | Visible text control → ext | Ad slots control → ext | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| cnn.com | news | 607 / 0 / 0 | 9 → 10 | 10,106 → 10,106 | 9 → 0 | renders |
+| theguardian.com | news | 28 / 0 / 0 | 18 → 18 | 17,906 → 17,899 | 13 → 0 | renders |
+| foxnews.com | news | 42 / 2 / 0 | 2 → 14 | 22,525 → 22,537 | 0 → 0 | renders; extra errors are its own "Error loading script" for blocked ad and analytics scripts |
+| dailymail.co.uk | news | 0 / 0 / 0 | 0 → 0 | 216 → 216 | 0 → 0 | bot interstitial in both runs |
+| weather.com | news | 40 / 0 / 0 | 1 → 2 | 1,999 → 3,822 | 20 → 0 | renders |
+| allrecipes.com | recipe | 0 / 0 / 0 | 0 → 0 | 0 → 0 | 0 → 0 | blank in both runs (headless challenge) |
+| foodnetwork.com | recipe | 21 / 1 / 0 | 0 → 0 | 2,322 → 2,322 | 0 → 0 | renders |
+| theverge.com | tech | 13 / 0 / 0 | 1 → 1 | 22,387 → 22,387 | 0 → 0 | renders |
+| techcrunch.com | tech | 23 / 0 / 0 | 1 → 1 | 11,098 → 11,098 | 18 → 0 | renders |
+| tomsguide.com | tech | 1 / 0 / 0 | 3 → 3 | 20,577 → 20,577 | 0 → 0 | renders |
+| bing.com search | search | 0 / 0 / 0 | 0 → 0 | 2,913 → 0 | 0 → 0 | probe hit Bing's own redirect (`rdr=1`) mid-load; a separate run with the extension rendered 11 results |
+| html.duckduckgo.com | search | 0 / 0 / 0 | 0 → 0 | 205 → 205 | 0 → 0 | bot challenge in both runs (left untouched) |
+| github.com/login | sign-in | 3 / 0 / 0 | 0 → 0 | 282 → 282 | 0 → 0 | form renders |
+| accounts.google.com | sign-in | 0 / 0 / 0 | 0 → 0 | 1,038 → 1,038 | 0 → 0 | form renders |
+| login.live.com | sign-in | 0 / 0 / 0 | 0 → 0 | 231 → 231 | 0 → 0 | form renders |
+| paypal.com/signin | sign-in | 0 / 0 / 0 | 2 → 2 | 0 → 0 | 0 → 0 | captcha in both runs |
+| checkout.stripe.dev | checkout | 0 / 0 / 0 | 0 → 0 | 584 → 584 | 0 → 0 | renders |
+| allbirds.com/cart (Shopify) | checkout | 10 / 1 / 0 | 0 → 0 | 2,479 → 2,479 | 0 → 0 | renders |
+
+No breakage was found that needed an allow rule or a priority fix: on every
+site that rendered in the control run, the extension run rendered the same
+text (within 1%, more on weather.com, where blocked ads stopped a layout
+shift). The built-in ad-slot stylesheet removed every visible slot the probe
+found (60 across four sites). Its style-recalculation cost, measured as a
+forced full recalc with the sheet on and off (median of 7): cnn.com 30.0 vs
+30.8 ms (5,273 elements), tomsguide.com 33 vs 32 ms (4,415), theguardian.com
+12.6 vs 12.4 ms, foxnews.com 11.2 vs 11.2 ms: within noise. Three sites
+showed bot interstitials to headless Chrome in both runs, so they say nothing
+about the extension.
+
 Not verified in a real browser: the popup opened from the toolbar (captures
-open `popup.html?tab=<id>` in a tab), behaviour after the service worker is
-stopped and restarted, the 10-minute continue cap, Firefox dark mode, and any
-real website.
+open `popup.html?tab=<id>` in a tab), a packed build (the counts fallback is
+covered by the adapter tests only), automatic reload after a rebuild in a
+normal profile, Firefox dark mode, and YouTube.

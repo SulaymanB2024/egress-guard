@@ -19,12 +19,12 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["core/selectors.js", "core/picker.js", "content.js"],
+      "js": ["core/selectors.js", "core/picker.js", "core/cosmetic.js", "content.js"],
       "run_at": "document_start",
       "all_frames": false
     }
   ],
-  "web_accessible_resources": [{"resources": ["warning.html"], "matches": ["<all_urls>"]}],
+  "web_accessible_resources": [{"resources": ["warning.html"], "matches": ["<all_urls>"], "use_dynamic_url": true}],
   "action": {"default_title": "Egress Guard", "default_popup": "popup.html"},
-  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'"}
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self'; frame-ancestors 'none'"}
 }

@@ -53,7 +53,8 @@ const server = http.createServer((req, res) => {
   const send = (code, type, body) => { res.writeHead(code, {"content-type": type, "cache-control": "no-store"}); res.end(body); };
   if (host === "malware-fixture.test" && url.pathname === "/landing") {
     return send(200, "text/html; charset=utf-8", `<!doctype html><title>Landing</title><p id="landing">landing</p>
-<img id="asset" src="/landing-asset.png"><img id="pixel" src="http://pixel.tracker-fixture.test:${port}/landing-pixel.gif">`);
+<img id="asset" src="/landing-asset.png"><img id="pixel" src="http://pixel.tracker-fixture.test:${port}/landing-pixel.gif">
+<img id="other-threat" src="http://phish.example:${port}/other-threat.gif"><iframe src="http://phish.example:${port}/other-threat-frame"></iframe>`);
   }
   if (url.pathname === "/article") return send(200, "text/html; charset=utf-8", fs.readFileSync(path.join(fixtureDir, "index.html")));
   if (url.pathname === "/static/app.js") return send(200, "text/javascript", fs.readFileSync(path.join(fixtureDir, "static/app.js")));
@@ -66,7 +67,7 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 port = server.address().port;
 const FIXTURE_HOSTS = ["publisher.example", "metrics.publisher.example", "tracker-fixture.test", "pixel.tracker-fixture.test",
-  "malware-fixture.test", "clean-fixture.test"];
+  "malware-fixture.test", "clean-fixture.test", "phish.example"];
 
 // ---- headless Chrome over the DevTools pipe --------------------------------------------
 const profile = path.join(work, "profile");
@@ -290,6 +291,10 @@ try {
     await cdp("Emulation.clearDeviceMetricsOverride", {}, page);
   }
 
+  // The worker refuses a continue for an address other than the one the page shows.
+  const mismatch = await evaluate(page, `chrome.runtime.sendMessage({type: "continue-once", url: "http://phish.example:${port}/"})`);
+  check("continue once: a request naming another address than the page shows is refused", /changed/.test(mismatch && mismatch.error || ""), JSON.stringify(mismatch));
+
   // "Continue once" needs a deliberate two-step real click; then the site and its own assets load, trackers stay blocked.
   await click(page, "#reveal");
   await sleep(200);
@@ -298,9 +303,11 @@ try {
   const assets = await waitFor(() => hitPaths().includes("malware-fixture.test/landing") && hitPaths().includes("malware-fixture.test/landing-asset.png"));
   check("continue once: the page and its same-site asset load", continued && assets, hitPaths().join(" "));
   check("continue once: trackers on that page stay blocked", !hitPaths().includes("pixel.tracker-fixture.test/landing-pixel.gif"));
+  check("continue once: another threat-listed host on that page stays blocked (image and frame)", !hits.some((h) => h.host === "phish.example"), hitPaths().join(" "));
   const sessionCount = () => swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => r.length)");
   const sessionRules = await sessionCount();
-  check("continue once: one session rule while on the site", sessionRules === 1, String(sessionRules));
+  const types = await swEval("chrome.declarativeNetRequest.getSessionRules().then((r) => [...new Set(r.map((x) => x.action.type))].join())");
+  check("continue once: two plain allow session rules while on the site", sessionRules === 2 && types === "allow", `${sessionRules} ${types}`);
 
   // Leaving the site ends the exception; coming back shows the warning again.
   await navigate(page, PAGE);
@@ -309,6 +316,11 @@ try {
   await navigate(page, THREAT);
   const again = await until(page, `location.href.startsWith("chrome-extension://${id}/warning.html")`, "warning shown again");
   check("continue once: returning later is blocked again", again && !hits.some((h) => h.host === "malware-fixture.test"));
+
+  // Fingerprinting: a web page cannot read the warning page at the fixed id (use_dynamic_url).
+  await navigate(page, PAGE);
+  const probe = await evaluate(page, `fetch("chrome-extension://${id}/warning.html").then(() => "readable", () => "refused")`);
+  check("fingerprint: a site cannot fetch warning.html at the fixed extension id", probe === "refused", probe);
 
   const external = hits.filter((h) => !FIXTURE_HOSTS.includes(h.host) && h.host !== "127.0.0.1");
   check("no unexpected hosts reached the fixture server", external.length === 0, JSON.stringify(external));

@@ -9,6 +9,7 @@
   const LIST_LABELS = {threats: "Malware and phishing", trackers: "Ads and trackers", cname: "Disguised trackers", user: "Your rules"};
   const LIST_ORDER = ["threats", "trackers", "cname", "user"];
   let tab = null;
+  let genericOn = true;
 
   function el(tag, text, className) {
     const node = document.createElement(tag);
@@ -74,10 +75,11 @@
     return (meta && meta.label) || LIST_LABELS[id] || id;
   };
 
-  function renderHero(blocked, lists) {
+  function renderHero(blocked, lists, counts = null) {
     const totals = {};
     let sum = 0;
-    for (const b of blocked) { const id = b.list || "user"; totals[id] = (totals[id] || 0) + b.count; sum += b.count; }
+    if (counts) for (const [id, n] of Object.entries(counts)) { totals[id] = n; sum += n; }
+    else for (const b of blocked) { const id = b.list || "user"; totals[id] = (totals[id] || 0) + b.count; sum += b.count; }
     $("blocked-count").textContent = String(sum);
     $("blocked-unit").textContent = sum === 1 ? "request" : "requests";
     const ids = Object.keys(totals).sort((a, b) => LIST_ORDER.indexOf(a) - LIST_ORDER.indexOf(b));
@@ -109,6 +111,7 @@
     const state = await send({type: "popup-state"});
     const lists = (state && state.lists) || [];
     renderLists(lists);
+    $("rebuilt").hidden = !(state && state.rebuilt === true);
     if (!state || !state.site) {
       $("site").textContent = "Not a web page";
       for (const id of ["pick", "restore"]) $(id).disabled = true;
@@ -122,12 +125,20 @@
 
     const blocked = $("blocked");
     const items = [...state.blocked].sort((a, b) => LIST_ORDER.indexOf(a.list || "user") - LIST_ORDER.indexOf(b.list || "user") || b.count - a.count);
-    renderHero(items, lists);
-    if (!items.length) empty(blocked, state.feedback === false ? "This build cannot list blocked requests; the toolbar badge shows the count." : "Nothing blocked on this page.");
+    renderHero(items, lists, state.feedback === "counts" ? state.counts || {} : null);
+    $("hero-note").hidden = state.feedback === "debug" || state.feedback === undefined;
+    $("hero-note").textContent = state.feedback === "counts"
+      ? "Counts by list from Chrome. This installed build cannot see which addresses were blocked."
+      : "This build cannot count or list blocked requests here; the toolbar badge shows Chrome's count.";
+    if (state.feedback === "badge") { $("blocked-count").textContent = "–"; $("blocked-unit").textContent = "see the toolbar badge"; }
+    if (!items.length) empty(blocked, state.feedback === "counts" || state.feedback === "badge"
+      ? "Addresses are listed only in a development (unpacked) build." : "Nothing blocked on this page.");
     else blocked.replaceChildren(...items.map((b) => {
       const list = b.list || "user";
       const tags = [[`${b.type}${b.count > 1 ? ` ×${b.count}` : ""}`, ""], [listLabel(list, lists), list]];
-      const buttons = b.type === "main_frame" ? [] : [[`Allow ${EXCEPTION_MINUTES} min`,
+      // No one-click exception for malware and phishing hosts, navigations, or types an exception cannot name exactly.
+      const allowable = list !== "threats" && b.type !== "main_frame" && (state.types || []).includes(b.type);
+      const buttons = !allowable ? [] : [[`Allow ${EXCEPTION_MINUTES} min`,
         () => act({type: "add-exception", host: b.host, path: b.path, resourceType: b.type, minutes: EXCEPTION_MINUTES}),
         `Allow ${b.host}${b.path} (${b.type}) on this site for ${EXCEPTION_MINUTES} minutes`]];
       return row({host: b.host, path: b.path, tags}, buttons);
@@ -141,6 +152,19 @@
       if (page.protectedRules.length) notes.push(`${page.protectedRules.length} rule(s) skipped protected content`);
       if (page.overbroadRules.length) notes.push(`${page.overbroadRules.length} rule(s) matched too much and were skipped`);
       $("hidden").textContent = `${page.hidden} element${page.hidden === 1 ? "" : "s"} hidden, ${page.shown} shown by you.${notes.length ? ` ${notes.join("; ")}.` : ""}`;
+    }
+    // Built-in ad-slot hiding (Chrome): on by default, switchable per site, takes effect at once on open tabs.
+    const genericShown = Boolean(page && page.generic && page.generic.available && typeof state.generic === "boolean");
+    $("generic").hidden = !genericShown;
+    $("generic-note").hidden = !genericShown;
+    if (genericShown) {
+      const slots = page.generic.slots;
+      $("generic-note").textContent = state.generic
+        ? (page.generic.on ? `${slots} ad slot${slots === 1 ? "" : "s"} hidden by built-in rules.` : "Built-in ad-slot hiding is paused for this page load.")
+        : "Built-in ad-slot hiding is off for this site.";
+      $("generic").textContent = state.generic ? "Show ad slots on this site" : "Hide ad slots on this site";
+      $("generic").setAttribute("aria-pressed", String(!state.generic));
+      genericOn = state.generic;
     }
     $("pick").disabled = !page;
     $("restore").disabled = !page;
@@ -200,6 +224,7 @@
       await tabMessage({type: page && page.paused ? "resume" : "restore-page"});
       await render();
     });
+    $("generic").addEventListener("click", () => act({type: "set-generic", on: !genericOn}));
     $("add-rule").addEventListener("submit", async (event) => {
       event.preventDefault();
       const types = [...$("rule-types").querySelectorAll('input[name="types"]')].filter((b) => b.checked).map((b) => b.value);

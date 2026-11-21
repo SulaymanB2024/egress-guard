@@ -16,7 +16,7 @@ const fixture = JSON.parse(read("tests/browser/fixtures/publisher/rules.json"));
 const cosmetic = fixture.rules.find((r) => r.kind === "cosmetic");
 const settle = () => new Promise(setImmediate);
 
-async function page({rules = [cosmetic], markup = html} = {}) {
+async function page({rules = [cosmetic], markup = html, generic = undefined} = {}) {
   const doc = parseHTML(markup);
   const store = new RuleStore();
   for (const r of rules) await store.addRule(r);
@@ -25,7 +25,7 @@ async function page({rules = [cosmetic], markup = html} = {}) {
   const browser = {runtime: {
     sendMessage: async (msg) => {
       sent.push(msg);
-      if (msg.type === "page-rules") return {site: "publisher.example", rules: store.activeFor("publisher.example").cosmeticRules};
+      if (msg.type === "page-rules") return {site: "publisher.example", rules: store.activeFor("publisher.example").cosmeticRules, ...(generic === undefined ? {} : {generic: generic.on})};
       if (msg.type === "add-cosmetic") {
         try { return {ok: true, value: await store.addRule({kind: "cosmetic", site: "publisher.example", selector: msg.selector})}; } catch (e) { return {error: e.message}; }
       }
@@ -35,7 +35,8 @@ async function page({rules = [cosmetic], markup = html} = {}) {
     onMessage: {addListener: (fn) => { listener = fn; }},
   }};
   const ctx = vm.createContext({document: doc, browser, setTimeout, clearTimeout, console, Date});
-  for (const file of ["browser/core/selectors.js", "browser/core/picker.js", "browser/content.js"]) vm.runInContext(read(file), ctx, {filename: file});
+  const files = ["browser/core/selectors.js", "browser/core/picker.js", ...(generic ? ["browser/core/cosmetic.js"] : []), "browser/content.js"];
+  for (const file of files) vm.runInContext(read(file), ctx, {filename: file});
   await ctx.__EGCosmetic.ready;
   const $ = (id) => doc.getElementById(id);
   const hidden = (id) => $(id).style.getPropertyValue("display") === "none" && $(id).style.getPropertyPriority("display") === "important";
@@ -47,6 +48,43 @@ const button = (host, label) => {
   const find = (n) => { if (n.localName === "button" && n.textContent === label) return n; for (const c of n.childNodes) { const hit = find(c); if (hit) return hit; } return null; };
   return find(host.shadowRoot);
 };
+
+test("built-in ad-slot stylesheet: one style element, switchable per site, lifted by Restore page, absent in Firefox", async () => {
+  const styles = (p) => {
+    const out = [];
+    const walk = (n) => { if (n.localName === "style" && n.hasAttribute("data-eg-page-ui")) out.push(n); for (const c of n.childNodes || []) walk(c); };
+    walk(p.doc);
+    return out;
+  };
+  const on = await page({generic: {on: true}});
+  assert.equal(styles(on).length, 1);
+  assert.match(styles(on)[0].textContent, /ins\.adsbygoogle\{display:none!important\}/);
+  assert.equal(on.api.status().generic.on, true);
+  await on.send({type: "generic", on: false});
+  assert.equal(styles(on).length, 0, "switched off for the site: removed at once");
+  await on.send({type: "generic", on: true});
+  assert.equal(styles(on).length, 1);
+  await on.send({type: "restore-page"});
+  assert.equal(styles(on).length, 0, "Restore this page also lifts it");
+  await on.send({type: "resume"});
+  assert.equal(styles(on).length, 1);
+  const off = await page({generic: {on: false}});
+  assert.equal(styles(off).length, 0, "a site switched off gets no stylesheet");
+  const firefox = await page();
+  assert.equal(styles(firefox).length, 0);
+  assert.equal(firefox.api.status().generic.available, false);
+});
+
+test("generic selector set stays small, specific and cheap", () => {
+  const list = require("../../browser/core/cosmetic.js");
+  assert.ok(list.GENERIC_SELECTORS.length <= list.MAX_SELECTORS);
+  for (const s of list.GENERIC_SELECTORS) {
+    assert.doesNotMatch(s, /:has\(|^\[|^\*|,|\s|sponsor|promo/i, s);
+    assert.ok(/^[a-z-]+[.#\[]|^[a-z-]+$|^\.[A-Za-z_]/.test(s), `${s} is tag-qualified or a class`);
+  }
+  assert.equal(new Set(list.GENERIC_SELECTORS).size, list.GENERIC_SELECTORS.length);
+  assert.equal(list.stylesheet().split("\n").length, list.GENERIC_SELECTORS.length);
+});
 
 test("acceptance: only the sponsored card is hidden; Show restores it; Restore page undoes everything", async () => {
   const p = await page();

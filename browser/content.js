@@ -28,6 +28,12 @@
   `;
 
   let rules = [], site = null, paused = false, observer = null, timer = null, scans = [];
+  // Built-in ad-slot hiding (Chrome build only: core/cosmetic.js is not in the Firefox manifest). One stylesheet,
+  // added at document_start so slots never flash, removed again if this site has it switched off.
+  const generic = root.EGCosmeticList || null;
+  // genericPaused: "Restore this page" (a user action) also lifts it for this page load; the automatic pause for
+  // pages that mutate too often does not, since the stylesheet costs no script work per mutation.
+  let genericStyle = null, genericWanted = Boolean(generic), genericPaused = false;
   const records = new Map();           // node -> record
   let revealed = new WeakSet();        // shown by the user for this page load
   const protectedHits = new Set();     // rule ids that matched protected structure
@@ -168,6 +174,29 @@
     return status();
   }
 
+  function applyGeneric() {
+    const on = Boolean(generic) && genericWanted && !genericPaused;
+    if (on && !genericStyle) {
+      genericStyle = document.createElement("style");
+      genericStyle.setAttribute(UI, "");
+      genericStyle.textContent = generic.stylesheet();
+      (document.head || document.documentElement).append(genericStyle);
+    } else if (!on && genericStyle) {
+      genericStyle.remove();
+      genericStyle = null;
+    }
+  }
+
+  function setGeneric(on) { genericWanted = Boolean(on); applyGeneric(); return status(); }
+
+  /** Ad slots the built-in stylesheet hides right now (counted only when the popup asks). */
+  function genericCount() {
+    if (!genericStyle) return 0;
+    let count = 0;
+    for (const selector of generic.GENERIC_SELECTORS) { try { count += document.querySelectorAll(selector).length; } catch {} }
+    return count;
+  }
+
   let pausedReason = "";
   function restorePage(reason = "Restored for this page load.") {
     paused = true; pausedReason = reason;
@@ -175,10 +204,11 @@
     clearTimeout(timer); timer = null;
     for (const record of [...records.values()]) release(record);
     revealed = new WeakSet();
+    applyGeneric();
     return status();
   }
 
-  function resume() { paused = false; pausedReason = ""; scan(); return status(); }
+  function resume() { paused = false; pausedReason = ""; genericPaused = false; applyGeneric(); scan(); return status(); }
 
   function status() {
     const values = [...records.values()];
@@ -186,6 +216,7 @@
       site, paused, reason: pausedReason, rules: rules.length,
       hidden: values.filter((r) => r.hidden).length, shown: values.filter((r) => !r.hidden).length,
       protectedRules: [...protectedHits], overbroadRules: [...overbroad], picking: Boolean(pick),
+      generic: generic ? {available: true, on: Boolean(genericStyle), wanted: genericWanted, slots: genericCount()} : {available: false},
     };
   }
 
@@ -327,9 +358,10 @@
     switch (message.type) {
       case "rules-changed": return Promise.resolve(setRules(message.rules));
       case "status": return Promise.resolve(status());
-      case "restore-page": return Promise.resolve(restorePage());
+      case "restore-page": genericPaused = true; return Promise.resolve(restorePage());
       case "resume": return Promise.resolve(resume());
       case "start-picker": startPicker(); return Promise.resolve(status());
+      case "generic": return Promise.resolve(setGeneric(message.on));
       default: return undefined;
     }
   }
@@ -340,12 +372,14 @@
     return true;
   });
 
+  applyGeneric();
   const ready = B.runtime.sendMessage({type: "page-rules"}).then((reply) => {
     site = reply && reply.site ? reply.site : null;
+    if (reply && reply.generic === false) setGeneric(false);
     const apply = () => setRules(reply && reply.rules);
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply, {once: true});
     else apply();
   }).catch(() => {});
 
-  root.__EGCosmetic = Object.freeze({ready, setRules, restorePage, resume, status, startPicker, stopPicker, proposal, commit, undo});
+  root.__EGCosmetic = Object.freeze({ready, setRules, setGeneric, restorePage, resume, status, startPicker, stopPicker, proposal, commit, undo});
 })(globalThis);

@@ -22,11 +22,23 @@ function matches(rule, req) {
   if (c.regexFilter && !new RegExp(c.regexFilter, c.isUrlFilterCaseSensitive ? "" : "i").test(req.url)) return false;
   return true;
 }
-/** Highest priority wins; at equal priority allow/allowAllRequests > block > redirect (same extension). */
+/**
+ * Highest priority wins; at equal priority allow/allowAllRequests > block > redirect (same extension).
+ * Frame-tree inheritance: when `req.frame` (the navigation request that created the requesting frame) is
+ * matched by an allowAllRequests rule of priority P, every request from that frame is allowed unless a rule
+ * with priority above P matches it. This is how Chrome documents allowAllRequests.
+ */
+const RANK = {allow: 3, allowAllRequests: 3, block: 2, redirect: 1};
+function best(all, req) {
+  return all.filter((r) => matches(r, req)).sort((a, b) => b.priority - a.priority || RANK[b.action.type] - RANK[a.action.type])[0] || null;
+}
 function outcome(all, req) {
-  const rank = {allow: 3, allowAllRequests: 3, block: 2, redirect: 1};
-  const hit = all.filter((r) => matches(r, req)).sort((a, b) => b.priority - a.priority || rank[b.action.type] - rank[a.action.type]);
-  return hit.length ? hit[0].action.type : "none";
+  const hit = best(all, req);
+  if (req.frame) {
+    const frameRule = best(all, req.frame);
+    if (frameRule && frameRule.action.type === "allowAllRequests" && (!hit || hit.priority <= frameRule.priority)) return "allow";
+  }
+  return hit ? hit.action.type : "none";
 }
 
 test("priority ladder: exceptions > user rules > lists > continue-once > threats > params", () => {
@@ -131,19 +143,46 @@ test("acceptance: an exception beats the tracker list and threat list, only for 
   assert.equal(outcome(all, req("https://publisher.example/article", "main_frame", null)), "none");
 });
 
-test("continue-once allows the flagged site in one tab but not its trackers", () => {
-  const threats = dnr.compileList("threats", ["bad.example"], {warningUrl: WARN}).rules;
+test("frame-tree model: allowAllRequests lifts lower-priority rules for every request of the frame", () => {
+  const threats = dnr.compileList("threats", ["bad.example", "other-bad.example"], {warningUrl: WARN}).rules;
+  const wide = {id: 9, priority: dnr.PRIORITY.continue, action: {type: "allowAllRequests"}, condition: {requestDomains: ["bad.example"], resourceTypes: ["main_frame"], tabIds: [7]}};
+  const frame = {url: "https://bad.example/", type: "main_frame", tabId: 7};
+  assert.equal(outcome([...threats, wide], {url: "https://other-bad.example/x.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "allow",
+    "the model reproduces why allowAllRequests is too wide");
+});
+
+test("continue-once allows the flagged site in one tab, not its trackers, not other threat hosts", () => {
+  const threats = dnr.compileList("threats", ["bad.example", "other-bad.example"], {warningUrl: WARN}).rules;
   const trackers = dnr.compileList("trackers", ["tracker.test"]).rules.map((r) => ({...r, id: 100 + r.id}));
-  const cont = dnr.continueRule(100000, "bad.example", 7);
-  assert.equal(cont.priority, dnr.PRIORITY.continue);
-  assert.equal(cont.action.type, "allowAllRequests");
-  const all = [...threats, ...trackers, cont];
-  assert.equal(outcome(all, {url: "https://bad.example/", type: "main_frame", tabId: 7}), "allowAllRequests");
-  assert.equal(outcome(all, {url: "https://bad.example/", type: "main_frame", tabId: 8}), "redirect", "other tabs still warned");
-  // allowAllRequests at priority 3 lifts lower-priority rules for that frame (threat=2) but not trackers (4).
-  assert.ok(dnr.PRIORITY.threat < cont.priority && dnr.PRIORITY.list > cont.priority);
-  assert.throws(() => dnr.continueRule(1, "127.0.0.1", 7));
-  assert.throws(() => dnr.continueRule(1, "bad.example", -1));
+  const cont = dnr.continueRules(100000, "bad.example", 7);
+  assert.deepEqual(cont.map((r) => r.id), [100000, 100001]);
+  for (const rule of cont) {
+    assert.equal(rule.priority, dnr.PRIORITY.continue);
+    assert.equal(rule.action.type, "allow", "never allowAllRequests");
+    assert.deepEqual(rule.condition.tabIds, [7]);
+  }
+  const all = [...threats, ...trackers, ...cont];
+  const frame = {url: "https://bad.example/", type: "main_frame", tabId: 7};
+  assert.equal(outcome(all, frame), "allow");
+  assert.equal(outcome(all, {...frame, tabId: 8}), "redirect", "other tabs still warned");
+  assert.equal(outcome(all, {url: "https://bad.example/app.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "allow", "its own assets load");
+  assert.equal(outcome(all, {url: "https://cdn.bad.example/app.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "allow", "and its subdomains'");
+  assert.equal(outcome(all, {url: "https://other-bad.example/x.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "block", "other threat hosts stay blocked");
+  assert.equal(outcome(all, {url: "https://other-bad.example/", type: "sub_frame", initiator: "bad.example", tabId: 7, frame}), "block");
+  assert.equal(outcome(all, {url: "https://pixel.tracker.test/p.gif", type: "image", initiator: "bad.example", tabId: 7, frame}), "block", "trackers stay blocked");
+  assert.equal(outcome(all, {url: "https://bad.example/app.js", type: "script", initiator: "news.example", tabId: 7}), "block", "other sites cannot load it");
+  assert.ok(dnr.PRIORITY.threat < dnr.PRIORITY.continue && dnr.PRIORITY.list > dnr.PRIORITY.continue);
+  assert.throws(() => dnr.continueRules(1, "127.0.0.1", 7));
+  assert.throws(() => dnr.continueRules(1, "bad.example", -1));
+});
+
+test("an exception shown as \"other\" does not also allow WebSocket, WebTransport or Web Bundles", () => {
+  const {rules: out} = dnr.compileUserState([], [exception({type: "other"})], NOW);
+  assert.deepEqual(out[0].condition.resourceTypes, ["other"]);
+  assert.equal(dnr.CHROME_TO_CORE.websocket, "websocket", "logged under its own type");
+  assert.ok(!rules.RESOURCE_TYPES.includes(dnr.CHROME_TO_CORE.websocket), "so no exception can be made for it");
+  const blocked = dnr.compileUserState([userRule({types: ["other"]})], [], NOW).rules[0];
+  assert.ok(blocked.condition.resourceTypes.includes("websocket"), "a block rule for other still covers them");
 });
 
 test("tracking parameter stripping: exact names, navigations only, only when one is present", () => {
@@ -159,6 +198,7 @@ test("tracking parameter stripping: exact names, navigations only, only when one
   }
   for (const name of ["utm_source", "utm_medium", "utm_campaign", "fbclid", "gclid", "msclkid", "dclid", "gbraid", "wbraid", "mc_eid", "igshid"]) assert.ok(removed.includes(name), name);
   for (const name of ["id", "q", "page", "ref", "v", "t"]) assert.ok(!removed.includes(name), `${name} is functional and kept`);
+  for (const name of ["mkt_tok", "_hsenc", "_hsmi"]) assert.ok(!removed.includes(name), `${name} is kept: unsubscribe and preference links need it`);
   // urlFilter without wildcards or anchors is a plain substring test.
   const triggers = (url) => out.some((r) => url.includes(r.condition.urlFilter));
   assert.ok(triggers("https://news.example/a?id=1&utm_source=x"));
