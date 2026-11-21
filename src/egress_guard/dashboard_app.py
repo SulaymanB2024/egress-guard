@@ -18,6 +18,7 @@ from .config import config_path, initialize, load_config
 from .feeds import feed_status, dns_name, update_feeds
 from .health import proxy_health
 from .http_deadline import request_json_object
+from .insights import read_insights
 from .ledger import read_activity
 from .paths import atomic_private, data_dir, private_dir
 from .policy import Policy, policy_stamp
@@ -99,9 +100,20 @@ class Application:
             "controls": {"pause_minutes": [5, 15, 30], "allow_minutes": [5, 15, 30],
                          "resume": paused, "remove_allow": True, "refresh_filters": not self.refreshing,
                          "block": True, "unblock": True, "pause_canaries": False, "resume_canaries": False},
+            "footprint": self._footprint(health.get("footprint")),
             "temporary_allows": [{"host": host, "expires_at": iso(expiry)} for host, expiry in exceptions.items()
                                   if dns_name(host) and type(expiry) in (int, float) and time.time() < expiry <= time.time() + 86400],
         }
+
+    @staticmethod
+    def _footprint(value):
+        """Pass through the proxy's own resource report only when it is present and well formed."""
+        if not isinstance(value, dict):
+            return None
+        keys = ("rss_bytes", "cpu_seconds", "uptime_seconds")
+        result = {key: value[key] for key in keys
+                  if type(value.get(key)) in (int, float) and 0 <= value[key] < 2 ** 53}
+        return result or None
 
     @staticmethod
     def _applied(policy, reported):
@@ -128,6 +140,12 @@ class Application:
             return read_activity(self.state / "events.sqlite3", 50)
         except (sqlite3.Error, ValueError):
             return {"events": [], "limit": 50, "message": "Local activity is temporarily unavailable"}
+
+    def insights(self):
+        try:
+            return read_insights(self.state / "events.sqlite3")
+        except (sqlite3.Error, ValueError, OSError):
+            return {"history": None, "message": "Local history is temporarily unavailable"}
 
     def domain(self, host):
         host = self._host(host)

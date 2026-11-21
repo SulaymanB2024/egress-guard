@@ -1,0 +1,284 @@
+"""Read-only outcome summaries for the dashboard, computed from the local ledger.
+
+Every number here is a count of rows the ledger actually holds. Nothing is estimated: the proxy
+sees hostnames only (TLS is passed through), so there are no byte, page-load or time figures.
+
+* ``full`` history gives hourly and daily series in local time, top hosts and recent threats.
+* ``aggregate`` history only has per-UTC-day counts, so there is no hourly series and "today"
+  means the current UTC day. Allowed traffic has no hostname there.
+* ``none`` history stores nothing, so every figure is ``None``.
+
+The ledger keeps at most ``ledger.MAX_EVENTS`` rows and ``retention_days`` of history; the
+``coverage`` block says how far back the retained rows reach so the page can mark partial days.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import sqlite3
+import time
+from urllib.parse import quote
+
+from .ledger import HISTORY_MODES, MAX_EVENTS
+
+# Block sources mapped to the categories the dashboard shows. Unknown or future sources fall back
+# to "other" so a new ledger value never breaks the page.
+CATEGORIES = {
+    "threats": "Malware and phishing",
+    "ads": "Ads and trackers",
+    "cname": "Cloaked trackers (CNAME)",
+    "manual": "Your block rules",
+    "other": "Other protections",
+}
+SOURCE_CATEGORY = {
+    "threat-intel": "threats", "malware": "threats", "phishing": "threats",
+    "tracker-feed": "ads", "tracker": "ads", "ads": "ads",
+    "cname-feed": "cname", "cname-cloak": "cname",
+    "local-block": "manual",
+}
+TOP_LIMIT = 8
+THREAT_LIMIT = 5
+DAYS = 7
+SCAN_LIMIT = 200_000  # A safety bound well above the ledger's own row cap.
+
+
+def category(source: object) -> str:
+    return SOURCE_CATEGORY.get(source, "other") if isinstance(source, str) else "other"
+
+
+def _iso(value: float) -> str:
+    return datetime.fromtimestamp(value, timezone.utc).isoformat()
+
+
+def _empty_totals() -> dict:
+    return {"blocked": 0, "allowed": 0}
+
+
+def _local_midnight(moment: datetime) -> datetime:
+    return moment.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _base(history: str, now: float) -> dict:
+    return {
+        "history": history, "generated_at": _iso(now), "day_basis": "local", "dropped": 0,
+        "coverage": {"oldest": None, "newest": None, "rows": 0, "row_cap": MAX_EVENTS, "capped": False},
+        "today": None, "yesterday": None, "same_time_yesterday": None,
+        "hourly": None, "daily": None,
+        "categories": None, "top_blocked": None, "threats": None,
+        "categories_list": [{"id": key, "label": label} for key, label in CATEGORIES.items()],
+    }
+
+
+def _categories(counts: dict) -> list[dict]:
+    return [{"id": key, "blocked": counts.get(key, 0)} for key in CATEGORIES]
+
+
+def read_insights(path: Path, now: float | None = None) -> dict:
+    """Summarize the ledger at ``path`` without writing to it."""
+    now = time.time() if now is None else now
+    if not path.is_file() or path.is_symlink():
+        result = _base("full", now)
+        result.update(_zero_full(now))
+        return result
+    with sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, timeout=0.25) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        meta = dict(connection.execute("SELECT key, value FROM meta").fetchall()) if "meta" in tables else {}
+        history = meta.get("history") if meta.get("history") in HISTORY_MODES else "full"
+        result = _base(history, now)
+        result["dropped"] = int(meta["dropped"]) if str(meta.get("dropped", "")).isdigit() else 0
+        if history == "full":
+            result.update(_full(connection, now) if "events" in tables else _zero_full(now))
+        elif history == "aggregate":
+            result.update(_aggregate(connection, now) if "daily" in tables else _zero_aggregate(now))
+        return result
+
+
+def _windows(now: float):
+    local_now = datetime.fromtimestamp(now).astimezone()
+    today = _local_midnight(local_now)
+    days = [today - timedelta(days=offset) for offset in range(DAYS - 1, -1, -1)]
+    hour = local_now.replace(minute=0, second=0, microsecond=0)
+    hours = [hour - timedelta(hours=offset) for offset in range(23, -1, -1)]
+    return local_now, today, days, hours
+
+
+def _zero_full(now: float) -> dict:
+    _, today, days, hours = _windows(now)
+    return {
+        "today": {**_empty_totals(), "start": _iso(today.timestamp())},
+        "yesterday": {**_empty_totals(), "complete": False},
+        "same_time_yesterday": {**_empty_totals(), "complete": False},
+        "hourly": [{"start": _iso(h.timestamp()), **_empty_totals()} for h in hours],
+        "daily": [{"start": _iso(d.timestamp()), "day": d.date().isoformat(), **_empty_totals(), "complete": False}
+                  for d in days],
+        "categories": {"today": _categories({}), "week": _categories({})},
+        "top_blocked": {"today": [], "week": []},
+        "threats": {"today": 0, "week": 0, "recent": []},
+    }
+
+
+def _full(connection: sqlite3.Connection, now: float) -> dict:
+    local_now, today, days, hours = _windows(now)
+    result = _zero_full(now)
+    week_start = int(days[0].timestamp())
+    today_start = int(today.timestamp())
+    yesterday_start = int((today - timedelta(days=1)).timestamp())
+    elapsed = int(now) - today_start
+
+    oldest, newest, rows = connection.execute("SELECT MIN(ts), MAX(ts), COUNT(*) FROM events").fetchone()
+    capped = rows >= MAX_EVENTS
+    result["coverage"] = {"oldest": _iso(oldest) if oldest else None, "newest": _iso(newest) if newest else None,
+                          "rows": rows, "row_cap": MAX_EVENTS, "capped": capped}
+    # A day is complete only when the retained rows reach back past its start.
+    reaches = (lambda start: oldest is not None and oldest <= start) if capped else (lambda start: True)
+
+    # Hourly buckets, aligned to the local hour, cover the whole week; days are sums of hours.
+    origin = int(hours[0].timestamp()) - (DAYS - 1) * 86400
+    origin = min(origin, week_start)
+    buckets: dict[int, dict] = {}
+    category_today: dict[str, int] = {}
+    category_week: dict[str, int] = {}
+    query = """SELECT (ts - ?) / 3600 AS bucket, decision, source, COUNT(*) FROM events
+               WHERE ts >= ? AND ts <= ? GROUP BY bucket, decision, source LIMIT ?"""
+    for bucket, decision, source, count in connection.execute(query, (origin, origin, int(now) + 60, SCAN_LIMIT)):
+        if decision not in ("blocked", "allowed"):
+            continue
+        start = origin + bucket * 3600
+        totals = buckets.setdefault(start, _empty_totals())
+        totals[decision] += count
+        if decision == "blocked" and start >= week_start:
+            key = category(source)
+            category_week[key] = category_week.get(key, 0) + count
+            if start >= today_start:
+                category_today[key] = category_today.get(key, 0) + count
+
+    def total(start: int, end: int) -> dict:
+        values = _empty_totals()
+        for bucket_start, counts in buckets.items():
+            if start <= bucket_start < end:
+                values["blocked"] += counts["blocked"]
+                values["allowed"] += counts["allowed"]
+        return values
+
+    hourly = []
+    for hour in hours:
+        start = int(hour.timestamp())
+        hourly.append({"start": _iso(start), **buckets.get(start, _empty_totals())})
+    daily = []
+    for index, day in enumerate(days):
+        start = int(day.timestamp())
+        end = int(days[index + 1].timestamp()) if index + 1 < len(days) else int(now) + 3600
+        daily.append({"start": _iso(start), "day": day.date().isoformat(), **total(start, end),
+                      "complete": reaches(start) and start >= week_start})
+    # Same-time-yesterday is exact rather than hour-bucketed.
+    same_time = dict(connection.execute(
+        "SELECT decision, COUNT(*) FROM events WHERE ts >= ? AND ts < ? GROUP BY decision",
+        (yesterday_start, yesterday_start + elapsed)).fetchall())
+    today_totals = dict(connection.execute(
+        "SELECT decision, COUNT(*) FROM events WHERE ts >= ? GROUP BY decision", (today_start,)).fetchall())
+
+    def tops(start: int) -> list[dict]:
+        rows = connection.execute(
+            """SELECT host, source, COUNT(*) AS hits, MAX(ts) FROM events
+               WHERE decision = 'blocked' AND ts >= ? GROUP BY host, source ORDER BY hits DESC, host LIMIT ?""",
+            (start, TOP_LIMIT * 3)).fetchall()
+        merged: dict[str, dict] = {}
+        for host, source, hits, last in rows:
+            item = merged.setdefault(host, {"host": host, "count": 0, "category": category(source), "last": last})
+            item["count"] += hits
+            item["last"] = max(item["last"], last)
+            if category(source) == "threats":
+                item["category"] = "threats"
+        ranked = sorted(merged.values(), key=lambda item: (-item["count"], item["host"]))[:TOP_LIMIT]
+        return [{**item, "last": _iso(item["last"])} for item in ranked]
+
+    threat_sources = tuple(source for source, key in SOURCE_CATEGORY.items() if key == "threats")
+    marks = ",".join("?" * len(threat_sources))
+    threat_rows = connection.execute(
+        f"SELECT ts, host, source FROM events WHERE decision = 'blocked' AND ts >= ? AND source IN ({marks}) "
+        f"ORDER BY ts DESC LIMIT ?", (week_start, *threat_sources, THREAT_LIMIT)).fetchall()
+    result.update({
+        "today": {"blocked": today_totals.get("blocked", 0), "allowed": today_totals.get("allowed", 0),
+                  "start": _iso(today_start)},
+        "yesterday": {**total(yesterday_start, today_start), "complete": reaches(yesterday_start)},
+        "same_time_yesterday": {"blocked": same_time.get("blocked", 0), "allowed": same_time.get("allowed", 0),
+                                "complete": reaches(yesterday_start)},
+        "hourly": hourly,
+        "daily": daily,
+        "categories": {"today": _categories(category_today), "week": _categories(category_week)},
+        "top_blocked": {"today": tops(today_start), "week": tops(week_start)},
+        "threats": {"today": category_today.get("threats", 0), "week": category_week.get("threats", 0),
+                    "recent": [{"at": _iso(ts), "host": host, "source": source} for ts, host, source in threat_rows]},
+    })
+    return result
+
+
+def _utc_days(now: float) -> list[int]:
+    today = int(now) // 86400 * 86400
+    return [today - offset * 86400 for offset in range(DAYS - 1, -1, -1)]
+
+
+def _zero_aggregate(now: float) -> dict:
+    days = _utc_days(now)
+    return {
+        "day_basis": "utc",
+        "today": {**_empty_totals(), "start": _iso(days[-1])},
+        "yesterday": {**_empty_totals(), "complete": True},
+        "daily": [{"start": _iso(day), "day": datetime.fromtimestamp(day, timezone.utc).date().isoformat(),
+                   **_empty_totals(), "complete": True} for day in days],
+        "categories": {"today": _categories({}), "week": _categories({})},
+        "top_blocked": {"today": [], "week": []},
+        "threats": {"today": 0, "week": 0, "recent": []},
+    }
+
+
+def _aggregate(connection: sqlite3.Connection, now: float) -> dict:
+    days = _utc_days(now)
+    result = _zero_aggregate(now)
+    by_day: dict[int, dict] = {}
+    category_today: dict[str, int] = {}
+    category_week: dict[str, int] = {}
+    oldest, newest, rows = connection.execute("SELECT MIN(day), MAX(day), COUNT(*) FROM daily").fetchone()
+    result["coverage"] = {"oldest": _iso(oldest) if oldest is not None else None,
+                          "newest": _iso(newest) if newest is not None else None,
+                          "rows": rows, "row_cap": MAX_EVENTS, "capped": rows >= MAX_EVENTS}
+    for day, decision, source, count in connection.execute(
+            "SELECT day, decision, source, SUM(count) FROM daily WHERE day >= ? GROUP BY day, decision, source LIMIT ?",
+            (days[0], SCAN_LIMIT)):
+        if decision not in ("blocked", "allowed"):
+            continue
+        totals = by_day.setdefault(day, _empty_totals())
+        totals[decision] += count
+        if decision == "blocked":
+            key = category(source)
+            category_week[key] = category_week.get(key, 0) + count
+            if day == days[-1]:
+                category_today[key] = category_today.get(key, 0) + count
+
+    def tops(start: int) -> list[dict]:
+        rows = connection.execute(
+            """SELECT host, source, SUM(count) AS hits, MAX(day) FROM daily
+               WHERE decision = 'blocked' AND host != '' AND day >= ? GROUP BY host, source
+               ORDER BY hits DESC, host LIMIT ?""", (start, TOP_LIMIT * 3)).fetchall()
+        merged: dict[str, dict] = {}
+        for host, source, hits, last in rows:
+            item = merged.setdefault(host, {"host": host, "count": 0, "category": category(source), "last": last,
+                                            "day_only": True})
+            item["count"] += hits
+            item["last"] = max(item["last"], last)
+            if category(source) == "threats":
+                item["category"] = "threats"
+        ranked = sorted(merged.values(), key=lambda item: (-item["count"], item["host"]))[:TOP_LIMIT]
+        return [{**item, "last": _iso(item["last"])} for item in ranked]
+
+    complete = lambda day: not result["coverage"]["capped"] or (oldest is not None and oldest <= day)
+    result.update({
+        "today": {**by_day.get(days[-1], _empty_totals()), "start": _iso(days[-1])},
+        "yesterday": {**by_day.get(days[-2], _empty_totals()), "complete": complete(days[-2])},
+        "daily": [{"start": _iso(day), "day": datetime.fromtimestamp(day, timezone.utc).date().isoformat(),
+                   **by_day.get(day, _empty_totals()), "complete": complete(day)} for day in days],
+        "categories": {"today": _categories(category_today), "week": _categories(category_week)},
+        "top_blocked": {"today": tops(days[-1]), "week": tops(days[0])},
+        "threats": {"today": category_today.get("threats", 0), "week": category_week.get("threats", 0), "recent": []},
+    })
+    return result

@@ -282,6 +282,8 @@ class Handler(BaseHTTPRequestHandler):
                     data = {**self.server.application.status(), "csrf_token": session["csrf"]}
                 elif parsed.path == "/api/activity":
                     data = self.server.application.activity()
+                elif parsed.path == "/api/insights":
+                    data = self.server.application.insights()
                 elif parsed.path == "/api/domain":
                     values = parse_qs(parsed.query, max_num_fields=2)
                     data = self.server.application.domain(values.get("host", [""])[0])
