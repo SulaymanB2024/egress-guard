@@ -63,8 +63,48 @@
   }
   async function loadModes() { modes = cleanModes((await C.storage.local.get(MODES_KEY))[MODES_KEY]); }
   async function saveModes() { await C.storage.local.set({[MODES_KEY]: modes}); }
-  const modeFor = (site) => (site && modes.sites[site]) || modes.defaultMode;
-  const cleaningOn = (site) => !(site && modes.cleanOff.includes(site));
+
+  // ---- timed per-site pause (popup only) ------------------------------------------------------------------------
+  // Pause: for PAUSE_MINUTES the site (registrable domain) runs at Relaxed, with no element hiding and no link or
+  // cookie cleaning. It is an overlay on the saved settings, never a change to them, so when it ends (alarm, Resume,
+  // or a worker or browser restart after the expiry) the site's own level and settings simply apply again. The threat
+  // list, the warning page and the user's block rules are untouched (they sit above Relaxed). Only the popup can start
+  // or end it; a running pause cannot be extended. Stored in storage.local as {site: expiresAt}.
+  const PAUSE_KEY = "egressGuardPauses";
+  const PAUSE_MINUTES = 15, MAX_PAUSES = 50;
+  let pauses = {};
+  /** Load stored pauses, dropping anything malformed or expired. Returns the sites whose pause ended while asleep. */
+  async function loadPauses() {
+    const stored = (await C.storage.local.get(PAUSE_KEY))[PAUSE_KEY];
+    const now = Date.now();
+    const ended = [];
+    pauses = {};
+    for (const [site, until] of Object.entries(stored && typeof stored === "object" ? stored : {}).slice(0, MAX_PAUSES)) {
+      if (hosts.siteOf(site) !== site || !Number.isFinite(until) || until > now + PAUSE_MINUTES * 60000) continue;
+      if (until > now) pauses[site] = until; else ended.push(site);
+    }
+    if (ended.length) await savePauses();
+    return ended;
+  }
+  async function savePauses() { await C.storage.local.set({[PAUSE_KEY]: pauses}); }
+  const pausedUntil = (site) => (site && pauses[site] > Date.now() ? pauses[site] : null);
+  /** End pauses whose time has come; returns their sites. */
+  async function endPauses(now = Date.now()) {
+    const ended = Object.keys(pauses).filter((site) => pauses[site] <= now);
+    for (const site of ended) delete pauses[site];
+    if (ended.length) await savePauses();
+    return ended;
+  }
+  /** The saved modes with every running pause laid over them: Relaxed, and cleaning off. */
+  function effectiveModes() {
+    const live = Object.keys(pauses).filter((site) => pausedUntil(site));
+    if (!live.length) return modes;
+    return {...modes, sites: {...modes.sites, ...Object.fromEntries(live.map((site) => [site, "relaxed"]))},
+      cleanOff: [...new Set([...modes.cleanOff, ...live])].sort()};
+  }
+  const savedModeFor = (site) => (site && modes.sites[site]) || modes.defaultMode;
+  const modeFor = (site) => (pausedUntil(site) ? "relaxed" : savedModeFor(site));
+  const cleaningOn = (site) => !(site && (modes.cleanOff.includes(site) || pausedUntil(site)));
 
   // ---- retired: experimental fingerprint noise ----------------------------------------------------------------
   // Removed in 0.3.1: keyed by the frame's own site, it gave third-party frames a stable cross-site value, and its key
@@ -216,9 +256,12 @@
     C.contextMenus.onClicked.addListener((info) => { if (info.menuItemId === MENU) copyClean(info.linkUrl, info.frameUrl || info.pageUrl).catch(() => {}); });
   }
 
-  const ready = Promise.all([store.load(), loadGenericOff(), loadModes(), retireNoise().catch(() => {})]).then(async () => {
+  let endedWhileAsleep = [];
+  const ready = Promise.all([store.load(), loadGenericOff(), loadModes(), loadPauses().then((ended) => { endedWhileAsleep = ended; }), retireNoise().catch(() => {})]).then(async () => {
     for (const msg of store.rejected) console.warn("Egress Guard dropped a stored entry:", msg);
     await sync();
+    // A pause that ended while the worker was not running: tell that site's open pages to hide and clean again.
+    for (const site of endedWhileAsleep) broadcastSite(site).catch(() => {});
   });
 
   // ---- dynamic rules --------------------------------------------------------------
@@ -227,7 +270,7 @@
     syncing = syncing.catch(() => {}).then(async () => {
       store.pruneSync();
       const compiled = dnr.compileUserState(store.rules, store.exceptions, Date.now());
-      const siteModes = dnr.compileModes(modes);
+      const siteModes = dnr.compileModes(effectiveModes());
       const existing = await C.declarativeNetRequest.getDynamicRules();
       await C.declarativeNetRequest.updateDynamicRules({removeRuleIds: existing.map((r) => r.id), addRules: [...compiled.rules, ...siteModes.rules]});
       sources = compiled.sources;
@@ -241,7 +284,7 @@
   async function schedule() {
     await C.alarms.clear(ALARM);
     const passes = (await C.storage.session.get("passes")).passes || [];
-    const times = [store.nextExpiry(), ...(await continues()).map((c) => c.expiresAt), ...passes.map((x) => x.expiresAt)].filter((t) => t !== null && t !== undefined);
+    const times = [store.nextExpiry(), ...(await continues()).map((c) => c.expiresAt), ...passes.map((x) => x.expiresAt), ...Object.values(pauses)].filter((t) => t !== null && t !== undefined);
     if (times.length) C.alarms.create(ALARM, {when: Math.max(Math.min(...times), Date.now() + 1000)});
   }
 
@@ -453,7 +496,11 @@
     const now = Date.now();
     await dropContinues((c) => c.expiresAt <= now);
     await dropPasses((x) => x.expiresAt <= now);
-    if (await store.prune()) { await sync(); await broadcast(); } else await schedule();
+    const ended = await endPauses(now);
+    const pruned = await store.prune();
+    if (pruned || ended.length) await sync(); else await schedule();
+    if (pruned) await broadcast();
+    for (const site of ended) await broadcastSite(site);
   });
 
   // ---- messaging -------------------------------------------------------------------
@@ -476,7 +523,19 @@
   const plain = (rule) => ({...rule, ...(rule.types ? {types: [...rule.types]} : {})});
 
   function broadcastTab(tabId, host) {
-    C.tabs.sendMessage(tabId, {type: "rules-changed", rules: store.activeFor(host).cosmeticRules.map(plain)}).catch(() => {});
+    // A paused site gets no cosmetic rules (its hidden elements come back); its rules return when the pause ends.
+    C.tabs.sendMessage(tabId, {type: "rules-changed", rules: pausedUntil(hosts.siteOf(host)) ? [] : store.activeFor(host).cosmeticRules.map(plain)}).catch(() => {});
+  }
+  /** A pause started or ended: that site's open pages update hiding, ad-slot hiding and link cleaning at once. */
+  async function broadcastSite(site) {
+    const tabs = await C.tabs.query({url: ["http://*/*", "https://*/*"]});
+    for (const tab of tabs) {
+      const host = hosts.hostOfUrl(tab.url);
+      if (!host || hosts.siteOf(host) !== site) continue;
+      broadcastTab(tab.id, host);
+      C.tabs.sendMessage(tab.id, {type: "generic", on: !genericOff.has(site) && !pausedUntil(site)}).catch(() => {});
+      C.tabs.sendMessage(tab.id, {type: "clean-enabled", on: cleaningOn(site)}).catch(() => {});
+    }
   }
   async function broadcast() {
     const tabs = await C.tabs.query({url: ["http://*/*", "https://*/*"]});
@@ -495,6 +554,7 @@
     switch (message.type) {
       case "page-rules":
         if (!pageHost) return {rules: []};
+        if (pausedUntil(hosts.siteOf(pageHost))) return {site: hosts.siteOf(pageHost), rules: [], generic: false};
         return {site: hosts.siteOf(pageHost), rules: store.activeFor(pageHost).cosmeticRules.map(plain), generic: !genericOff.has(hosts.siteOf(pageHost))};
       case "add-cosmetic": {
         if (!pageHost) return {error: "Not a page."};
@@ -592,9 +652,10 @@
           types: rulesApi.RESOURCE_TYPES,
           categories: Object.fromEntries(Object.entries(dnr.CATEGORIES).filter(([, v]) => v.label).map(([k, v]) => [k, v.label])),
           mode: modeFor(hosts.siteOf(host)), siteMode: modes.sites[hosts.siteOf(host)] || null, defaultMode: modes.defaultMode,
+          paused: pausedUntil(hosts.siteOf(host)), resumeMode: savedModeFor(hosts.siteOf(host)),
           strictAllowed: [...(modes.allowHosts[hosts.siteOf(host)] || [])],
           scannedDirect: modes.scannedDirect,
-          cleaning: {on: cleaningOn(hosts.siteOf(host)), links: await countsReady.then(() => counts.links.get(message.tabId) || 0),
+          cleaning: {on: !modes.cleanOff.includes(hosts.siteOf(host)), links: await countsReady.then(() => counts.links.get(message.tabId) || 0),
             cookies: counts.cookies.get(hosts.siteOf(host)) || 0},
         };
       }
@@ -610,6 +671,22 @@
         return {ok: true, on: message.on};
       }
       case "copy-clean": return copyClean(message.url, message.tabUrl);
+      case "pause-site": case "resume-site": {
+        const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
+        if (!site) return {error: "Open a web page first."};
+        if (message.type === "pause-site") {
+          // Fixed length; a running pause is not extended (Resume, then Pause again, starts a new one).
+          if (pausedUntil(site)) return {error: "This site is already paused.", until: pausedUntil(site)};
+          await endPauses();
+          if (Object.keys(pauses).length >= MAX_PAUSES) return {error: "Too many sites are paused."};
+          pauses[site] = Date.now() + PAUSE_MINUTES * 60000;
+        } else {
+          if (!(site in pauses)) return {ok: true, site, until: null};
+          delete pauses[site];
+        }
+        await savePauses(); await sync(); await broadcastSite(site);
+        return {ok: true, site, until: pausedUntil(site)};
+      }
       case "set-scanned-direct": {
         if (typeof message.on !== "boolean") return {error: "Bad message."};
         modes.scannedDirect = message.on;
@@ -699,5 +776,5 @@
     handle(message, sender).then(sendResponse, (error) => sendResponse({error: String(error && error.message || error)}));
     return true;
   });
-  root.__EGBackground = Object.freeze({store, ready, handle, sync, onMatched, tabLog, continues, reloadIfRebuilt, onCookie, copyClean, cleanLink, counts, get sources() { return sources; }});
+  root.__EGBackground = Object.freeze({store, ready, handle, sync, onMatched, tabLog, continues, reloadIfRebuilt, onCookie, copyClean, cleanLink, counts, get sources() { return sources; }, get pauses() { return {...pauses}; }});
 })(globalThis);

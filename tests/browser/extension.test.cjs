@@ -216,8 +216,11 @@ test("popup in a packed build shows counts by list and says it cannot name addre
   assert.match(text("breakdown"), /5.*2/s);
   assert.equal(doc.getElementById("hero-note").hidden, false);
   assert.match(text("hero-note"), /cannot see which addresses/);
+  assert.equal(doc.getElementById("breakdown-group").hidden, false, "counts by reason are listed");
   const badge = await popupWith({...BASE_STATE, feedback: "badge", blocked: []});
-  assert.match(badge.text("hero-note"), /toolbar badge/);
+  assert.equal(badge.doc.getElementById("blocked-empty").hidden, false);
+  assert.match(badge.text("blocked-empty"), /toolbar badge/);
+  assert.equal(badge.text("blocked-count"), "–", "no count is invented");
   const debug = await popupWith({...BASE_STATE, feedback: "debug", blocked: []});
   assert.equal(debug.doc.getElementById("hero-note").hidden, true);
 });
@@ -243,17 +246,19 @@ test("popup renders blocked vs hidden, rules and exceptions with textContent onl
   const text = (id) => allText(doc.getElementById(id));
   assert.match(text("site"), /publisher\.example/);
   assert.match(text("blocked"), /publisher\.example\/collect/);
-  assert.match(text("blocked"), /beacon ×1|beacon/);
+  assert.match(text("blocked"), /beacon/i);
   assert.match(text("hidden"), /1 element hidden/);
-  assert.match(text("rules"), /Block.*publisher\.example\/collect/s);
-  assert.match(text("rules"), /Hide.*article\.card\.teaser\[data-ad-slot\]/s);
-  assert.match(text("exceptions"), /No exceptions/);
+  assert.match(text("rules"), /publisher\.example\/collect.*Always block/s);
+  assert.match(text("rules"), /article\.card\.teaser\[data-ad-slot\].*Hidden on this site/s);
+  assert.equal(text("exceptions"), "");
+  assert.equal(doc.getElementById("exceptions-group").hidden, true, "no exceptions: the group is not shown");
   const allow = doc.getElementById("blocked").querySelector('button[type="button"]');
   assert.ok(allow);
   assert.match(allow.getAttribute("aria-label"), /Allow publisher\.example\/collect \(beacon\) on this site for 15 minutes/);
   userClick(allow);
   await settle(); await settle();
-  assert.match(text("exceptions"), /publisher\.example\/collect.*beacon · 15 min left/s);
+  assert.match(text("exceptions"), /publisher\.example\/collect.*beacon · 15 min left/si);
+  assert.equal(doc.getElementById("exceptions-group").hidden, false);
   assert.equal(bg.api.store.exceptions.length, 1);
   // Removing a rule from the popup.
   const before = bg.api.store.rules.length;

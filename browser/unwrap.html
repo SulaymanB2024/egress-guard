@@ -10,33 +10,38 @@
 <link rel="stylesheet" href="unwrap.css">
 </head>
 <body>
-<main class="warning">
-  <p class="brand"><span class="brand-symbol" aria-hidden="true"></span>Egress Guard</p>
+<header class="bar"><span class="mark" aria-hidden="true"></span>Egress Guard</header>
 
-  <section class="card scan" aria-labelledby="scan-title" id="scan" hidden>
-    <p class="eyebrow" id="scan-eyebrow">Mail security link</p>
-    <h1 id="scan-title">This link goes through your mail scanner</h1>
+<main class="page scan" data-state="neutral" data-optical aria-labelledby="scan-title" id="scan" hidden>
+  <p class="kind"><span class="dot" id="scan-dot" aria-hidden="true" hidden></span><span id="scan-eyebrow">Mail scanner link</span></p>
+  <h1 id="scan-title" class="t-display">Open this link through your mail scanner?</h1>
+  <div class="dest">
     <p class="label">It leads to</p>
-    <p class="host" id="scan-host">…</p>
-    <p class="idn" id="scan-idn" hidden></p>
-    <p class="url" id="scan-url"></p>
-    <p class="body" id="scan-body">Your organisation's mail security checks this link when you open it. Continuing through the scanner keeps that check.</p>
-    <div class="actions">
-      <button id="through" class="primary" type="button">Continue through the scanner</button>
-      <button id="direct" class="secondary" type="button">Open directly <span class="sub">(skips the mail scan)</span></button>
-    </div>
-    <p class="fine" id="scan-fine">Either way Egress Guard checks the address against its malware and phishing list. To skip this page for every scanned link, use <b>Always open scanned links directly</b> in the Egress Guard popup.</p>
-    <p id="scan-error" class="error" role="alert" hidden></p>
-  </section>
+    <p class="h"><span class="host" id="scan-host">…</span></p>
+    <p class="url t-caption"><span class="host" id="scan-url"></span></p>
+  </div>
+  <p class="said" id="scan-idn" hidden></p>
+  <p class="said" id="scan-body" hidden></p>
+  <div class="actions">
+    <button id="through" class="btn primary lg" type="button">Continue through the scanner</button>
+    <button id="direct" class="btn lg" type="button" aria-label="Open directly (skips the mail scan)" title="Skips the mail scanner's click-time check. Malware and phishing blocking still applies.">Open directly</button>
+  </div>
+  <p id="scan-error" class="inline-error" role="alert" hidden></p>
+</main>
 
-  <section class="card unwrap" aria-labelledby="title" id="card" hidden>
-    <p class="eyebrow">Link tracker skipped</p>
-    <h1 id="title">This link's destination could not be read</h1>
-    <p class="url" id="url"></p>
-    <p class="body" id="reason"></p>
-    <p class="body">Egress Guard did not contact the tracker. Go back, or copy the address above if you know where it should lead.</p>
-    <div class="actions"><button id="back" class="primary" type="button">Go back</button></div>
-  </section>
+<main class="page unwrap" data-state="neutral" data-optical aria-labelledby="title" id="card" hidden>
+  <p class="kind">Link tracker skipped</p>
+  <h1 id="title" class="t-display">This link's destination couldn't be read</h1>
+  <div class="dest">
+    <p class="label">The link was</p>
+    <p class="h full"><span class="host" id="url"></span></p>
+  </div>
+  <p class="said">Egress Guard did not contact the tracker.</p>
+  <p class="reason muted" id="reason"></p>
+  <div class="actions">
+    <button id="back" class="btn primary lg" type="button">Go back</button>
+    <button id="copy" class="btn quiet" type="button">Copy link</button>
+  </div>
 </main>
 <script src="core/links.js"></script>
 <script src="unwrap.js"></script>

@@ -1,10 +1,15 @@
 // Headless capture of the design mockups (and the warning-page "before") into docs/design/review/.
 // node docs/design/review/capture.mjs [filter]   — headless Chrome, throwaway profile, no visible window.
+// node docs/design/review/capture.mjs --extension [--before] [filter]
+//   Captures and audits the real extension pages (browser/popup.html, warning.html, unwrap.html and the page-guard.js
+//   placeholder) with a stubbed extension API and the fixture states in ext-fixtures.mjs, into review/ext/{after,before}/.
+//   Exits non-zero when the audit finds a problem (see extAudit below).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {launch, sleep} from "../../../tests/browser/cdp.mjs";
+import * as fx from "./ext-fixtures.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../../..");
@@ -84,7 +89,9 @@ const OVERLAP = `(() => {
   return hits.slice(0, 12);
 })()`;
 
-const filter = process.argv[2];
+const args = process.argv.slice(2);
+const extMode = args.includes("--extension"), extBefore = args.includes("--before");
+const filter = args.find((a) => !a.startsWith("--"));
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "eg-design-"));
 const chrome = launch({profile, args: ["--allow-file-access-from-files", "--hide-scrollbars", "--disable-gpu"]});
 const {cdp} = chrome;
@@ -122,7 +129,7 @@ const AUDIT = `(() => {
       if (hasText) sizes.add(cs.fontSize + (cs.fontFamily.includes('mono') ? ' mono' : ''));
       if (hasText && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible') clipped.push(el.textContent.trim().slice(0, 50));
       if (el.closest('.sheet > figure > figcaption') || el.matches('.lights i, .bars i, .days i, .dot, .mark, svg *, .switch, .sk, dialog')) continue;
-      for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap']) {
+      for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap'].filter((q) => !(q === 'paddingTop' && el.matches('[data-optical]')))) {
         const v = parseFloat(cs[p]); if (!isNaN(v) && !scale.has(Math.abs(Math.round(v))) && Math.abs(v - Math.round(v)) < .01) off.add(p + ':' + v + ' ' + (el.className || el.tagName));
       }
     }
@@ -133,7 +140,8 @@ const AUDIT = `(() => {
 })()`;
 const auditLog = [];
 
-for (const job of jobs) {
+if (extMode) await extension();
+else for (const job of jobs) {
   const tag = job.file || job.prefix;
   if (filter && !tag.includes(filter)) continue;
   if (job.kind === "live") {
@@ -183,6 +191,129 @@ for (const job of jobs) {
   }
   console.log("ok", tag);
 }
-fs.writeFileSync(path.join(here, filter ? `audit-${filter}.json` : "audit.json"), JSON.stringify(auditLog, null, 1));
+if (!extMode) fs.writeFileSync(path.join(here, filter ? `audit-${filter}.json` : "audit.json"), JSON.stringify(auditLog, null, 1));
 await chrome.close();
 fs.rmSync(profile, {recursive: true, force: true});
+if (extMode && process.exitCode) console.log("extension audit: FAIL"); else if (extMode) console.log("extension audit: clean");
+
+// ---- Extension mode: the real pages, stubbed API, measured audit ------------------------------------------------
+// Fails on: clipped text (an ellipsis on an element whose full value is in a title counts as truncation, not
+// clipping), horizontal scroll, more than one filled button, more than five text sizes, off-scale spacing,
+// a focusable control without an accessible name, and a popup main view over 520 px or with an inner scroller.
+function extAudit() { return `(() => {
+  const scale = new Set([0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64]);
+  const clipped = [], ellipsis = [], sizes = new Set(), off = new Set(), unnamed = [], scrollers = [];
+  const visible = (el) => { const cs = getComputedStyle(el); return cs.display !== 'none' && cs.visibility !== 'hidden' && !el.closest('[hidden]') && el.getClientRects().length > 0; };
+  const all = [];
+  const walk = (root) => { for (const el of root.querySelectorAll('*')) { all.push(el); if (el.shadowRoot) walk(el.shadowRoot); } };
+  walk(document);
+  for (const el of all) {
+    if (!visible(el)) continue;
+    const cs = getComputedStyle(el);
+    const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+    if (hasText) sizes.add(parseFloat(cs.fontSize) + (/mono|Menlo|Consolas/.test(cs.fontFamily) ? ' mono' : ''));
+    if (el.textContent.trim() && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible' && el.childElementCount < 4) {
+      (cs.textOverflow === 'ellipsis' && el.closest('[title]') ? ellipsis : clipped).push(el.textContent.trim().slice(0, 60));
+    }
+    if (/(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1) scrollers.push((el.id || el.className || el.tagName) + ' ' + el.scrollHeight + '>' + el.clientHeight);
+    if (el.matches('button, input, select, textarea, a[href], [role=tab], [tabindex]')) {
+      const label = el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || el.textContent.trim() || el.title || (el.labels && el.labels.length && el.labels[0].textContent.trim());
+      if (!label) unnamed.push(el.outerHTML.slice(0, 80));
+    }
+    if (el.matches('.dot, .mark, .switch, .seg, .seg button, .tabs [role=tab], .sheet, figure, figcaption')) continue;
+    for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap'].filter((q) => !(q === 'paddingTop' && el.matches('[data-optical]')))) {
+      const v = parseFloat(cs[p]); if (!isNaN(v) && !scale.has(Math.abs(Math.round(v))) && Math.abs(v - Math.round(v)) < .01) off.add(p + ':' + v + ' ' + (el.id || el.className || el.tagName));
+    }
+  }
+  const primaries = all.filter((b) => b.matches('.btn.primary') && visible(b)).length;
+  const textSizes = [...sizes].filter((s) => !String(s).endsWith('mono'));
+  return {clipped, ellipsis, primaries, sizes: [...sizes].sort(), textSizes: textSizes.length, off: [...off].slice(0, 20), unnamed, scrollers,
+    hscroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 || all.some((e) => visible(e) && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && e.getBoundingClientRect().right > document.documentElement.clientWidth + 1 && !e.closest(".sheet")), height: Math.ceil(document.body.getBoundingClientRect().height)};
+})()`; }
+
+async function extension() {
+  const dir = path.join(here, "ext", extBefore ? "before" : "after");
+  fs.mkdirSync(dir, {recursive: true});
+  const page = (f) => pathToFileURL(path.join(repo, "browser", f)).href;
+  const log = [];
+  const problems = [];
+  const judge = (tag, r, {budget} = {}) => {
+    const bad = [];
+    if (r.clipped.length) bad.push(`clipped: ${r.clipped.join(" | ")}`);
+    if (r.hscroll) bad.push("scrolls horizontally");
+    if (r.primaries > 1) bad.push(`${r.primaries} filled buttons`);
+    if (r.textSizes > 5) bad.push(`${r.textSizes} font sizes: ${r.sizes.join(", ")}`);
+    if (r.off.length) bad.push(`off-scale: ${r.off.join(", ")}`);
+    if (r.unnamed.length) bad.push(`no accessible name: ${r.unnamed.join(" | ")}`);
+    if (budget && (r.height > budget || r.scrollers.length)) bad.push(`main view ${r.height} px tall (budget ${budget}) ${r.scrollers.join(" ")}`);
+    log.push({tag, ...r, bad});
+    if (bad.length && !extBefore) { problems.push(`${tag}: ${bad.join("; ")}`); process.exitCode = 1; }
+  };
+
+  // Popup at its real 360 px width, 2x.
+  const states = Object.fromEntries(fx.POPUP.map((s) => [s[0], s]));
+  for (const [name, state0, page0, url0, setup = ""] of fx.POPUP) {
+    if (filter && !`popup-${name}`.includes(filter)) continue;
+    if (extBefore && name !== "main") continue;
+    const steps = setup.split(";").filter(Boolean);
+    const same = steps.find((s) => s.startsWith("same:"));
+    const [, state, pageStatus, url] = same ? states[same.slice(5)] : [name, state0, page0, url0];
+    for (const scheme of schemes) {
+      const {sessionId, targetId, ev} = await open(page("popup.html"), 360, 600, scheme, 2, fx.popupStub(state, pageStatus, url));
+      await sleep(300);
+      for (const s of steps) {
+        if (s.startsWith("tab:")) await ev(`document.getElementById('tab-${s.slice(4)}').click()`);
+        if (s.startsWith("focusrow:")) await ev(`(() => { const r = [...document.querySelectorAll('[role=tabpanel]:not([hidden]) .row[tabindex]')][${Number(s.slice(9))}]; r.focus(); })()`);
+        if (s === "add") await ev(`document.getElementById('rule-add').click()`);
+      }
+      await sleep(250);
+      const main = /^(main|idn|threat|packed|badge|reduced|paused|unsupported|firefox|longhost)$/.test(name);
+      if (scheme === "light") judge(`popup-${name}`, await ev(extAudit()), {budget: !extBefore && main ? 520 : 0});
+      const h = await ev(`Math.ceil(document.body.getBoundingClientRect().height)`);
+      await shot(sessionId, {x: 0, y: 0, width: 360, height: h}, path.join(dir, `popup-${name}-${scheme}.png`));
+      await cdp("Target.closeTarget", {targetId});
+    }
+    console.log("ok", `popup-${name}`);
+  }
+
+  // Decision pages at 1440 and 390.
+  for (const [name, file, rest, stub, setup] of fx.PAGES) {
+    if (filter && !name.includes(filter)) continue;
+    if (extBefore && !["warning", "interstitial", "unread"].includes(name)) continue;
+    for (const w of [1440, 390]) for (const scheme of schemes) {
+      const {sessionId, targetId, ev} = await open(page(file) + rest, w, 900, scheme, w <= 400 ? 2 : 1, stub);
+      await sleep(300);
+      if (setup) { await ev(setup); await sleep(200); }
+      if (scheme === "light") {
+        const r = await ev(extAudit());
+        r.focused = await ev(`document.activeElement && (document.activeElement.id || document.activeElement.textContent.trim())`);
+        // Decision pages: the headline is the largest type and the hostname the second largest.
+        r.hierarchy = await ev(`(() => { const main = [...document.querySelectorAll('main')].find((m) => !m.hidden); const size = (e) => e ? parseFloat(getComputedStyle(e).fontSize) : 0;
+          const texts = [...main.querySelectorAll('*')].filter((e) => !e.closest('[hidden]') && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()));
+          const sizes = [...new Set(texts.map(size))].sort((a, b) => b - a); const host = main.querySelector('#host .lbl, #scan-host .lbl');
+          return {h1: size(main.querySelector('h1')), host: host ? size(host) : null, top: sizes.slice(0, 3), top3: Math.round(main.querySelector('.kind').getBoundingClientRect().top)}; })()`);
+        if (r.hierarchy.h1 !== r.hierarchy.top[0] || (r.hierarchy.host !== null && r.hierarchy.host !== r.hierarchy.top[1])) r.unnamed.push(`hierarchy: ${JSON.stringify(r.hierarchy)}`);
+        judge(`${name}-${w}`, r);
+      }
+      const h = await ev(`Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)`);
+      await shot(sessionId, {x: 0, y: 0, width: w, height: h}, path.join(dir, `${name}-${w}-${scheme}.png`));
+      await cdp("Target.closeTarget", {targetId});
+    }
+    console.log("ok", name);
+  }
+
+  // The click-to-load placeholder, rendered by page-guard.js inside a stand-in article.
+  if (!filter || filter.includes("placeholder")) {
+    for (const scheme of schemes) {
+      const {sessionId, targetId, ev} = await open(pathToFileURL(path.join(here, "ext-placeholder.html")).href, 1600, 1200, scheme, 2);
+      await sleep(300);
+      const rects = await ev(`[...document.querySelectorAll('.frame[data-name]')].map(e=>{const r=e.getBoundingClientRect();return {name:e.dataset.name,x:r.left+scrollX,y:r.top+scrollY,width:r.width,height:r.height}})`);
+      if (scheme === "light") judge("placeholder", await ev(extAudit().replace("walk(document);", "for (const f of document.querySelectorAll('.frame [data-eg-embed]')) { all.push(f); walk(f.shadowRoot); }")));
+      for (const r of rects) await shot(sessionId, {x: r.x, y: r.y, width: r.width, height: r.height}, path.join(dir, `${r.name}-${scheme}.png`));
+      await cdp("Target.closeTarget", {targetId});
+    }
+    console.log("ok", "placeholder");
+  }
+  fs.writeFileSync(path.join(dir, "audit.json"), JSON.stringify(log, null, 1));
+  for (const p of problems) console.log("AUDIT", p);
+}

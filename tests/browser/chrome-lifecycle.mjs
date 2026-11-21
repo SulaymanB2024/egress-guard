@@ -60,6 +60,8 @@ try {
   const {targetId} = await cdp("Target.createTarget", {url: `http://publisher.example:${port}/page`});
   const page = (await cdp("Target.attachToTarget", {targetId, flatten: true})).sessionId;
   await waitFor(async () => (await evaluate(page, "document.readyState")) === "complete");
+  // The tab can take a moment to show its URL to the worker when Chrome is busy (the first run after another suite).
+  await waitFor(async () => (await swEval(`chrome.tabs.query({}).then((t) => t.some((x) => (x.url || "").includes("publisher.example")))`)) === true);
   const tabId = await swEval(`chrome.tabs.query({}).then((t) => t.find((x) => (x.url || "").includes("publisher.example")).id)`);
   const popup = `{id: chrome.runtime.id, url: "chrome-extension://" + chrome.runtime.id + "/popup.html"}`;
   const tabUrl = JSON.stringify(`http://publisher.example:${port}/page`);
@@ -101,6 +103,16 @@ try {
     await chrome.alarms.create("eg-expiry", {when: soon});
     return {soon, exception: Math.min(...__EGBackground.store.exceptions.map((e) => e.expiresAt))};
   })()`);
+  // A timed pause of the site, from the popup, made to end at the same moment (as if its 15 minutes were up).
+  const paused = await swEval(`(async () => {
+    const r = await __EGBackground.handle({type: "pause-site", tabId: ${tabId}, tabUrl: ${tabUrl}}, ${popup});
+    const relax = (await chrome.declarativeNetRequest.getDynamicRules()).some((x) => x.action.type === "allowAllRequests" && x.condition.requestDomains.includes("publisher.example"));
+    await chrome.storage.local.set({egressGuardPauses: {"publisher.example": ${due.soon}}});
+    return {ok: r.ok, until: r.until, now: Date.now(), relax};
+  })()`);
+  check("pause: the popup pauses the site for 15 minutes (Relaxed in place)", paused.ok && paused.relax && Math.abs(paused.until - paused.now - 900000) < 5000, JSON.stringify(paused));
+  hits.length = 0;
+  check("pause: the user's own block rule still blocks while paused", (await loadImage(page, `http://pixel.tracker-fixture.test:${port}/user-blocked.gif`)) === "error" && !hits.length);
   check("worker stopped again before the expiries", await stopWorker());
   const deadline = Math.max(due.soon, due.exception) + 20000;
   let wokeAt = null;
@@ -115,6 +127,11 @@ try {
     session: (await chrome.declarativeNetRequest.getSessionRules()).length}; })()`);
   check("expired exception removed while the worker was asleep; the 15-minute one kept", end.exceptions.join() === "/allowed.gif" && end.dynamic.length === 2, JSON.stringify(end));
   check("expired continue removed while the worker was asleep", end.continues === 0 && end.session === 0, JSON.stringify(end));
+  const pauseEnd = await swEval(`(async () => { await __EGBackground.ready; return {stored: (await chrome.storage.local.get("egressGuardPauses")).egressGuardPauses || {},
+    relax: (await chrome.declarativeNetRequest.getDynamicRules()).some((x) => x.action.type === "allowAllRequests"),
+    state: await __EGBackground.handle({type: "popup-state", tabId: ${tabId}, tabUrl: ${tabUrl}}, ${popup})}; })()`);
+  check("pause ended on the alarm while the worker was stopped; the site's own level is back", Object.keys(pauseEnd.stored).length === 0 && !pauseEnd.relax && pauseEnd.state.paused === null && pauseEnd.state.mode === "standard",
+    JSON.stringify({stored: pauseEnd.stored, relax: pauseEnd.relax, paused: pauseEnd.state.paused, mode: pauseEnd.state.mode}));
   hits.length = 0;
   check("after expiry Chrome blocks the formerly excepted endpoint again", (await loadImage(page, `http://pixel.tracker-fixture.test:${port}/short.gif`)) === "error" && !hits.length);
 

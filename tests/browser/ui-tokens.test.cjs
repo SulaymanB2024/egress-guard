@@ -1,0 +1,266 @@
+"use strict";
+// The extension's UI against the design system (docs/design/DESIGN.md, docs/design/tokens.css): one token source,
+// no off-token colours, sizes or spacing, contrast per section 4, no inline scripts or styles, and the popup's
+// keyboard and truncation rules. No browser; the real-browser audit is docs/design/review/capture.mjs --extension.
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const {parseHTML, event, userClick, allText} = require("./dom-stub.cjs");
+
+const root = path.resolve(__dirname, "../..");
+const read = (f) => fs.readFileSync(path.join(root, f), "utf8");
+const TOKENS = read("docs/design/tokens.css");
+const TOKEN_BODY = TOKENS.slice(TOKENS.indexOf(":root {"));
+const CSS_FILES = fs.readdirSync(path.join(root, "browser")).filter((f) => f.endsWith(".css")).map((f) => `browser/${f}`);
+
+/** The extension's own CSS: every stylesheet with the verbatim token block removed, plus the placeholder's rules. */
+function ownCss() {
+  const out = CSS_FILES.map((f) => [f, read(f).replace(TOKEN_BODY, "")]);
+  const guard = read("browser/page-guard.js");
+  const css = guard.slice(guard.indexOf("const PLACEHOLDER_CSS = `"), guard.indexOf("`;", guard.indexOf("const PLACEHOLDER_CSS = `")));
+  out.push(["browser/page-guard.js (placeholder)", css]);
+  return out;
+}
+
+/** Custom properties of one block of tokens.css: light (:root) or dark (the prefers-color-scheme block). */
+function tokenValues(scheme) {
+  const light = TOKENS.slice(TOKENS.indexOf(":root {"), TOKENS.indexOf("@media (prefers-color-scheme: dark)"));
+  const dark = TOKENS.slice(TOKENS.indexOf("@media (prefers-color-scheme: dark)"), TOKENS.indexOf("/* macOS mapping"));
+  const map = {};
+  const parse = (text) => { for (const m of text.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)) map[m[1]] = m[2].trim(); };
+  parse(light);
+  if (scheme === "dark") parse(dark);
+  return map;
+}
+
+test("ui.css carries docs/design/tokens.css byte for byte, so every surface shares one token source", () => {
+  const ui = read("browser/ui.css");
+  assert.ok(ui.includes(TOKEN_BODY), "ui.css must contain tokens.css from ':root {' to its end, unchanged");
+  assert.equal(ui.indexOf(":root {"), ui.indexOf(TOKEN_BODY), "the copied block is the first token definition in ui.css");
+  assert.equal(ui.split(":root {").length, TOKEN_BODY.split(":root {").length, "no extra :root block redefines a token");
+  for (const f of CSS_FILES.filter((x) => x !== "browser/ui.css")) {
+    assert.doesNotMatch(read(f), /--(paper|raised|sunken|ink|muted|faint|line|edge|fill-primary|focus|protected|reduced|unprotected|s[1-8]|t-[a-z]+)\s*:/, `${f} redefines a design token`);
+  }
+  for (const f of ["browser/popup.html", "browser/warning.html", "browser/unwrap.html"]) {
+    assert.match(read(f), /<link rel="stylesheet" href="ui\.css">/, `${f} loads ui.css`);
+  }
+});
+
+test("extension CSS uses only token colours, type sizes and spacing", () => {
+  const problems = [];
+  const sizes = new Set();
+  for (const [file, css] of ownCss()) {
+    const body = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of body.matchAll(/#[0-9a-f]{3,8}\b|\b(rgba?|hsla?)\(/gi)) problems.push(`${file}: literal colour ${m[0]}`);
+    for (const m of body.matchAll(/(?:^|[;{\s])(font-size|font)\s*:\s*([^;}]+)/g)) {
+      const value = m[2];
+      for (const t of value.matchAll(/var\(--t-([a-z]+)\)/g)) sizes.add(t[1]);
+      if (/\d+(\.\d+)?px/.test(value)) problems.push(`${file}: raw font size "${m[1]}: ${value.trim()}"`);
+    }
+    for (const m of body.matchAll(/(?:^|[;{\s])((?:padding|margin)(?:-[a-z]+)?|gap|row-gap|column-gap)\s*:\s*([^;}]+)/g)) {
+      for (const px of m[2].matchAll(/(-?\d*\.?\d+)px/g)) {
+        if (![1, 2, 4, 8, 12, 16, 24, 32, 48, 64].includes(Math.abs(Number(px[1])))) problems.push(`${file}: off-scale ${m[1]}: ${m[2].trim()}`);
+      }
+    }
+  }
+  // The token file's own rules count too: the whole extension may use at most the five type roles.
+  for (const t of TOKEN_BODY.matchAll(/var\(--t-([a-z]+)\)/g)) sizes.add(t[1]);
+  assert.deepEqual(problems, []);
+  assert.ok(sizes.size <= 5, `more than five font sizes: ${[...sizes].join(", ")}`);
+});
+
+test("the embed placeholder's inlined tokens equal tokens.css in light and dark", () => {
+  const guard = read("browser/page-guard.js");
+  const start = guard.indexOf("const PLACEHOLDER_TOKENS = ") + "const PLACEHOLDER_TOKENS = ".length;
+  const literal = guard.slice(start, guard.indexOf("};", start) + 1);
+  const inlined = vm.runInNewContext(`(${literal})`);
+  for (const scheme of ["light", "dark"]) {
+    const want = tokenValues(scheme);
+    for (const [k, v] of Object.entries({...inlined.common, ...inlined[scheme]})) assert.equal(v, want[k], `${scheme} ${k}`);
+  }
+});
+
+// WCAG 2.x relative luminance contrast.
+const lum = (hex) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+
+test("contrast per DESIGN.md section 4, light and dark", () => {
+  for (const scheme of ["light", "dark"]) {
+    const t = tokenValues(scheme);
+    const text = [["ink", "paper"], ["ink", "raised"], ["ink", "sunken"], ["muted", "paper"], ["muted", "raised"], ["muted", "sunken"],
+      ["protected", "paper"], ["reduced", "paper"], ["unprotected", "paper"], ["protected", "raised"], ["reduced", "raised"], ["unprotected", "raised"],
+      ["unprotected", "sunken"], ["protected", "protected-tint"], ["reduced", "reduced-tint"], ["unprotected", "threat-tint"], ["ink", "reduced-tint"],
+      ["ink", "threat-tint"], ["on-primary", "fill-primary"]];
+    for (const [fg, bg] of text) assert.ok(ratio(t[`--${fg}`], t[`--${bg}`]) >= 4.5, `${scheme}: ${fg} on ${bg} ${ratio(t[`--${fg}`], t[`--${bg}`]).toFixed(2)}`);
+    for (const [fg, bg] of [["edge", "paper"], ["edge", "raised"], ["focus", "paper"], ["focus", "raised"], ["fill-primary", "paper"]]) {
+      assert.ok(ratio(t[`--${fg}`], t[`--${bg}`]) >= 3, `${scheme}: ${fg} against ${bg} ${ratio(t[`--${fg}`], t[`--${bg}`]).toFixed(2)}`);
+    }
+  }
+  // Dark mode: the filled button is the brightest control (the owner's decision on open question 4).
+  const dark = tokenValues("dark");
+  for (const k of ["--raised", "--ink", "--edge", "--protected"]) assert.ok(lum(dark["--fill-primary"]) >= lum(dark[k]) || k === "--ink", k);
+});
+
+test("extension pages: no inline scripts or styles, no remote resources, at most one filled button per view", () => {
+  for (const f of fs.readdirSync(path.join(root, "browser")).filter((x) => x.endsWith(".html"))) {
+    const html = read(`browser/${f}`);
+    assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/, `${f}: inline script`);
+    assert.doesNotMatch(html, /<style\b|\sstyle="/, `${f}: inline style`);
+    assert.doesNotMatch(html, /(src|href)="(https?:)?\/\//, `${f}: remote resource`);
+    for (const view of html.split(/<main\b|<section id="panel-/).slice(1)) {
+      assert.ok((view.match(/class="btn primary/g) || []).length <= 1, `${f}: more than one filled button in a view`);
+    }
+  }
+});
+
+// ---- popup behaviour ---------------------------------------------------------------------------------------------
+async function popupWith(state, page = {site: "publisher.example", paused: false, hidden: 0, shown: 0, protectedRules: [], overbroadRules: []}) {
+  const doc = parseHTML(read("browser/popup.html"));
+  const sent = [];
+  const browser = {
+    runtime: {sendMessage: async (msg) => { sent.push(msg); return msg.type === "popup-state" ? JSON.parse(JSON.stringify(state)) : {ok: true}; }},
+    tabs: {query: async () => [{id: 1, url: "https://publisher.example/a"}], sendMessage: async () => page},
+  };
+  const ctx = vm.createContext({document: doc, browser, console, close: () => {}});
+  vm.runInContext(read("browser/popup.js"), ctx, {filename: "popup.js"});
+  await ctx.__EGPopup.ready;
+  return {doc, sent, api: ctx.__EGPopup, $: (id) => doc.getElementById(id), text: (id) => allText(doc.getElementById(id))};
+}
+const STATE = {host: "publisher.example", site: "publisher.example", lists: [], requestRules: [], cosmeticRules: [], exceptions: [],
+  mode: "standard", defaultMode: "standard", feedback: "debug", types: ["script", "image", "beacon"], cleaning: {on: true, links: 3, cookies: 1},
+  blocked: [{host: "cdn.bad.example", path: "/x.js", type: "script", list: "threats", count: 1}, {host: "t.example", path: "/p.gif", type: "image", list: "trackers", count: 2}]};
+
+test("popup tabs follow the ARIA tabs pattern: one tab stop, arrows, Home and End select and focus", async () => {
+  const p = await popupWith(STATE);
+  const tab = (id) => p.$(`tab-${id}`);
+  assert.equal(p.$("tabs").getAttribute("role"), "tablist");
+  assert.equal(tab("page").getAttribute("aria-selected"), "true");
+  assert.equal(p.$("panel-blocked").hidden, true);
+  const key = (k) => { const e = event("keydown", {key: k}); p.$("tabs").dispatchEvent(e); return e; };
+  assert.ok(key("ArrowRight").defaultPrevented);
+  assert.equal(tab("blocked").getAttribute("aria-selected"), "true");
+  assert.equal(tab("blocked").getAttribute("tabindex"), "0");
+  assert.equal(tab("page").getAttribute("tabindex"), "-1");
+  assert.equal(p.doc.activeElement, tab("blocked"));
+  assert.equal(p.$("panel-blocked").hidden, false);
+  assert.equal(p.$("panel-page").hidden, true);
+  key("End");
+  assert.equal(tab("settings").getAttribute("aria-selected"), "true");
+  key("ArrowRight");
+  assert.equal(tab("page").getAttribute("aria-selected"), "true", "wraps around");
+  key("ArrowLeft");
+  assert.equal(tab("settings").getAttribute("aria-selected"), "true");
+  for (const id of ["page", "blocked", "rules", "settings"]) assert.equal(tab(id).getAttribute("aria-controls"), `panel-${id}`);
+});
+
+test("popup: a stopped threat is counted in the threat colour and never offered a timed exception", async () => {
+  const p = await popupWith(STATE);
+  assert.equal(p.text("blocked-count"), "3");
+  assert.equal(p.$("threat-line").hidden, false);
+  assert.equal(p.$("threat-line").getAttribute("data-state"), "threat");
+  assert.match(p.text("threat-line"), /1 threat stopped/);
+  const groups = p.$("blocked").childNodes;
+  assert.equal(groups[0].getAttribute("data-state"), "threat", "the threat group heading uses the threat state");
+  assert.equal(groups[1].getAttribute("data-state"), null, "nothing else uses it");
+  assert.equal(groups[0].querySelectorAll(".btn").length, 0, "no Allow on a threat-listed host");
+  const allow = groups[1].querySelectorAll(".btn");
+  assert.equal(allow.length, 1);
+  assert.equal(allow[0].className, "btn act", "Allow 15 min is a trailing action, hidden at rest by .row .act");
+  const li = groups[1].querySelector(".row");
+  assert.equal(li.getAttribute("tabindex"), "0", "its row is focusable, so the action is keyboard reachable");
+  assert.equal(li.getAttribute("title"), "t.example/p.gif", "the full address stays available");
+});
+
+test("popup: the endpoint form opens from Add…, closes with Escape and returns focus", async () => {
+  const p = await popupWith(STATE);
+  assert.equal(p.$("rules-empty").hidden, false, "no rules: the designed empty state");
+  userClick(p.$("rule-add-empty"));
+  assert.equal(p.$("add-rule").hidden, false);
+  assert.equal(p.$("rules-empty").hidden, true);
+  assert.equal(p.doc.activeElement, p.$("rule-path"));
+  const esc = event("keydown", {key: "Escape"});
+  p.doc.dispatchEvent(esc);
+  assert.equal(p.$("add-rule").hidden, true);
+  assert.equal(p.$("rule-add").getAttribute("aria-expanded"), "false");
+  assert.equal(p.doc.activeElement, p.$("rule-add-empty"));
+});
+
+test("popup: every second-level view has its empty state; unsupported pages say so", async () => {
+  const p = await popupWith({...STATE, blocked: []});
+  assert.equal(p.$("blocked-empty").hidden, false);
+  assert.match(p.text("blocked-empty"), /Nothing blocked on this page/);
+  assert.equal(p.text("blocked-count"), "0", "zero is shown as 0");
+  assert.equal(p.$("rules-empty").hidden, false);
+  const none = await popupWith({site: null});
+  assert.equal(none.$("unsupported").hidden, false);
+  assert.equal(none.$("tab-blocked").hidden, true);
+  assert.equal(none.$("status").getAttribute("data-state"), "neutral");
+});
+
+test("popup: protection levels are a segmented control; Pause and the default stay separate controls", async () => {
+  const p = await popupWith(STATE);
+  const modes = p.$("modes").childNodes;
+  assert.deepEqual(modes.map((b) => b.textContent), ["Relaxed", "Standard", "Strict", "No scripts"]);
+  assert.equal(modes[1].getAttribute("aria-pressed"), "true");
+  userClick(modes[2]);
+  await new Promise((r) => setImmediate(r));
+  assert.ok(p.sent.some((m) => m.type === "set-mode" && m.mode === "strict"));
+  assert.equal(p.$("pause").className, "btn quiet", "Pause is quiet, not a fifth segment");
+  assert.deepEqual(p.$("default-modes").childNodes.map((b) => b.textContent), ["Standard", "Strict"]);
+  const ff = await popupWith({...STATE, mode: undefined, cleaning: undefined});
+  assert.equal(ff.$("protection").hidden, true, "a build without levels (Firefox) shows none");
+  assert.equal(ff.$("fact-links").hidden, true);
+});
+
+test("truncation: hostnames in the middle by whole labels; URLs keep the host and the last segment", async () => {
+  const {api} = await popupWith(STATE);
+  const long = "accounts.internal-billing-portal.eu-west1.cdn.example-enterprise.co.uk";
+  assert.equal(long.length, 70);
+  assert.equal(api.fitHost(long, 80), long);
+  assert.equal(api.fitHost(long, 40), "accounts.….example-enterprise.co.uk");
+  assert.equal(api.fitHost(long, 28), "….example-enterprise.co.uk");
+  for (const max of [20, 30, 45, 60]) {
+    const out = api.fitHost(long, max);
+    assert.ok(out.length <= max, `${out} fits ${max}`);
+    const kept = out.split(".").filter((l) => l !== "…" && !l.includes("…"));
+    for (const label of kept) assert.ok(long.split(".").includes(label), `"${label}" is a whole label`);
+  }
+  assert.equal(api.fitHost("xn--pypal-4ve.com", 30), "xn--pypal-4ve.com", "punycode is shown as is");
+  assert.deepEqual([...api.fitUrl("publisher.example", "/sgtm/gtm.js", 40)], ["publisher.example", "/sgtm/gtm.js"]);
+  assert.deepEqual([...api.fitUrl("publisher.example", "/a/very/long/path/to/gtm.js", 28)], ["publisher.example", "/…/gtm.js"]);
+  assert.deepEqual([...api.fitUrl("securepubads.g.doubleclick.net", "/pagead/managed/js/gpt/m202611180101/pubads_impl.js", 40)], ["securepubads.g.doubleclick.net", "/…"]);
+  const [h, rest] = api.fitUrl(long, "/p.gif", 40);
+  assert.ok((h + rest).length <= 40 && rest === "/p.gif" && h.endsWith("example-enterprise.co.uk"));
+  assert.equal(api.fmt(9999), "9,999");
+  assert.equal(api.fmt(12480), "12.5k");
+  assert.equal(api.fmt(1870000), "1.9M");
+});
+
+test("popup: a paused site says Paused until HH:MM, offers a filled Resume, and shows the level that comes back, disabled", async () => {
+  const until = new Date(2026, 10, 20, 15, 42).getTime();
+  const p = await popupWith({...STATE, mode: "relaxed", resumeMode: "strict", paused: until});
+  assert.equal(p.text("status-word"), "Paused");
+  assert.equal(p.$("status").getAttribute("data-state"), "reduced");
+  assert.equal(p.$("paused").hidden, false);
+  assert.equal(p.text("paused-text"), "Paused on this site until 15:42");
+  assert.equal(p.$("resume").className, "btn primary", "Resume is the one filled button");
+  assert.equal(p.$("paused-note").hidden, false);
+  assert.equal(p.text("paused-note"), "Malware and phishing blocking stays on.");
+  assert.equal(p.$("pause").hidden, true);
+  const modes = p.$("modes").childNodes;
+  assert.ok(modes.every((b) => b.disabled), "levels cannot change while paused");
+  assert.equal(modes.find((b) => b.getAttribute("aria-pressed") === "true").textContent, "Strict", "the level that will be restored");
+  userClick(p.$("resume"));
+  await new Promise((r) => setImmediate(r));
+  assert.ok(p.sent.some((m) => m.type === "resume-site"));
+  const live = await popupWith(STATE);
+  assert.equal(live.$("paused").hidden, true);
+  userClick(live.$("pause"));
+  await new Promise((r) => setImmediate(r));
+  assert.ok(live.sent.some((m) => m.type === "pause-site"), "Pause asks the worker, not the page");
+});

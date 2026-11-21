@@ -115,6 +115,35 @@
   const HOST_STYLE = [["display", "block"], ["position", "static"], ["opacity", "1"], ["visibility", "visible"], ["transform", "none"],
     ["filter", "none"], ["clip-path", "none"], ["mask", "none"], ["pointer-events", "auto"], ["mix-blend-mode", "normal"], ["margin", "8px 0"],
     ["contain", "none"], ["z-index", "auto"]];
+  // What each held embed is, for its title and button ("YouTube video", "Load video").
+  const EMBED_KINDS = {youtube: "video", tiktok: "video", x: "post", instagram: "post", facebook: "post", disqus: "comments"};
+  // The placeholder sits in a closed shadow root on someone else's page, so it cannot use the extension's ui.css:
+  // these are the design tokens it needs, copied from docs/design/tokens.css (tests/browser/ui-tokens.test.cjs
+  // fails if any value drifts), and the component rules of docs/design/mockups/placeholder.html.
+  const PLACEHOLDER_TOKENS = {
+    light: {"--paper": "#f5f5ef", "--raised": "#fbfbf7", "--sunken": "#ebebe3", "--ink": "#182721", "--muted": "#56645d", "--edge": "#7c8780",
+      "--fill-primary": "#19382e", "--on-primary": "#fbfbf7", "--focus": "#2f6f58", "--unprotected": "#913f37"},
+    dark: {"--paper": "#0f1713", "--raised": "#17221d", "--sunken": "#0a110e", "--ink": "#e6e8df", "--muted": "#9aa69f", "--edge": "#64726b",
+      "--fill-primary": "#cfe3d6", "--on-primary": "#0f1713", "--focus": "#8fc9ac", "--unprotected": "#e08a7f"},
+    common: {"--s1": "4px", "--s2": "8px", "--s3": "12px", "--s4": "16px", "--t-caption": "12px", "--lh-caption": "16px", "--t-body": "14px", "--lh-body": "20px",
+      "--t-title": "16px", "--lh-title": "22px", "--w-regular": "400", "--w-strong": "600", "--r-control": "6px", "--r-surface": "10px", "--hit": "28px",
+      "--font-sans": '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif'},
+  };
+  const vars = (o) => Object.entries(o).map(([k, v]) => `${k}:${v}`).join(";");
+  const PLACEHOLDER_CSS = `:host{all:initial !important;display:block !important;position:static !important;opacity:1 !important;visibility:visible !important;transform:none !important;filter:none !important;clip-path:none !important;pointer-events:auto !important;margin:8px 0 !important}
+      .b{${vars(PLACEHOLDER_TOKENS.common)};${vars(PLACEHOLDER_TOKENS.light)};display:flex !important;flex-direction:column;justify-content:center;align-items:flex-start;gap:var(--s3);box-sizing:border-box;min-height:120px;padding:var(--s4);border-radius:var(--r-surface);background:var(--sunken);color:var(--ink);font:var(--w-regular) var(--t-body)/var(--lh-body) var(--font-sans);text-align:left;opacity:1 !important;visibility:visible !important}
+      @media (prefers-color-scheme:dark){.b{${vars(PLACEHOLDER_TOKENS.dark)}}}
+      p{margin:0}
+      .w{display:flex;align-items:center;gap:var(--s2);color:var(--muted);font-size:var(--t-caption);line-height:var(--lh-caption)}
+      .mk{width:14px;height:16px;flex:none;background:var(--fill-primary);clip-path:polygon(50% 0, 100% 18%, 94% 66%, 50% 100%, 6% 66%, 0 18%)}
+      .t{font-size:var(--t-title);line-height:var(--lh-title);font-weight:var(--w-strong)}
+      .row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s3)}
+      button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:24px;min-height:var(--hit);margin:0;padding:0 var(--s3);border:1px solid var(--fill-primary);border-radius:var(--r-control);background:var(--fill-primary);color:var(--on-primary);font:var(--w-strong) var(--t-body)/1 var(--font-sans);white-space:nowrap;cursor:pointer;opacity:1 !important;visibility:visible !important}
+      button.c{min-width:var(--hit);padding:0;background:transparent;border-color:transparent;color:var(--ink);text-decoration:underline;text-decoration-color:var(--edge);text-underline-offset:3px}
+      button:disabled{cursor:default}
+      button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+      .n{color:var(--unprotected)}
+      .n[hidden]{display:none}`;
   const computed = (el) => { try { return typeof root.getComputedStyle === "function" ? root.getComputedStyle(el) : null; } catch { return null; } };
 
   /**
@@ -151,14 +180,7 @@
     for (const [k, v] of HOST_STYLE) box.style.setProperty(k, v, "important");
     const shadow = box.attachShadow({mode: "closed"});
     const style = document.createElement("style");
-    style.textContent = `:host{all:initial !important;display:block !important;position:static !important;opacity:1 !important;visibility:visible !important;transform:none !important;filter:none !important;clip-path:none !important;pointer-events:auto !important;margin:8px 0 !important}
-      .b{display:flex !important;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px;box-sizing:border-box;min-height:120px;padding:16px;border:1px dashed #8a948c;border-radius:8px;background:#f4f4f0;color:#1b1f1d;font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;opacity:1 !important;visibility:visible !important}
-      .t{font-weight:650}.n{color:#4d5650;font-size:12.5px}
-      .row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
-      button{font:inherit;font-weight:600;border:1px solid #2f6f58;border-radius:6px;padding:6px 12px;color:#fff;background:#19382e;cursor:pointer;opacity:1 !important;visibility:visible !important;min-width:24px;min-height:24px}
-      button.c{background:transparent;color:#2f6f58;border-color:transparent;text-decoration:underline;text-underline-offset:3px;font-weight:500;padding:6px 4px}
-      button:focus-visible{outline:3px solid #2f6f58;outline-offset:2px}
-      @media (prefers-color-scheme:dark){.b{background:#1d2421;color:#e8ece9;border-color:#5b665f}.n{color:#a9b3ad}button.c{color:#8fc9ac}}`;
+    style.textContent = PLACEHOLDER_CSS;
     const wrap = document.createElement("div");
     wrap.className = "b";
     if (sizeFrom) {
@@ -166,10 +188,17 @@
       if (w > 0) wrap.style.maxWidth = `${Math.min(w, 2000)}px`;
       if (h > 0) wrap.style.minHeight = `${Math.min(h, 2000)}px`;
     }
-    const title = document.createElement("span"); title.className = "t"; title.textContent = `${provider.name} content held`;
-    const note = document.createElement("span"); note.className = "n"; note.textContent = `Loading it lets ${provider.name} see this visit, without its cookies. Held by Egress Guard (Strict).`;
-    const button = document.createElement("button"); button.type = "button"; button.textContent = `Load from ${provider.name}`;
-    const withCookies = document.createElement("button"); withCookies.type = "button"; withCookies.className = "c"; withCookies.textContent = "Load with cookies (signed in)";
+    // "Held by Egress Guard" (caption) -> provider and kind (title) -> Load (primary) and Load signed in (quiet).
+    const kind = EMBED_KINDS[provider.id] || "content";
+    const who = document.createElement("p"); who.className = "w";
+    const mark = document.createElement("span"); mark.className = "mk"; mark.setAttribute("aria-hidden", "true");
+    who.append(mark, document.createTextNode("Held by Egress Guard"));
+    const title = document.createElement("p"); title.className = "t"; title.textContent = `${provider.name} ${kind}`;
+    const note = document.createElement("p"); note.className = "n"; note.setAttribute("role", "alert"); note.hidden = true;
+    const button = document.createElement("button"); button.type = "button"; button.textContent = `Load ${kind}`;
+    button.setAttribute("aria-label", `Load ${provider.name} ${kind}, without cookies`);
+    const withCookies = document.createElement("button"); withCookies.type = "button"; withCookies.className = "c"; withCookies.textContent = "Load signed in";
+    withCookies.setAttribute("aria-label", "Load signed in, with cookies");
     let visibleSince;   // undefined until IntersectionObserver v2 reports; see clickAllowed
     if (typeof root.IntersectionObserver === "function") {
       try {
@@ -185,7 +214,8 @@
     }
     const load = (cookies, from) => async (event) => {
       if (!clickAllowed(from, shadow, event, visibleSince)) {
-        note.textContent = "Not loaded: the button was covered, hidden or had just appeared. Scroll it fully into view and click again.";
+        note.textContent = "Not loaded: the button was covered or had just appeared. Click again.";
+        note.hidden = false;
         return;
       }
       button.disabled = true; withCookies.disabled = true;
@@ -196,7 +226,7 @@
     withCookies.addEventListener("click", load(true, withCookies));
     const row = document.createElement("div"); row.className = "row";
     row.append(button, withCookies);
-    wrap.append(title, note, row);
+    wrap.append(who, title, row, note);
     shadow.append(style, wrap);
     return box;
   }

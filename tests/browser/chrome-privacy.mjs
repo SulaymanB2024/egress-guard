@@ -273,6 +273,20 @@ try {
   check("links: an unwrapped destination on the threat list lands on warning.html; the threat host is never contacted",
     toWarning && (await evaluate(page, "document.getElementById('host').textContent")) === "malware-fixture.test" && !hits.some((h) => h.host === "malware-fixture.test"), await evaluate(page, "location.href"));
 
+  // Pause: even with the threat-listed site itself and the page it is opened from both paused (Relaxed, no cleaning),
+  // the navigation still lands on the warning page and the site is never contacted.
+  const threatUrl = `http://malware-fixture.test:${port}/landing`;
+  const pausedThreat = await popupAct(tabId, threatUrl, {type: "pause-site"});
+  const pausedFrom = await popupAct(tabId, P("/fp"), {type: "pause-site"});
+  await navigate(page, P("/fp"));
+  hits.length = 0;
+  await evaluate(page, `location.href = ${JSON.stringify(threatUrl)}; true`);
+  const pausedWarning = await until(page, `location.href.startsWith("chrome-extension://${id}/warning.html") && document.getElementById("host").textContent === "malware-fixture.test"`, "threat navigation while paused");
+  check("pause: a threat-listed navigation still lands on the warning page while paused", pausedThreat.ok && pausedFrom.ok && pausedWarning && !hits.some((h) => h.host === "malware-fixture.test"),
+    JSON.stringify({pausedThreat, pausedFrom, at: await evaluate(page, "location.href")}));
+  await popupAct(tabId, threatUrl, {type: "resume-site"});
+  await popupAct(tabId, P("/fp"), {type: "resume-site"});
+
   // 2b. Mail scanners: the interstitial; nothing opens by itself; Continue goes through the scanner; Open directly is checked.
   const scanUrl = (dest) => `http://nam02.safelinks.protection.outlook.com:${port}/?url=${encodeURIComponent(dest)}&data=05%7C02&sdata=sig&utm_source=x`;
   const scanned = scanUrl(`http://clean-fixture.test:${port}/dest?s=1`);
@@ -284,7 +298,7 @@ try {
     onScan && (await evaluate(page, "document.getElementById('scan-host').textContent")) === "clean-fixture.test" && (await evaluate(page, "location.protocol")) === "chrome-extension:" && hits.length === 0,
     JSON.stringify({host: await evaluate(page, "document.getElementById('scan-host').textContent"), hits: hitPaths()}));
   check("scanner: Continue through the scanner has the focus; Open directly says it skips the scan",
-    (await evaluate(page, "document.activeElement && document.activeElement.id")) === "through" && /skips the mail scan/.test(await evaluate(page, "document.getElementById('direct').textContent")));
+    (await evaluate(page, "document.activeElement && document.activeElement.id")) === "through" && /skips the mail scan/.test(await evaluate(page, "document.getElementById('direct').getAttribute('aria-label')")));
   const framed = await evaluate(page, `new Promise((r) => { const f = document.createElement("iframe"); f.src = location.href; f.onload = () => { try { r(f.contentDocument ? f.contentDocument.getElementById("scan") && !f.contentDocument.getElementById("scan").hidden : false); } catch (e) { r(false); } }; document.body.append(f); setTimeout(() => r(false), 3000); })`);
   check("scanner: the interstitial does not render inside a frame", framed === false, String(framed));
   await click(page, "#through");
@@ -485,7 +499,7 @@ try {
     for (const scheme of ["light", "dark"]) {
       await cdp("Emulation.setEmulatedMedia", {features: [{name: "prefers-color-scheme", value: scheme}]}, pop);
       await navigate(pop, `chrome-extension://${id}/popup.html?tab=${tabId}`);
-      await until(pop, "Number(document.getElementById('blocked-count').textContent) > 0 && document.querySelectorAll('#modes input').length === 4", "popup rendered");
+      await until(pop, "Number(document.getElementById('blocked-count').textContent) > 0 && document.querySelectorAll('#modes button').length === 4", "popup rendered");
       await sleep(300);
       await screenshot(pop, path.join(shots, `popup-categories-${scheme}.png`), 360);
     }

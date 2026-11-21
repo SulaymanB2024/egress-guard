@@ -28,19 +28,26 @@
     // If anything changes the address after this page rendered, start over so the page never shows one host and
     // continues to another.
     root.addEventListener("hashchange", () => { lock(); root.location.reload(); });
-    $("host").textContent = target.host;
+    // One box per label (dot included), so the hostname wraps only between labels.
+    const labels = target.host.split(".");
+    $("host").replaceChildren(...labels.map((label, i) => Object.assign(document.createElement("span"), {className: "lbl", textContent: i < labels.length - 1 ? `${label}.` : label})));
     $("url").textContent = target.url;
+    // The button names the host it opens; a host too long for one button line is named above it instead.
+    if (target.host.length <= 32) $("continue").textContent = `Open ${target.host} once`;
     document.title = `Blocked: ${target.host}`;
     $("back").addEventListener("click", () => {
       if (root.history.length > 1) root.history.back();
       else B.tabs.update({url: "chrome://newtab/"}).catch(() => {});
     });
-    $("reveal").addEventListener("click", () => {
-      const open = $("confirm").hidden;
+    const reveal = (open) => {
       $("confirm").hidden = !open;
       $("reveal").setAttribute("aria-expanded", String(open));
-      if (open) $("continue").focus();
-    });
+      (open ? $("continue") : $("reveal")).focus();
+    };
+    $("reveal").addEventListener("click", () => reveal($("confirm").hidden));
+    // Escape closes the confirmation step.
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("confirm").hidden) { event.preventDefault(); reveal(false); } });
+    $("back").focus();
     $("continue").addEventListener("click", async () => {
       $("continue").disabled = true;
       const reply = await B.runtime.sendMessage({type: "continue-once", url: target.url});
@@ -49,7 +56,7 @@
     });
     const info = await B.runtime.sendMessage({type: "warning-info", list: target.list}).catch(() => null);
     if (info && info.list) {
-      $("list").textContent = `${info.list.label} · ${info.list.name}`;
+      $("list").textContent = info.list.name || info.list.label;
       $("updated").textContent = date(info.list.published_at || info.list.updated_at);
     }
     if (info && info.minutes) $("minutes").textContent = String(info.minutes);
