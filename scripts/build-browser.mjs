@@ -205,7 +205,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (args.lists) {
       const feeds = args.feeds || defaultFeedsDir();
       if (!fs.existsSync(path.join(feeds, "blocklists"))) {
-        throw new Error(`no feed cache at ${path.join(feeds, "blocklists")}. Run \`egress-guard update\` (or pass --feeds DIR), or build with --no-lists.`);
+        throw new Error(`no feed cache at ${path.join(feeds, "blocklists")}. Run \`egress-guard refresh\` (or pass --feeds DIR), or build with --no-lists.`);
       }
       lists = loadLists(feeds, {tier: args.tier, allowSmall: args.allowSmall, log: (m) => console.warn(`warning: ${m}`)});
       const day = 48 * 3600;
