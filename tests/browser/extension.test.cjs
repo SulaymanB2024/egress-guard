@@ -66,7 +66,8 @@ test("extension source has no HTML injection, eval or unapproved browser network
     // The one sanctioned read: the Chrome worker loads its own packaged threat ruleset (CSP connect-src 'self').
     // And it asks Chrome how a navigation to a host would match (testMatchOutcome), which sends nothing.
     if (path.basename(file) === "background-chrome.js") code = code.replace("fetch(OWN + file)", "OWN_RULESET").replace('fetch(OWN + "rules/build.json"', "OWN_STAMP(").replace("url: `https://${host}/`", "url: PROBE");
-    for (const banned of [/innerHTML/, /outerHTML/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function/, /\bfetch\s*\(/, /XMLHttpRequest/, /WebSocket/, /sendBeacon/, /importScripts/, /setTimeout\(\s*["'`]/, /\bon[a-z]+\s*=\s*["']/]) {
+    // Ban the network API identifier, not a local option such as includeWebSockets.
+    for (const banned of [/innerHTML/, /outerHTML/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function/, /\bfetch\s*\(/, /XMLHttpRequest/, /\bWebSocket\b/, /sendBeacon/, /importScripts/, /setTimeout\(\s*["'`]/, /\bon[a-z]+\s*=\s*["']/]) {
       assert.doesNotMatch(code, banned, `${path.relative(root, file)} contains ${banned}`);
     }
   }

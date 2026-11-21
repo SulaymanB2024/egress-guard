@@ -8,6 +8,7 @@ import tomllib
 
 from .paths import atomic_private, data_dir, private_dir
 from .feeds import dns_name
+from .transport_policy import valid_settings
 
 MAX_CONFIG_BYTES = 64 * 1024
 # Opt-in compatibility presets. Each names exact hosts that skip tracker and
@@ -82,6 +83,9 @@ def load_config(path: Path | None = None) -> dict:
             raise ValueError(f"{key} must be true or false")
     if type(result["risk"]["block_plaintext_credentials"]) is not bool:
         raise ValueError("block_plaintext_credentials must be true or false")
+    if not valid_settings(result["transport"]):
+        raise ValueError("transport requires compatible or hardened profile, a boolean address_guard, "
+                         "and 1 to 32 sorted unique connect_ports between 1 and 65535")
     for key in ("hosts", "allow", "dashboard_hosts"):
         values = result["block"][key]
         if not isinstance(values, list) or len(values) > 2000 or any(not isinstance(value, str) for value in values):

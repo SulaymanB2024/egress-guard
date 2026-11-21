@@ -49,8 +49,8 @@ class UpstreamHandler(BaseHTTPRequestHandler):
 
 
 class Origin(ThreadingHTTPServer):
-    def __init__(self, tls=None):
-        super().__init__(("127.0.0.1", 0), UpstreamHandler)
+    def __init__(self, tls=None, *, host="127.0.0.1", port=0):
+        super().__init__((host, port), UpstreamHandler)
         self.tls = tls
         self.requests = []
         self.accepts = 0
@@ -98,8 +98,8 @@ def certificate(directory):
 
 @unittest.skipUnless(MITMDUMP, "mitmdump required for the real proxy test")
 class ProxyIntegrationTests(unittest.TestCase):
-    def serve(self, tls=None):
-        server = Origin(tls)
+    def serve(self, tls=None, **address):
+        server = Origin(tls, **address)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(server.server_close)
@@ -155,7 +155,8 @@ class LoopbackOnly:
 
 addons = [EgressGuard(), LoopbackOnly()]
 """)
-    def start_proxy(self, *, ready=True, plaintext_credentials=True):
+    def start_proxy(self, *, ready=True, plaintext_credentials=True, transport_profile="compatible",
+                    connect_ports=None, address_guard=False):
         state = self.state
         log = (state / "proxy.log").open("wb")
         self.addCleanup(log.close)
@@ -163,7 +164,10 @@ addons = [EgressGuard(), LoopbackOnly()]
         # Transport assertions inspect deliberately opted-in fixture history;
         # fresh production configuration defaults to no traffic history.
         config.write_text(f'[proxy]\nport = {self.proxy_port}\n[logging]\nhistory = "full"\n'
-                          f'[risk]\nblock_plaintext_credentials = {str(plaintext_credentials).lower()}\n')
+                          f'[risk]\nblock_plaintext_credentials = {str(plaintext_credentials).lower()}\n'
+                          f'[transport]\nprofile = "{transport_profile}"\n'
+                          f'connect_ports = {connect_ports or [443]}\n'
+                          f'address_guard = {str(address_guard).lower()}\n')
         process = subprocess.Popen(
             [
                 str(MITMDUMP), "--mode", "regular", "--listen-host", "127.0.0.1",

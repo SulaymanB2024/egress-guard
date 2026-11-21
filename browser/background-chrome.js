@@ -41,7 +41,7 @@
     const stored = (await C.storage.local.get(GENERIC_KEY))[GENERIC_KEY];
     genericOff = new Set((Array.isArray(stored) ? stored : []).filter((s) => hosts.siteOf(s) === s).slice(0, MAX_GENERIC_OFF));
   }
-  // Site modes (Relaxed / Standard / Strict / No scripts) and the hosts allowed under Strict, per site. Validated on
+  // Site modes (Relaxed / Standard / Strict / No scripts / Isolation) and the hosts allowed under Strict. Validated on
   // load and on every change; compiled into dynamic rules by dnr.compileModes.
   const MODES_KEY = "egressGuardModes";
   const MAX_MODE_SITES = 2000, MAX_ALLOWED_HOSTS = 50;
@@ -70,18 +70,25 @@
     const raw = (await C.storage.local.get(MODES_KEY))[MODES_KEY];
     modes = cleanModes(raw);
     if (raw && (raw.schema !== 2 || raw.scope !== "top-level-psl-v2" || raw.psl !== hosts.psl.sha256)) {
-      modes.sites = Object.fromEntries(Object.entries(modes.sites).filter(([, mode]) => mode === "strict" || mode === "noscript"));
+      modes.sites = Object.fromEntries(Object.entries(modes.sites).filter(([, mode]) => ["strict", "noscript", "isolated"].includes(mode)));
       modes.allowHosts = {}; modes.cleanOff = [];
       policy.warnings.push("Legacy relaxed modes, cleaning exemptions and host permissions were revoked for the PSL/top-level scope migration.");
     }
     savedModes = clone(modes);
   }
-  async function saveModes() {
+  async function saveModes({clearPauseSite = null} = {}) {
     const next = cleanModes(modes);
+    const nextPauses = clearPauseSite ? {...pauses} : null;
+    if (nextPauses) delete nextPauses[clearPauseSite];
     try {
-      await C.storage.local.set({[MODES_KEY]: {...next, schema: 2, scope: "top-level-psl-v2", psl: hosts.psl.sha256}});
+      // One saved-intent write for activation and its pause removal. Independently,
+      // effectiveModes never permits a pause to replace Isolation, even if old or
+      // inconsistent storage contains both entries after recovery.
+      await C.storage.local.set({[MODES_KEY]: {...next, schema: 2, scope: "top-level-psl-v2", psl: hosts.psl.sha256},
+        ...(nextPauses ? {[PAUSE_KEY]: {schema: 2, scope: "top-level-psl-v2", items: nextPauses}} : {})});
       modes = next; savedModes = clone(next);
-    } catch (error) { modes = clone(savedModes); noteError(error); throw error; }
+      if (nextPauses) { pauses = nextPauses; savedPauses = clone(nextPauses); }
+    } catch (error) { modes = clone(savedModes); if (nextPauses) pauses = clone(savedPauses); noteError(error); throw error; }
   }
 
   // ---- timed per-site pause (popup only) ------------------------------------------------------------------------
@@ -113,10 +120,10 @@
       savedPauses = clone(pauses);
     } catch (error) { pauses = clone(savedPauses); noteError(error); throw error; }
   }
-  const requestedPausedUntil = (site) => (site && pauses[site] > Date.now() ? pauses[site] : null);
+  const requestedPausedUntil = (site) => (site && modes.sites[site] !== "isolated" && pauses[site] > Date.now() ? pauses[site] : null);
   // Applied pauses stay visible until the actual allow is removed, even if its
   // scheduled deadline passed while Chrome slept or rejected a rule update.
-  const pausedUntil = (site) => (site && applied && applied.pauses[site]) || null;
+  const pausedUntil = (site) => (site && applied && applied.effectiveModes.sites[site] !== "isolated" && applied.pauses[site]) || null;
   /** End pauses whose time has come; returns their sites. */
   async function endPauses(now = Date.now()) {
     const ended = Object.keys(pauses).filter((site) => pauses[site] <= now);
@@ -132,8 +139,17 @@
       cleanOff: [...new Set([...modes.cleanOff, ...live])].sort()};
   }
   const savedModeFor = (site) => (site && modes.sites[site]) || modes.defaultMode;
-  const modeFor = (site) => applied ? ((site && applied.effectiveModes.sites[site]) || applied.effectiveModes.defaultMode) : "unknown";
+  const modeFor = (site, topHost = site) => {
+    const mode = applied ? ((site && applied.effectiveModes.sites[site]) || applied.effectiveModes.defaultMode) : "unknown";
+    return mode === "isolated" && !preparedHostScope(site, topHost) ? "unknown" : mode;
+  };
   const cleaningOn = (site) => !(site && applied && applied.effectiveModes.cleanOff.includes(site));
+  const isolationSelected = (site, includeApplied = true) => {
+    const key = hosts.siteOf(site);
+    return Boolean(key && (modes.sites[key] === "isolated" || includeApplied && applied && applied.effectiveModes.sites[key] === "isolated"));
+  };
+  const crossesIsolation = (site, target, includeApplied = true) => isolationSelected(site, includeApplied) && hosts.isThirdParty(target, site);
+  const ISOLATION_REPAIR_ERROR = "Isolation blocks cross-site resources and has no repair exceptions. Choose another site mode explicitly before allowing this resource.";
 
   // ---- retired: experimental fingerprint noise ----------------------------------------------------------------
   // Removed in 0.3.1: keyed by the frame's own site, it gave third-party frames a stable cross-site value, and its key
@@ -334,6 +350,19 @@
     return preparationFor(host && hosts.siteOf(host), host || parsed.hostname);
   }
 
+  function isolationFor(site, topHost = site) {
+    const requested = site && modes.sites[site] === "isolated";
+    const recorded = Boolean(site && applied && applied.effectiveModes.sites[site] === "isolated");
+    if (!requested && !recorded) return null;
+    const supported = preparedHostScope(site, topHost);
+    const active = supported && recorded;
+    return {state: !supported ? "unsupported" : policy.state === "degraded" ? "degraded" : requested && active && policy.state === "applied" ? "applied" : "pending",
+      active, requested: Boolean(requested), revision: active ? applied.revision : null,
+      resourceScope: "cross-top-site-subresources", httpHeaders: ["cookie", "authorization", "referer", "set-cookie"],
+      navigationScope: "destination-site-headers", existingConnections: "not-revoked", reloadNeeded: true,
+      ...(!supported ? {reason: "This public-suffix or wildcard-registry address cannot be isolated safely with Chrome's domain conditions."} : {})};
+  }
+
   function preparationCandidates(activeSites, requestedModes, now) {
     for (const [tabId, entry] of prewarmContexts) if (entry.expiresAt <= now || entry.expiresAt > now + PREWARM_MS) prewarmContexts.delete(tabId);
     if (requestedModes.defaultMode !== "strict") prewarmContexts.clear();
@@ -362,6 +391,7 @@
       store.exceptions = []; pauses = {};
       policy.warnings.push("Temporary permissions were revoked after an extension or policy-bundle update.");
     }
+    for (const site of Object.keys(pauses)) if (modes.sites[site] === "isolated") delete pauses[site];
     // Complete the conservative migration before any newly compiled permissions.
     await Promise.all([store.save(), saveModes(), savePauses()]);
     loaded = true;
@@ -393,6 +423,7 @@
     const host = hosts.hostOfUrl(tab.url || "");
     if (entry.kind === "embed") {
       if (hosts.siteOf(host) !== entry.site) return false;
+      if (dnr.EMBEDS.find((e) => e.id === entry.embed).domains.some((name) => crossesIsolation(entry.site, name, false))) return false;
       // Any provider that has become a listed threat loses ordinary load/cookie grants.
       for (const name of dnr.EMBEDS.find((e) => e.id === entry.embed).domains) if (await isThreat(name)) return false;
     } else if (entry.kind === "pass") {
@@ -457,11 +488,11 @@
     const keepRules = [], keepExceptions = [];
     for (const rule of store.rules) {
       if (rule.expiresAt !== undefined && rule.expiresAt <= now) continue;
-      if (rule.action === "allow" && (rollback || await isThreat(rule.host))) continue;
+      if (rule.action === "allow" && (rollback || rule.expiresAt !== undefined && crossesIsolation(rule.site, rule.host, false) || await isThreat(rule.host))) continue;
       keepRules.push(rule);
     }
     for (const exc of store.exceptions) {
-      if (!eligibleEndpoint(exc, tabs) || rollback || exc.expiresAt <= now || (exc.createdAt !== undefined && exc.createdAt > now) || await isThreat(exc.host)) continue;
+      if (!eligibleEndpoint(exc, tabs) || crossesIsolation(exc.site, exc.host, false) || rollback || exc.expiresAt <= now || (exc.createdAt !== undefined && exc.createdAt > now) || await isThreat(exc.host)) continue;
       keepExceptions.push(exc);
     }
     if (keepRules.length !== store.rules.length || keepExceptions.length !== store.exceptions.length) {
@@ -486,7 +517,7 @@
       await savePauses().catch(() => { pauses = {}; });
     }
     let expiredPause = false;
-    for (const [site, until] of Object.entries(pauses)) if (until <= now) { delete pauses[site]; expiredPause = true; }
+    for (const [site, until] of Object.entries(pauses)) if (until <= now || modes.sites[site] === "isolated") { delete pauses[site]; expiredPause = true; }
     if (expiredPause) {
       const desired = clone(pauses);
       await savePauses().catch((error) => { pauses = desired; policy.warnings.push(`Expired pauses could not be saved: ${String(error.message || error)}`); });
@@ -660,7 +691,7 @@
       grants = next;
       await apply();
       if (requested.some((entry) => !grants.some((actual) => canonical(actual) === canonical(entry)))) {
-        throw new Error("The permission was refused: its tab changed, its deadline passed, or the provider is now a threat. Reload the page and review the request.");
+        throw new Error("The permission was refused: its tab or site mode changed, its deadline passed, or the provider is now a threat. Reload the page and review the request.");
       }
   }
   function changeGrants(change) { return serial(() => changeGrantsNow(change)); }
@@ -965,7 +996,7 @@
       }
       case "guard-config": {
         if (!pageHost) return {clean: false};
-        const mode = modeFor(hosts.siteOf(pageHost));
+        const mode = modeFor(hosts.siteOf(pageHost), pageHost);
         return {clean: cleaningOn(hosts.siteOf(pageHost)), mode, embeds: mode === "strict" || mode === "noscript" ? dnr.EMBEDS.map((e) => ({id: e.id, name: e.name, domains: [...e.domains]})) : []};
       }
       case "cosmetic-style": {
@@ -976,7 +1007,9 @@
       }
       case "load-embed": {
         if (!pageHost || !sender.tab || !Number.isInteger(sender.tab.id)) return {error: "Not a page."};
-        if (!dnr.EMBEDS.some((e) => e.id === message.embed)) return {error: "Bad message."};
+        const provider = dnr.EMBEDS.find((e) => e.id === message.embed);
+        if (!provider) return {error: "Bad message."};
+        if (provider.domains.some((name) => crossesIsolation(hosts.siteOf(pageHost), name))) return {error: ISOLATION_REPAIR_ERROR};
         await loadEmbed(message.embed, sender.tab.id, message.cookies === true, hosts.siteOf(pageHost));
         return {ok: true};
       }
@@ -1072,7 +1105,8 @@
           categories: Object.fromEntries(Object.entries(dnr.CATEGORIES).filter(([, v]) => v.label).map(([k, v]) => [k, v.label])),
           policy: {...policy}, coverage: LISTS.coverage || {complete: false, missing: ["build metadata"]},
           preparation: preparationFor(hosts.siteOf(host), host),
-          mode: modeFor(hosts.siteOf(host)), siteMode: applied ? applied.modes.sites[hosts.siteOf(host)] || null : null, defaultMode: applied ? applied.modes.defaultMode : "unknown",
+          isolation: isolationFor(hosts.siteOf(host), host),
+          mode: modeFor(hosts.siteOf(host), host), siteMode: applied ? applied.modes.sites[hosts.siteOf(host)] || null : null, defaultMode: applied ? applied.modes.defaultMode : "unknown",
           requestedMode: savedModeFor(hosts.siteOf(host)), requestedDefaultMode: modes.defaultMode,
           paused: pausedUntil(hosts.siteOf(host)), resumeMode: savedModeFor(hosts.siteOf(host)),
           strictAllowed: [...(applied && applied.modes.allowHosts[hosts.siteOf(host)] || [])],
@@ -1097,6 +1131,7 @@
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
         if (!site || !hosts.canScopeSite(site)) return {error: "Open a web page with a safely scoped registrable site first."};
         if (message.type === "pause-site") {
+          if (isolationSelected(site)) return {error: "Isolation cannot be paused. Choose another site mode explicitly to relax it."};
           // Fixed length; a running pause is not extended (Resume, then Pause again, starts a new one).
           if (requestedPausedUntil(site)) return {error: "This site is already paused.", until: requestedPausedUntil(site)};
           await endPauses();
@@ -1116,17 +1151,19 @@
         return {ok: true, on: modes.scannedDirect};
       }
       case "set-mode": {
-        const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
+        const host = hosts.hostOfUrl(message.tabUrl), site = hosts.siteOf(host || "");
         if (!site || !hosts.canScopeSite(site)) return {error: "Open a web page with a safely scoped registrable site first."};
         if (message.mode !== "default" && !dnr.SITE_MODES.includes(message.mode)) return {error: "Bad message."};
+        if (message.mode === "isolated" && !preparedHostScope(site, host)) return {error: "This address cannot be isolated safely with Chrome's domain conditions."};
         if (message.mode === "default") delete modes.sites[site];
         else if (Object.keys(modes.sites).length >= MAX_MODE_SITES && !modes.sites[site]) return {error: "Too many sites have their own mode."};
         else modes.sites[site] = message.mode;
-        await saveModes(); await apply();
+        await saveModes({clearPauseSite: message.mode === "isolated" ? site : null}); await apply();
         // Rules cannot see what a service worker answers from its cache: clear the site's workers and caches.
         const mode = modeFor(site);
         const cleared = mode === "noscript" || mode === "strict" ? await clearWorkers(site).catch(() => ({ok: false, origins: []})) : null;
-        return {ok: true, site, mode, cleared};
+        await broadcastSite(site);
+        return {ok: true, site, mode, cleared, isolation: isolationFor(site, host)};
       }
       case "set-default-mode": {
         if (message.mode !== "standard" && message.mode !== "strict") return {error: "Bad message."};
@@ -1138,6 +1175,7 @@
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
         const target = hosts.normalizeHost(message.host);
         if (!site || !hosts.canScopeSite(site) || !target || hosts.isSuffixLike(target)) return {error: "Choose a hostname below a public suffix."};
+        if (message.type === "strict-allow" && crossesIsolation(site, target)) return {error: ISOLATION_REPAIR_ERROR};
         if (message.type === "strict-allow" && !modes.allowHosts[site] && Object.keys(modes.allowHosts).length >= MAX_MODE_SITES) return {error: "Too many sites have allowed hosts."};
         if (message.type === "strict-allow" && await isThreat(target)) return {error: "This host is on the malware and phishing list; it cannot be allowed from here."};
         const list = new Set(modes.allowHosts[site] || []);
@@ -1181,6 +1219,7 @@
         const target = hosts.normalizeHost(message.host);
         if (target && await isThreat(target)) return {error: "This host is on the malware and phishing list; it cannot be allowed from here."};
         const site = hosts.siteOf(host);
+        if (target && crossesIsolation(site, target)) return {error: ISOLATION_REPAIR_ERROR};
         const manual = store.rules.find((r) => r.kind === "request" && r.action === "block" && r.host === target && hosts.inSiteScope(host, r.site) &&
           r.types.some((type) => (dnr.TYPE_MAP[type] || []).some((mapped) => (dnr.EXCEPTION_TYPE_MAP[message.resourceType] || []).includes(mapped))) &&
           new RegExp(dnr.endpointRegex(r.host, r.path)).test(`https://${target}${message.path}`) &&

@@ -25,6 +25,15 @@ exemption_presets = []
 [risk]
 block_plaintext_credentials = true
 
+[transport]
+# "compatible" preserves HTTP and ordinary CONNECT behavior. "hardened" refuses
+# non-loopback HTTP, literal-IP CONNECT targets, and CONNECT ports outside this list.
+profile = "compatible"
+connect_ports = [443]
+# Experimental pre-connect IP threat/DoH checks for the CPython selector connector.
+# Explicit opt-in; changing this setting requires restarting the proxy.
+address_guard = false
+
 [logging]
 retention_days = 7
 max_queue = 10000

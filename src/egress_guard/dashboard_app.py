@@ -22,6 +22,7 @@ from .insights import read_insights
 from .ledger import read_activity
 from .paths import atomic_private, data_dir, private_dir
 from .policy import Policy, policy_stamp
+from .transport_policy import applied as transport_applied, runtime_receipt, settings as transport_settings
 
 LAUNCHER_RESPONSE_SECONDS = 3
 
@@ -59,7 +60,10 @@ class Application:
         policy = self.policy()
         health = proxy_health(config["proxy"]["port"], self.state)
         healthy = health["ready"]
-        applied = self._applied(policy, health.get("policy"))
+        reported = health.get("policy") if isinstance(health.get("policy"), dict) else {}
+        applied = self._applied(policy, reported)
+        saved_transport = transport_settings(config)
+        runtime_transport = runtime_receipt(reported.get("transport"))
         pause = self._read("filter-controls.json").get("tracker_pause_until", 0)
         paused = type(pause) in (int, float) and time.time() < pause <= time.time() + 86400
         ready = healthy and policy.ready() and applied["state"] == "active"
@@ -77,11 +81,13 @@ class Application:
                 "pause_expires_at": iso(pause) if paused else None},
             "proxies": [{"name": "Loopback filtering proxy", "state": "active" if healthy else "degraded",
                          "detail": f"127.0.0.1:{config['proxy']['port']} · original HTTPS certificates"},
-                        {"name": "Applied policy", "state": applied["state"], "detail": applied["detail"]}],
+                        {"name": "Applied policy", "state": applied["state"], "detail": applied["detail"]},
+                        *self._transport_checks(saved_transport, runtime_transport)],
             "policy": {key: applied[key] for key in ("saved_revision", "applied_revision", "applied", "pending",
                                                      "degraded")},
             "logging": {"saved": config["logging"],
                         "runtime": health.get("policy", {}).get("logging") if isinstance(health.get("policy"), dict) else None},
+            "transport": {"saved": saved_transport, "runtime": runtime_transport},
             "filters": [{"name": item["name"],
                          "state": "active" if item["status"] == "current" and policy.coverage.get(item["id"]) == "verified"
                          else "degraded",
@@ -117,13 +123,40 @@ class Application:
         return result or None
 
     @staticmethod
+    def _transport_checks(saved, runtime):
+        acknowledged = transport_applied(saved, runtime)
+        current = runtime["profile"] if runtime else "unknown"
+        detail = (f"{current.capitalize()} profile acknowledged for traffic using this proxy."
+                  if acknowledged else f"Saved profile: {saved['profile']}; runtime profile: {current}. Settings are not acknowledged.")
+        if runtime and runtime["profile"] == "hardened":
+            detail += " Non-loopback HTTP and literal CONNECT targets refused; CONNECT ports: " + ", ".join(
+                map(str, runtime["connect_ports"])) + "."
+        guard = runtime["address_guard"] if runtime else None
+        if guard is None:
+            guard_state, guard_detail = "unknown", "No authenticated address-guard receipt. Restart the proxy after an upgrade."
+        elif guard["state"] == "active":
+            guard_state, guard_detail = "active", "Experimental numeric TCP-address checks are active in this proxy process."
+        elif guard["state"] == "disabled":
+            guard_state, guard_detail = "disabled", "Experimental numeric TCP-address checks are disabled."
+        else:
+            guard_state, guard_detail = "degraded", "Address guard unavailable (" + guard["reason"] + "); proxy traffic is refused."
+        if guard is not None and saved["address_guard"] != guard["selected"]:
+            guard_state = "degraded"
+            guard_detail += " The saved selection requires a proxy restart."
+        return [{"name": "Transport profile", "state": "active" if acknowledged else "degraded", "detail": detail},
+                {"name": "TCP address guard", "state": guard_state, "detail": guard_detail}]
+
+    @staticmethod
     def _applied(policy, reported):
         """Compare saved rules with the revision the proxy authenticated as running."""
         saved = policy.revision
         revision = reported.get("revision") if isinstance(reported, dict) else None
         revision = revision if isinstance(revision, str) else None
-        pending = not isinstance(reported, dict) or reported.get("pending") is not False
-        degraded = not isinstance(reported, dict) or reported.get("degraded") is not False
+        transport = runtime_receipt(reported.get("transport")) if isinstance(reported, dict) else None
+        pending = (not isinstance(reported, dict) or reported.get("pending") is not False
+                   or not transport_applied(policy.transport, transport))
+        degraded = (not isinstance(reported, dict) or reported.get("degraded") is not False
+                    or not transport_applied(policy.transport, transport))
         applied = revision == saved and not pending
         if revision is None:
             state, detail = "unknown", f"Saved revision {saved[:12]}; the proxy has not reported an applied revision."

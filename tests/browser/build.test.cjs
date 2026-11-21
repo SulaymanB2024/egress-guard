@@ -185,7 +185,8 @@ test("URL filter lists: downloaded once a day into the build's own cache, verifi
   const body = (title) => `[Adblock Plus 2.0]\n! Version: 202611210000\n! Title: ${title}\n! Licence: https://easylist.to/pages/licence.html\n` +
     Array.from({length: 20001}, (_, i) => `||t${i}.example^`).join("\n") + "\n/g/collect?\n@@||ok.example/g/collect?\n||ads.example^\n";
   const domains = Array.from({length: 6000}, (_, i) => `c${i}.click.example`).concat(["mkt_vis.example"]).join("\n") + "\n";
-  const textFor = (url) => { const spec = FILTER_LISTS.find((f) => f.url === url); return spec.kind === "domains" ? domains : body(spec.name); };
+  const textFor = (url) => { const spec = FILTER_LISTS.find((f) => f.url === url); return spec.kind === "domains" ? domains : spec.kind === "parameters"
+    ? `! Title: ${spec.name}\n! License: ${spec.license.url}\n! Homepage: https://github.com/uBlockOrigin/uAssets\n! Last modified: %timestamp%\n` + "$removeparam=fixture_tracking\n".repeat(spec.minimum + 1) : body(spec.name); };
   const reply = (url, text) => { const result = new Response(text); Object.defineProperty(result, "url", {value: url}); return result; };
   let calls = 0;
   const fetchImpl = async (url) => { calls++; return reply(url, textFor(url)); };
@@ -238,7 +239,8 @@ test("unpinned lists: a fresh copy whose size, entries or exceptions moved by mo
     Array.from({length: 20001}, (_, i) => `||t${i}.example^`).join("\n") + "\n" + Array.from({length: exceptions}, (_, i) => `@@||ok${i}.example/x`).join("\n") + "\n";
   const domains = (n) => Array.from({length: n}, (_, i) => `c${i}.click.example`).join("\n") + "\n";
   let exceptions = 100, names = 6000;
-  const textFor = (url) => { const spec = FILTER_LISTS.find((f) => f.url === url); return spec.kind === "domains" ? domains(names) : body(spec.name, spec.id === "easylist" ? exceptions : 100); };
+  const textFor = (url) => { const spec = FILTER_LISTS.find((f) => f.url === url); return spec.kind === "domains" ? domains(names) : spec.kind === "parameters"
+    ? `! Title: ${spec.name}\n! License: ${spec.license.url}\n! Homepage: https://github.com/uBlockOrigin/uAssets\n! Last modified: %timestamp%\n` + "$removeparam=fixture_tracking\n".repeat(spec.minimum + 1) : body(spec.name, spec.id === "easylist" ? exceptions : 100); };
   const fetchImpl = async (url) => { const result = new Response(textFor(url)); Object.defineProperty(result, "url", {value: url}); return result; };
   const day = Date.now() / 1000 + 2 * 86400;
   try {

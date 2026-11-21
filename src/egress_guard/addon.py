@@ -14,11 +14,13 @@ from mitmproxy.proxy.layers.tcp import TCPLayer
 from mitmproxy.proxy.layers.tls import parse_client_hello
 
 from egress_guard import __version__
+from egress_guard.address_guard import AddressGuard
 from egress_guard.config import config_path, load_config
 from egress_guard.health import policy_proof, response_proof
 from egress_guard.ledger import Ledger
 from egress_guard.paths import data_dir, private_dir
 from egress_guard.policy import Policy, PolicyRuntime, is_loopback, normalize_host, policy_stamp
+from egress_guard.transport_policy import refusal as transport_refusal, settings as transport_settings
 
 HEALTH_HOST = "egress-guard.invalid"
 HEALTH_QUERY = re.compile(r"nonce=([A-Za-z0-9_-]{43})")
@@ -37,7 +39,7 @@ class TunnelGuard(layer.Layer):
     No TLS keys, decrypted contents or new TCP-flow history are created here.
     """
 
-    def __init__(self, context, *, require_tls: bool, admit: Callable[[str | None], bool],
+    def __init__(self, context, *, require_tls: bool | Callable[[], bool], admit: Callable[[str | None], bool],
                  invalid: Callable[[], None]) -> None:
         super().__init__(context)
         self._require_tls = require_tls
@@ -79,7 +81,8 @@ class TunnelGuard(layer.Layer):
         possible_tls = (not data or (data[0] == 0x16 and (
             len(data) < 2 or (data[1] == 0x03 and (len(data) < 3 or data[2] <= 0x03)))))
         if not possible_tls:
-            if self._require_tls:
+            require_tls = self._require_tls() if callable(self._require_tls) else self._require_tls
+            if require_tls:
                 yield from self._refuse(invalid=True)
             elif self._admit(None):
                 yield from self._relay(remainder)
@@ -115,6 +118,9 @@ class EgressGuard:
         self.runtime: PolicyRuntime | None = None
         self.ledger: Ledger | None = None
         self._refresh_task: asyncio.Task | None = None
+        self._address_guard = AddressGuard(lambda: self.policy)
+        self._startup_transport = transport_settings({})
+        self._closed = False
         # Admitted CONNECT tunnels awaiting their first client bytes: client id -> authority.
         self._tunnels: dict[str, tuple[str, int]] = {}
 
@@ -138,7 +144,7 @@ class EgressGuard:
             and not options.store_streamed_bodies
         )
 
-    def running(self) -> None:
+    async def running(self) -> None:
         if not self._safe_options():
             ctx.master.shutdown()
             return
@@ -154,6 +160,8 @@ class EgressGuard:
             ctx.master.shutdown()
             return
         self._startup_proxy = dict(config["proxy"])
+        self._startup_transport = transport_settings(config)
+        await self._address_guard.start(self._startup_transport["address_guard"])
         self.ledger = Ledger(self._state / "events.sqlite3", **config["logging"])
         self.runtime = PolicyRuntime(self._load_policy, lambda: policy_stamp(self._config_path, self._state),
                                      apply=self._apply_runtime_settings)
@@ -167,8 +175,10 @@ class EgressGuard:
             ctx.master.shutdown()
 
     def done(self) -> None:
+        self._closed = True
         if self._refresh_task is not None:
             self._refresh_task.cancel()
+        self._address_guard.close()
         if self.ledger is not None:
             self.ledger.close()
 
@@ -176,10 +186,33 @@ class EgressGuard:
         return Policy(load_config(self._config_path), self._state, previous)
 
     def _apply_runtime_settings(self, candidate: Policy) -> None:
-        if self.ledger is None or not self.ledger.reconfigure(**candidate.logging):
-            raise ValueError("History settings are waiting for the ledger writer to acknowledge them")
+        if self._closed:
+            raise ValueError("The proxy is stopping")
         if candidate.proxy != self._startup_proxy:
             raise ValueError("Changed listening ports require restarting the proxy and dashboard")
+        if candidate.transport["address_guard"] != self._startup_transport["address_guard"]:
+            raise ValueError("Changing the experimental address guard requires restarting the proxy")
+        if not self._address_guard.ready():
+            raise ValueError("The selected transport guard is unavailable; proxy traffic is refused")
+        if self.ledger is None or not self.ledger.reconfigure(**candidate.logging):
+            raise ValueError("History settings are waiting for the ledger writer to acknowledge them")
+
+    def _transport_status(self) -> dict:
+        selected = self.policy.transport if self.policy is not None else self._startup_transport
+        return {"profile": selected["profile"], "connect_ports": list(selected["connect_ports"]),
+                "address_guard": self._address_guard.status(), "scope": "proxy-tcp",
+                "applied": self.policy is not None and self._address_guard.ready() and not self._closed}
+
+    def _transport_refusal(self, host: str, port: int, transport: str) -> str | None:
+        if not self._address_guard.ready():
+            return "address-guard-unavailable"
+        return transport_refusal(self.policy.transport, host, port, transport, loopback=is_loopback(host))
+
+    def _require_tls(self, host: str) -> bool:
+        # Evaluate at first bytes, so a delayed tunnel cannot retain an older,
+        # permissive profile across a live policy reload.
+        return not is_loopback(host) and (self._block_plaintext_credentials
+            or self.policy is None or self.policy.transport["profile"] == "hardened")
 
     async def _refresh(self) -> None:
         while True:
@@ -219,6 +252,11 @@ class EgressGuard:
             self._event(host, "blocked", decision["source"], transport)
             self._deny(flow, 403, "Blocked by Egress Guard.")
             return False
+        if (reason := self._transport_refusal(normalize_host(host), flow.request.port, transport)) is not None:
+            self._event(host, "blocked", reason, transport)
+            self._deny(flow, 503 if reason == "address-guard-unavailable" else 403,
+                       "Egress Guard refused this transport. Use an admitted HTTPS destination.")
+            return False
         self._event(host, "allowed", decision["source"], transport)
         return True
 
@@ -245,6 +283,9 @@ class EgressGuard:
             if decision["decision"] == "blocked":
                 self._event(candidate, "blocked", decision["source"], "connect")
                 return False
+        if (reason := self._transport_refusal(host, port, "connect")) is not None:
+            self._event(host, "blocked", reason, "connect")
+            return False
         return True
 
     def next_layer(self, nextlayer: layer.NextLayer) -> None:
@@ -257,7 +298,7 @@ class EgressGuard:
             host, port = authority
             nextlayer.layer = TunnelGuard(
                 nextlayer.context,
-                require_tls=self._block_plaintext_credentials and not is_loopback(host),
+                require_tls=lambda: self._require_tls(host),
                 admit=lambda sni: self._admit_tunnel(host, port, sni),
                 invalid=lambda: self._event(host, "blocked", "non-tls-tunnel", "connect"),
             )
@@ -278,13 +319,15 @@ class EgressGuard:
         if self._has_body(request):
             flow.kill()
             return
-        ready = bool(self.policy and self.policy.ready() and self.ledger and self.ledger.ready())
+        ready = bool(self.policy and self.policy.ready() and self.ledger and self.ledger.ready()
+                     and self._address_guard.ready() and not self._closed)
         data = {"product": "egress-guard", "version": __version__, "ready": ready, "https_decryption": False}
         port = ctx.options.listen_port
         if challenge is not None and type(port) is int and self.runtime is not None:
             # Applied revision, pending and degraded state travel only with an authenticated reply.
             status = self.runtime.status()
             status["logging"] = self.ledger.status() if self.ledger is not None else None
+            status["transport"] = self._transport_status()
             try:
                 data["policy_proof"] = policy_proof(challenge.group(1), port, self._state, status)
                 data["policy"] = status

@@ -13,6 +13,8 @@ const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), "eg-filter-cache-"));
 const digest = body => crypto.createHash("sha256").update(body).digest("hex");
 
 function bodyFor(spec, marker = "old") {
+  if (spec.kind === "parameters") return `! Title: ${spec.name}\n! License: ${spec.license.url}\n! Homepage: https://github.com/uBlockOrigin/uAssets\n! Last modified: %timestamp%\n` +
+    (`$removeparam=${marker}_tracking\n`).repeat(spec.minimum + 1);
   const rows = Array.from({length: spec.minimum + 1}, (_, index) => spec.kind === "domains"
     ? `${marker}${index}.click.example` : `||${marker}${index}.example^`).join("\n") + "\n";
   return spec.kind === "domains" ? rows : `[Adblock Plus 2.0]\n! Title: ${spec.name}\n! Licence: https://easylist.to/pages/licence.html\n` + rows;

@@ -1,6 +1,6 @@
-# Browser companion 0.8
+# Browser companion 0.9
 
-The companion supplies URL-level request rules, tracking-parameter and cookie cleaning, indexed generic and scoped page-element hiding, optional local review of sponsored cards, and explicit Chrome profile privacy controls. Chrome is the primary implementation. Firefox retains manual request/cosmetic rules; it does not have the Chrome built-in list, model or profile-control feature set.
+The companion supplies URL-level request rules, maintained tracking-parameter and cookie cleaning, named-site isolation, indexed generic and scoped page-element hiding, optional local review of sponsored cards, and explicit Chrome profile privacy controls. Chrome is the primary implementation. Firefox retains manual HTTP/S request/cosmetic rules; it does not have the Chrome built-in list, socket-deny, isolation, model or profile-control feature set.
 
 The extension remains an unsigned alpha. It works without the proxy. An optional read-only bridge can show the proxy's authenticated state in the popup; that connection does not route browser traffic or establish device-wide protection.
 
@@ -22,7 +22,7 @@ Use Chrome 145 or newer and Node 20 or newer. The local model has additional bro
 
 3. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `dist-browser/chrome`. Reload the extension after rebuilding.
 
-The browser extension itself reads packaged filter data. The build process downloads EasyList, EasyPrivacy and the AdGuard click-through list when its own verified cache needs a refresh. It does not execute downloaded filter text as code.
+The browser extension itself reads packaged filter data. The build process downloads EasyList, EasyPrivacy, the AdGuard click-through list and AdGuard/uBO URL Tracking Protection when its own verified cache needs a refresh. It does not execute downloaded filter text as code.
 
 | Option | Meaning |
 | --- | --- |
@@ -33,13 +33,22 @@ The browser extension itself reads packaged filter data. The build process downl
 | `--offline` | Use cached browser lists without downloading. |
 | `--out DIR` | Choose the output folder. |
 | `--allow-missing` | Explicitly permit a reduced build. |
+| `--allow-parameter-quarantine NAME` | Acknowledge one reviewed parameter name that must remain untouched; all required-source and other completeness checks still apply. Repeat for separately reviewed names. The receipt stays reduced. |
 | `--allow-small` | Development fixtures only; skip production feed-size checks. |
 | `--no-lists` / `--no-filters` | Explicitly leave out those sources; the result is reduced. |
 | `--accept-list-change ID` | Accept a reviewed large change in a named source's size, entries or exceptions. |
 
-Normal builds require every selected source. A Medium fallback does not fulfill a request for Full threat coverage. Choose Medium explicitly if that is the intended tier. Required URL sources must produce at least one blocking rule; having a source file alone is insufficient. Missing sources, ineffective compilation, development size overrides and conservative cosmetic-exception fallbacks are recorded in `rules/build.json`; the popup reports reduced coverage. Normal builds refuse a source exception they cannot preserve without disabling imported coverage. Explicit reduced builds remain available for review. Stale snapshots are also reported.
+Normal builds require every selected source. A Medium fallback does not fulfill a request for Full threat coverage. Choose Medium explicitly if that is the intended tier. Required network sources must produce blocking rules, and the parameter source must produce effective imported removers; having a source file alone is insufficient. Missing sources, ineffective compilation, development size overrides and conservative source-exception fallbacks are recorded in `rules/build.json`; the popup reports reduced coverage. Normal builds refuse unsafe ambiguous source exceptions. Explicit reduced builds remain available for review. Stale snapshots are also reported.
 
 The compiler supports a bounded subset of filter syntax. A complete source receipt means the selected required sources are present and produced the required output; it does **not** mean every upstream rule was implemented. Conversion and rejection counts are in the build output and receipt.
+
+The reviewed 0.9 URL Tracking Protection snapshot has one unrepresentable named exception for `analytics_trace_id`. It is preserved everywhere, including in overlapping built-in policy, rather than removed on an incorrectly guessed scope. After reviewing that documented tradeoff, build with:
+
+```sh
+node scripts/build-browser.mjs --allow-parameter-quarantine analytics_trace_id
+```
+
+That acknowledgment cannot permit missing threat feeds, a disabled parameter policy, ambiguous all-parameter exceptions or another newly quarantined name. The popup and build receipt continue to report the one-name reduction. An updated upstream list can require a new review.
 
 Each browser filter is committed as one private `<id>.snapshot` containing bounded metadata and the exact verified body. A failed write or interrupted update leaves either the prior or new complete snapshot. Legacy `.txt`/`.json` pairs remain readable until the first successful snapshot refresh; an invalid existing snapshot cannot be masked by an old pair. Interrupted private staging folders are ignored. Ordinary output-publication failures restore the previous Chrome and Firefox folders; if rollback itself fails, the builder preserves its backup folder and reports its location.
 
@@ -53,16 +62,35 @@ The fixed development public key gives the unpacked build the ID `danbhmcinakkkk
 | Standard | Domain and URL filters, supported tracker substitutes, beacon/link protections and normal cleaning. |
 | Strict | Standard plus restrictions on third-party scripts, frames and fonts, stronger header cleaning, and held supported embeds. Default Strict additionally holds active resources on unprepared sites. |
 | No scripts | Strict plus script-request blocks and response policy restrictions, intended for reading. Existing execution and cached/service-worker responses require separate care. |
+| Isolated | A named-site choice that blocks all cross-top-site subresource types, including images, fetches and socket handshakes. Removes Cookie, Authorization, Referer and Set-Cookie for covered site resources and navigations to the site. Sign-in and third-party services can stop working. |
 
 Named site rules use Chrome's top-level-domain condition, so nested frames do not acquire a different site's permissions through their initiator. Registrable-site boundaries come from the complete pinned Public Suffix List, including private suffixes. A hosted tenant is not automatically trusted because its hostname ends with a larger platform's name.
 
 The popup shows the last verified applied policy. A saved change that Chrome has not installed is **Pending** or **Degraded**, with a **Retry policy update** action. Dynamic rules, session grants and their receipts are reconciled; a local storage write alone is not a successful application.
 
-Ordinary endpoint exceptions are exact-path/type, bound to the source tab and top-level site, and temporary. Each has paired sanitation to remove Cookie, Set-Cookie and Referer headers. Threat and manual-deny rules remain above these grants. Strict host allowances repair Strict blocking without turning off header cleaning. An explicitly requested embed-with-cookies permission has separate semantics and still cannot lift tracker, threat or manual-deny rules.
+Ordinary endpoint exceptions are exact-path/type, bound to the source tab and top-level site, and temporary. Each has paired sanitation to remove Cookie, Set-Cookie and Referer headers. Threat, manual-deny and isolation rules remain above these grants. Strict host allowances repair Strict blocking without turning off header cleaning. An explicitly requested embed-with-cookies permission has separate semantics and still cannot lift tracker, threat, manual-deny or isolation rules.
 
 The threat warning has a separate two-step **Continue anyway** action. It permits the named host's navigation in that tab, with sanitation; the threat host's subresources remain blocked. This can produce an incomplete page. Leaving the site, closing the tab or expiry revokes the grant.
 
 Expiry uses scheduled worker reconciliation. Chrome does not provide a DNR rule with a built-in wall-clock expiration. Sleep, delayed alarms and API failures can delay revocation, so “15 minutes” is a scheduled lifetime, not a hard security lease. Browser restart clears session grants. See [the grant journal and recovery](enforcement-0.7.md).
+
+### Named-site isolation
+
+Choose **Isolated** under **Protection on this site** for a site whose cross-site network access you want to contain. It is separate from No scripts: first-party scripts may still execute, but new cross-site subresources in the covered page context are blocked across all resource types. Functional-provider allowlists, Strict allowances and ordinary temporary grants do not override the boundary. Activating the mode removes conflicting temporary permissions; Pause is unavailable until you explicitly choose another mode.
+
+The popup reports whether isolation rules have been read back as installed. A failed activation must not display an isolated page. If a later change fails while the previous isolation remains confirmed, that retained state is reported separately. Sites that cannot be represented safely by the existing PSL domain conditions remain unsupported rather than receiving an unsafe broad scope.
+
+Installing new rules does not terminate an existing WebSocket or WebTransport session. Use the browser's own Reload when appropriate. Isolation does not automatically reload, clear cookies, unregister workers or erase storage. First-party scripts can still read available storage and send identifiers to the first party. Outbound main-frame navigations, form submissions, popups, unrelated worker contexts, service-worker-generated responses, public IP and TLS identity need separate controls. This mode is a subresource boundary with HTTP header reduction, not an anonymous session. [Implementation and test contract](enforcement-0.9.md).
+
+### Maintained tracking-parameter policy
+
+The Chrome build converts a bounded subset of AdGuard/uBO URL Tracking Protection into top-level GET navigation rules and shared click-time data. Source exceptions constrain the same effective policy as built-in names, so an old global remover cannot undo a maintained exception. The build retains exact source hashes and conversion/quarantine diagnostics.
+
+Signed URLs, authentication flows, protected names, sensitive hosts and unsubscribe/preferences links have conservative preservation rules. Imported exceptions never become general network permissions. The fixed preservation brakes sit below header sanitation and apply only to top-level GET navigation, closing the former Strict subframe bypass.
+
+The network compiler proves a removable key is present before applying a redirect. Unsupported remove-all, inversion, arbitrary-regex and scope forms remain counted rather than guessed. Page-side cleanup preserves untouched query spelling and order, but it is not evidence that an earlier request was cleaned. Native qualification must check the actual request received by the origin, including first-position keys and redirect iteration. [Supported syntax, preserved flows and limitations](parameters-0.9.md).
+
+Chrome reconstructs queries during a declarative transformation. The network policy therefore preserves links with bare or empty query components and encoded query keys; the page-side cleaner can retain those components exactly. The two bracketed tracking names `__cft__[0]` and `__xts__[0]` are deferred to page-side cleaning to avoid a matching rule whose native transformation changes nothing. Entity-based exemptions are conservatively widened to documented three-character DNS-label prefixes to fit Chrome's compiled-regex memory budget.
 
 ### Default Strict preparation
 
@@ -164,4 +192,4 @@ Optional real-browser fixture scripts remain in `tests/browser/`. They use throw
 
 The dedicated `tests/browser/chrome-0.8.mjs` adds native imported-CSS cases, Chrome's hypothetical Strict rule evaluator and an optional visible privacy-permission/setting check. Its `--check` mode only validates fixture contracts and launches no browser. See [commands and the remaining native matrix](releasing.md#focused-08-chrome-fixture).
 
-The [0.6 guide and measurements](browser-companion-0.6.md) and [0.7 record](release-0.7.md) are historical evidence. Current checks and remaining target work are recorded in the [0.8 release notes](release-0.8.md).
+The [0.6 guide and measurements](browser-companion-0.6.md), [0.7 record](release-0.7.md) and [0.8 record](release-0.8.md) are historical evidence. Current checks and remaining target work are recorded in the [0.9 release notes](release-0.9.md).

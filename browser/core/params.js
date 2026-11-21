@@ -1,7 +1,7 @@
 /* Link cleaning: which query parameters are tracking, and a cleaner that removes them. Pure: no browser APIs.
  *
- * The same data drives two layers. core/dnr.js compiles it into navigation redirects (every top-level and frame
- * navigation, including links opened from other apps), and page-guard.js uses cleanUrl() to rewrite a link's href at
+ * The same data drives two layers. The builder compiles it into top-level GET navigation redirects,
+ * including links opened from other apps, and page-guard.js rewrites a link's href at
  * click time, so "Copy link address" and middle-click get the clean address too.
  *
  * Built from first principles (what each vendor documents its parameters for) and checked for coverage against
@@ -11,6 +11,8 @@
  * unsubscribe tokens in KEPT, pagination and search queries. */
 (function (root) {
   "use strict";
+  const importedData = typeof module !== "undefined" && module.exports ? require("./param-data.js") : root.EGParamData;
+  const policy = typeof module !== "undefined" && module.exports ? require("./param-policy.js") : root.EGParamPolicy;
 
   const GLOBAL = Object.freeze([
     // Campaign tags: Google Analytics / Ads, Matomo / Piwik, Adobe, Webtrends, Yandex, HubSpot ads
@@ -105,8 +107,41 @@
   // Unsubscribe, opt-out and preference pages: the link's parameters are left alone there (they usually identify and
   // authenticate the recipient), on navigation and at click time. Matched against the path only.
   const PRESERVE_PATH = /(^|[\/_.-])(unsub|unsubscribe[a-z]*|opt-?out|opt-?down|preferences?|preference-?cent(?:er|re)|email-?(?:settings|preferences|prefs)|manage-?(?:subscriptions?|preferences|email)|subscriptions?|subscription-?cent(?:er|re)|notification-?settings|communication-?preferences)([\/_.-]|$)/i;
-  // The same test as an RE2 pattern for the navigation rule (whole address; case-insensitive in the rule).
-  const PRESERVE_REGEX = "^https?://[^/?#]+/(?:[^?#]*[/_.-])?(?:unsub|unsubscribe[a-z]*|opt-?out|opt-?down|preferences?|preference-?cent(?:er|re)|email-?(?:settings|preferences|prefs)|manage-?(?:subscriptions?|preferences|email)|subscriptions?|subscription-?cent(?:er|re)|notification-?settings|communication-?preferences)(?:[/_.?#-]|$)";
+  // Whole-address versions of the path tests. Keep individual fixed alternatives:
+  // a single union can exceed Chrome's 2 KiB compiled-RE2 budget even when its
+  // source is short. The aggregate exports are reference predicates only;
+  // navigation compilers must consume PRESERVE_URL_REGEXES.
+  const PRESERVE_PATH_TERMS = Object.freeze(["unsub", "unsubscribe[a-z]*", "opt-?out", "opt-?down", "preferences?",
+    "preference-?cent(?:er|re)", "email-?(?:settings|preferences|prefs)", "manage-?(?:subscriptions?|preferences|email)",
+    "subscriptions?", "subscription-?cent(?:er|re)", "notification-?settings", "communication-?preferences"]);
+  const pathGuard = (term) => "^https?://[^/?#]+/(?:[^?#]*[/_.-])?(?:" + term + ")(?:[/_.?#-]|$)";
+  const PRESERVE_REGEX = pathGuard(PRESERVE_PATH_TERMS.join("|"));
+
+  // These are fixed compatibility brakes, never source-generated network allows.
+  // A signature may cover the entire query, including an otherwise disposable tag.
+  const AUTH_PATH = /(^|[\/_.-])(?:auth(?:entication|orize|orization)?|oauth2?|sso|login|log-in|signin|sign-in|callback|checkout|payment)([\/_.-]|$)/i;
+  const AUTH_PATH_TERMS = Object.freeze(["auth(?:entication|orize|orization)?", "oauth2?", "sso", "login", "log-in", "signin", "sign-in", "callback", "checkout", "payment"]);
+  const AUTH_REGEX = pathGuard(AUTH_PATH_TERMS.join("|"));
+  const SENSITIVE_KEYS = Object.freeze(["signature", "sig", "hmac", "x-amz-signature", "x-amz-credential", "x-amz-security-token",
+    "x-goog-signature", "x-goog-credential", "googleaccessid", "awsaccesskeyid", "key-pair-id", "policy",
+    "code", "state", "token", "session", "session_id", "nonce", "id_token", "access_token", "oauth_token", "oauth_verifier",
+    "samlrequest", "samlresponse", "relaystate", "client_id", "redirect_uri"]);
+  const SENSITIVE_SET = new Set(SENSITIVE_KEYS);
+  const queryGuard = (keys) => "^https?://[^/?#]+/[^?#]*\\?(?:[^&#]*&)*(?:" + keys.join("|") + ")(?:=|&|$)";
+  const SENSITIVE_QUERY_REGEX = queryGuard(SENSITIVE_KEYS);
+  const USERINFO_REGEX = "^https?://[^/?#]*@";
+  // DNR's literal removeParams and encoded-key handling require native qualification.
+  // Keep an encoded query key intact there; the JS cleaner can safely decode and inspect it.
+  const ENCODED_KEY_REGEX = "^https?://[^/?#]+/[^?#]*\\?(?:[^&#]*&)*[^=&#]*%[0-9a-f]{2}[^=&#]*(?:=|&|$)";
+  // Chromium's GetModifiedQuery rebuilds retained parts as key + "=" + value.
+  // Preserve any navigation with a bare or empty query part so queryTransform
+  // cannot rewrite functional data. JS clean() can still preserve those raw
+  // parts exactly while removing a different tracking key.
+  const BARE_QUERY_PART_REGEX = "^https?://[^/?#]+/[^?#]*\\?(?:[^&#]*&)*[^=&#]*(?:&|#|$)";
+  const PRESERVE_URL_REGEXES = Object.freeze([
+    ...PRESERVE_PATH_TERMS.map(pathGuard), ...AUTH_PATH_TERMS.map(pathGuard),
+    ...SENSITIVE_KEYS.map((key) => queryGuard([key])), USERINFO_REGEX, ENCODED_KEY_REGEX, BARE_QUERY_PART_REGEX,
+  ]);
 
   // Path-embedded tracking: Amazon's "/ref=…" segment (it only records which link was clicked).
   const PATH_RULES = Object.freeze([{domains: AMAZON, pattern: /\/ref=[^/?#]*/}]);
@@ -118,9 +153,16 @@
   const preservedPath = (pathname) => PRESERVE_PATH.test(String(pathname || ""));
 
   /** Names removed on `host` (global plus every scoped set that covers it); none on an excluded host. */
-  function namesFor(host) {
+  function namesFor(host, data = importedData) {
     const h = lower(host);
     if (excluded(h)) return new Set();
+    if (data && data.generated === true) {
+      const names = policy ? policy.namesFor(h, data) : new Set();
+      for (const k of KEPT) names.delete(k);
+      return names;
+    }
+    // Only an absent or explicit development placeholder may use the legacy data.
+    if (data && (data.schema !== 1 || data.generated !== false || data.available !== false)) return new Set();
     const names = new Set(GLOBAL);
     for (const scope of SCOPED) if (covers(h, scope.domains)) for (const n of scope.params) names.add(n);
     for (const k of KEPT) names.delete(k);
@@ -131,22 +173,29 @@
     try { return decodeURIComponent(raw.replace(/\+/g, " ")); } catch { return raw; }
   }
 
+  function preservedUrl(url) {
+    if (url.username || url.password || preservedPath(url.pathname) || AUTH_PATH.test(url.pathname)) return true;
+    return url.search.slice(1).split("&").some((part) => SENSITIVE_SET.has(decodeKey(part.split("=", 1)[0]).toLowerCase()));
+  }
+
   /**
    * Remove tracking parameters (and Amazon's /ref= path segment) from an http(s) address. Every other parameter keeps
    * its exact spelling, order and encoding. Returns {url, removed: [names]}; a non-http(s) or unparsable input comes
    * back unchanged with removed = [].
    */
-  function clean(href) {
+  function clean(href, {data = importedData} = {}) {
     let url;
     try { url = new URL(href); } catch { return {url: href, removed: []}; }
     if (url.protocol !== "http:" && url.protocol !== "https:") return {url: href, removed: []};
-    if (excluded(url.hostname) || preservedPath(url.pathname)) return {url: href, removed: []};
-    const names = namesFor(url.hostname);
+    if (excluded(url.hostname) || preservedUrl(url)) return {url: href, removed: []};
+    if (data && (data.generated === true ? !policy || !policy.prepare(data) || data.disabled :
+      data.schema !== 1 || data.generated !== false || data.available !== false)) return {url: href, removed: []};
+    const names = namesFor(url.hostname, data);
     const removed = [];
     if (url.search.length > 1) {
       const kept = [];
       for (const part of url.search.slice(1).split("&")) {
-        if (!part) continue;
+        if (!part) { kept.push(part); continue; }
         const eq = part.indexOf("=");
         const key = decodeKey(eq < 0 ? part : part.slice(0, eq));
         if (names.has(key)) removed.push(key); else kept.push(part);
@@ -154,7 +203,8 @@
       if (removed.length) url.search = kept.length ? `?${kept.join("&")}` : "";
     }
     for (const rule of PATH_RULES) {
-      if (covers(lower(url.hostname), rule.domains) && rule.pattern.test(url.pathname)) {
+      if ((!data || data.generated !== true || policy.pathAllowed(url.hostname, data)) &&
+        covers(lower(url.hostname), rule.domains) && rule.pattern.test(url.pathname)) {
         url.pathname = url.pathname.replace(rule.pattern, "");
         removed.push("/ref=");
       }
@@ -162,7 +212,9 @@
     return {url: removed.length ? url.href : href, removed};
   }
 
-  const api = Object.freeze({GLOBAL, SCOPED, KEPT, PATH_RULES, AMAZON, GOOGLE, EXCLUDED_HOSTS, PRESERVE_PATH, PRESERVE_REGEX, namesFor, clean, excluded, preservedPath});
+  const api = Object.freeze({GLOBAL, SCOPED, KEPT, PATH_RULES, AMAZON, GOOGLE, EXCLUDED_HOSTS, PRESERVE_PATH, PRESERVE_REGEX,
+    AUTH_PATH, AUTH_REGEX, SENSITIVE_KEYS, SENSITIVE_QUERY_REGEX, PRESERVE_URL_REGEXES, BARE_QUERY_PART_REGEX,
+    namesFor, clean, excluded, preservedPath, preservedUrl});
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.EGParams = api;
 })(globalThis);

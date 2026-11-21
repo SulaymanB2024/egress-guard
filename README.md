@@ -4,23 +4,26 @@ Local ad, tracker and threat filtering for macOS, with a portable Python core.
 
 Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps the origin server's certificate and encrypted contents. No root daemon, browser certificate trust, or account credentials are needed for filtering.
 
-**0.8.0 is alpha software.** This revision checks visible TLS hostnames before opening proxy tunnels, holds active resources on unprepared default-Strict browser sites, expands imported cosmetic filtering, and adds optional Chrome profile privacy controls. New configurations retain no domain history by default. Read the [0.8 changes and qualification limits](docs/release-0.8.md).
+**0.9.0 is alpha software.** This revision adds an explicit hardened proxy transport profile, an experimental check of the actual numeric address at socket connection time, named-site browser isolation, and maintained URL-tracking parameter data. New configurations retain no domain history by default. Read the [0.9 changes and qualification limits](docs/release-0.9.md).
 
-The transport was previously exercised on macOS ARM64 with Python 3.12. The 0.8 changes have Linux isolated-test coverage, including real loopback TLS; Chrome's actual rule/setting APIs, macOS launchd, installed-browser native messaging and the local model still require target-device qualification. Windows dashboard authentication and verified health remain unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
+The transport was previously exercised on macOS ARM64 with Python 3.12. The new transport work is qualified through isolated Linux tests and real loopback TLS fixtures; the experimental address guard requires a supported CPython selector loop and a successful startup self-test. Chrome's actual rule/setting APIs, macOS launchd, installed-browser native messaging and the local model still require target-device qualification. Windows dashboard authentication and verified health remain unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
 
 ## What it does
 
 - Blocks domains from HaGeZi's ad/tracker and full threat-intelligence feeds, URLhaus malware hosts and IP addresses, Phishing Army phishing domains and curated, exact-match AdGuard CNAME aliases. Threat matches cannot be overridden by allow rules, exemptions, pauses or timed exceptions.
-- Blocks known DNS-over-HTTPS servers by name and the major public resolvers by address, and punycode look-alikes of well-known brands (for example `xn--pple-43d.com`, which displays as "аpple.com" with a Cyrillic "а"). A short, built-in list of exact sign-in, OS-update and certificate-revocation hosts for Apple, Google, Microsoft, DigiCert and Mozilla can never be blocked by a downloaded list. [Every block reason](#block-reasons).
+- Blocks known DNS-over-HTTPS servers by name and the major public resolvers by address, and punycode look-alikes of well-known brands (for example `xn--pple-43d.com`, which displays as "аpple.com" with a Cyrillic "а"). A short, built-in list of exact sign-in, OS-update and certificate-revocation hosts for Apple, Google, Microsoft, DigiCert and Mozilla bypasses downloaded hostname lists. With the experimental address guard enabled, an independently blocked resolved IP still wins. [Every block reason](#block-reasons).
 - Inspects additional CNAME chains through the macOS system resolver on explicit request, with portable offline analysis and separate policy results for each alias. Conflicting or incomplete answers remain indeterminate.
 - Fetches community sponsor-timing suggestions by a short video hash prefix on explicit request, checks the supplied current duration, and exports attributed local JSON for manual review.
 - Updates feeds daily when macOS background services are enabled. Invalid, truncated or failed downloads retain the last good copy; the dashboard shows publication age separately from download success.
 - Refuses external plaintext HTTP requests carrying `Cookie` or `Authorization` headers before forwarding them, and closes a CONNECT tunnel to an external host unless its first bytes are a complete TLS ClientHello, so plaintext cannot travel through a tunnel unchecked. Other protocols over CONNECT, such as SSH, need `block_plaintext_credentials = false`. This is a guard against accidental plaintext credentials, not data-loss prevention: it reads only those two headers, never inspects encrypted traffic, and cannot stop a program that deliberately sends data elsewhere.
 - Checks an initial TLS ClientHello's visible server name independently of the CONNECT destination, including IP-address tunnels. Both must pass the current policy before upstream contact; a grant for one name does not permit another. Original TLS bytes and certificates are preserved. ECH-hidden names and later encrypted requests remain opaque. [Transport behavior and tests](docs/core-0.8.md).
+- Offers an explicit hardened transport profile that refuses external plaintext HTTP before forwarding a body, refuses non-loopback literal CONNECT targets, and restricts CONNECT ports. The independent experimental address guard checks each actual numeric TCP connection candidate against current IP policy without a second DNS lookup; a rejected address can fall back to an allowed candidate. [Configuration and qualification](docs/core-0.9.md).
 - Provides an authenticated local dashboard with decision explanations, temporary exact-host exceptions, ad-filter pauses, manual rules and local activity.
 - Adds an optional Chrome 145+ companion for request-level filtering, indexed generic and scoped cosmetic rules, deterministic sponsored-card hiding and user-reviewed local model suggestions. Default Strict holds scripts, frames, fonts and objects until a site's complete policy is installed. Its popup distinguishes saved policy from applied policy and reports incomplete coverage. [Build, recovery and compatibility costs](docs/browser-companion.md).
+- Adds an Isolated mode for a named browser site: new cross-site subresource requests are blocked across the covered page context, including images, fetches and socket handshakes, while HTTP identity headers are removed on site resources and navigations to that site. Ordinary grants and Pause cannot relax isolation. Existing connections, local site storage, outbound navigations and public IP exposure retain explicit limits. [Enforcement design](docs/enforcement-0.9.md).
+- Imports AdGuard/uBO URL Tracking Protection at browser build time. Network and click-time parameter cleaning share a bounded policy, source exceptions also narrow overlapping built-ins, and signed/authentication links are preserved. Unsupported source forms are counted and unsafe exception fallbacks reduce the build receipt. [Compiler behavior](docs/parameters-0.9.md).
 - Offers optional Chrome profile controls for speculative loading, non-proxied WebRTC UDP, third-party cookies, browser advertising APIs and selected remote browser services. Each control shows its actual value and owner. Explicit release removes only Egress Guard's override. [Controls and tradeoffs](docs/browser-privacy-0.8.md).
-- Offers an explicitly registered, read-only native messaging bridge so the Chrome popup can check the local proxy's authenticated policy and logging acknowledgments. It cannot change routing, weaken rules or prove device-wide coverage.
+- Offers an explicitly registered, read-only native messaging bridge so the Chrome popup can check the local proxy's authenticated policy, transport and logging acknowledgments. It cannot change routing, weaken rules or prove device-wide coverage.
 - Monitors canaries you explicitly register with Thinkst and sends batched macOS notifications. Registration verifies access and establishes a history baseline without exposing token values in logs or the dashboard.
 - Leaves system-wide routing unchanged. Automatic native activation is withheld until endpoint ownership can be guaranteed across logout, crashes and reboot. Inspection and ownership-preserving recovery are retained.
 
@@ -75,7 +78,7 @@ For recovery without the CLI, turn off the matching `127.0.0.1:18080` HTTP and H
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r requirements/runtime.lock
-python -m pip install --no-deps --no-index ./egress_guard-0.8.0-py3-none-any.whl
+python -m pip install --no-deps --no-index ./egress_guard-0.9.0-py3-none-any.whl
 python -m pip check
 egress-guard init
 egress-guard refresh
@@ -91,6 +94,23 @@ After upgrading from 0.3, run `egress-guard refresh` once: the new malware, phis
 The default configuration exempts no hosts from tracker or CNAME decisions. To keep the Google Analytics, Microsoft Clarity and PostHog reporting consoles usable through the proxy, opt in with `exemption_presets = ["analytics-dashboards"]` under `[block]`, or list exact hosts in `dashboard_hosts`. Threat and manual block rules still apply to exempted hosts. Configurations created by earlier releases keep the six hosts they were written with in `dashboard_hosts`; set it to `[]` for the strict default.
 
 Download the source archive for its `requirements` directory as well as the wheel. The source installer refuses an existing environment; this alpha has no automatic application-upgrade transaction. Existing users should keep their current installation intact until choosing a manual update plan.
+
+### Stronger transport controls
+
+The default `compatible` profile preserves the existing transport behavior. To select the stronger profile in your configuration:
+
+```toml
+[transport]
+profile = "hardened"
+connect_ports = [443]
+address_guard = true
+```
+
+`hardened` blocks external plaintext HTTP, non-loopback IP CONNECT destinations and CONNECT ports outside the explicit list. Loopback health and local traffic remain available. HTTP-only services and services using unusual TLS ports can stop working; the proxy does not silently replay their requests over HTTPS. Ports must be unique, sorted integers, with at most 32 entries.
+
+`address_guard` is a separate experimental setting, off by default, and needs a proxy restart after changing it. The process must pass its supported-runtime and socket self-test before reporting the guard active. When selected but unavailable, filtering traffic is refused and authenticated health still reports the reason. An active guard does not establish complete feeds or device-wide routing. Read [the address-guard lifecycle and limits](docs/core-0.9.md) before selecting it.
+
+After upgrading to 0.9, restart the proxy before trusting its new receipts. A running older proxy cannot acknowledge the transport fields required by the 0.9 dashboard and native bridge. Rebuild and reload the browser companion separately; new browser rules cannot revoke already established connections.
 
 ## Block reasons
 
@@ -112,7 +132,7 @@ Each decision carries a `source` (stored in the activity log) and a `category` (
 
 Threat feeds are checked most specific first, so a host listed by both Phishing Army and HaGeZi is reported as `phishing-feed`. Other sources are unchanged from 0.3 (`no-match`, `local-allow`, `dashboard-exception`, `temporary-exception`, `tracker-paused`, `plaintext-credentials`, `non-tls-tunnel`, `invalid-host`).
 
-Encrypted DNS is blocked by default because it can obscure the hostname a client subsequently uses through an IP-address tunnel. Version 0.8 checks an initial visible TLS name too, but absent or ECH-hidden names and later encrypted requests still limit visibility. Resolver fallback and compatibility depend on the client. Set `block_encrypted_dns = false` under `[block]` to allow DoH. Unlisted raw IP addresses and unusual ports are labelled rather than blanket-blocked; listed malware IPs and resolver addresses are still blocked. `threat_tier = "medium"` selects HaGeZi's smaller threat feed.
+Encrypted DNS is blocked by default because it can obscure the hostname a client subsequently uses through an IP-address tunnel. Initial visible TLS names receive a separate check, but absent or ECH-hidden names and later encrypted requests still limit visibility. Resolver fallback and compatibility depend on the client. Set `block_encrypted_dns = false` under `[block]` to allow DoH. In the compatible profile, unlisted raw IP addresses and unusual ports are labelled rather than blanket-blocked; listed malware IPs and resolver addresses are still blocked. Hardened transport adds the admission rules above. `threat_tier = "medium"` selects HaGeZi's smaller threat feed.
 
 ## Inspect disguised trackers and sponsor timings
 

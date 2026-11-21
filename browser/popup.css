@@ -35,6 +35,8 @@ main > .inline-error { padding: var(--s3) var(--s4) 0; }
 .callout:not([hidden]) ~ .control { margin-top: var(--s5); }
 .paused-note { margin-top: var(--s1); }
 .seg button[disabled] { cursor: default; }
+#modes:has([data-mode="isolated"]) { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#modes [data-mode="isolated"] { grid-column: 1 / -1; }
 .control .head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: var(--hit); }
 .control h2, .group > h2 { font-size: var(--t-body); line-height: var(--lh-body); font-weight: var(--w-strong); }
 #unsupported { padding-top: 0; }

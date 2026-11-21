@@ -8,6 +8,7 @@ import secrets
 
 from .paths import data_dir, supports_private_identity
 from .http_deadline import request_json_object
+from .transport_policy import runtime_receipt
 
 HEALTH_RESPONSE_SECONDS = 2
 
@@ -85,8 +86,13 @@ def proxy_health(port: int, state=None, *, create_identity=True) -> dict:
                  and hmac.compare_digest(data["proof"].encode(), response_proof(
                      nonce, port, state, create_identity=create_identity).encode()))
         # The applied-policy report is authenticated separately so it is visible while unready.
+        reported = _verified_policy(data, nonce, port, state, create_identity=create_identity)
+        transport = runtime_receipt(reported.get("transport")) if reported is not None else None
+        if reported is not None:
+            reported = {**reported, "transport": transport}
+        valid = bool(valid and transport is not None and transport["applied"])
         return {"ready": bool(valid), "port": port, "https_decryption": False,
-                "policy": _verified_policy(data, nonce, port, state, create_identity=create_identity),
+                "policy": reported,
                 # Display-only resource figures, accepted only from a proxy that proved its identity.
                 "footprint": data.get("footprint") if valid and isinstance(data.get("footprint"), dict) else None}
     except (OSError, ValueError, RuntimeError, http.client.HTTPException):

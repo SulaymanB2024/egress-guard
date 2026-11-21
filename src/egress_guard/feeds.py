@@ -138,7 +138,8 @@ class Feed:
 
     `category` is the policy group (`tracker`, `threat`, `cname` or `doh`). `source` is the
     ledger reason recorded when this feed decides a block, and `kind` the user-facing category.
-    An `ips` feed may also list IP literals, which match only IP-literal request targets.
+    An `ips` feed may also list IP literals, matched against IP-literal request targets
+    and actual numeric TCP destinations when the experimental address guard is enabled.
     """
     id: str
     name: str

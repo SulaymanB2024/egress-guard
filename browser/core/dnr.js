@@ -18,9 +18,9 @@
   const params = isNode ? require("./params.js") : root.EGParams;
 
   const PRIORITY = Object.freeze({easylist: 1, easylistAllow: 2, easyprivacy: 3, easyprivacyAllow: 4, filterImportant: 5, hand: 6,
-    mode: 7, embed: 8, clean: 9, scanner: 11, scannerPass: 12, embedCookies: 13, relax: 14,
-    list: 17, surrogate: 18, userAllow: 20, exception: 21, grantHeaders: 22, threat: 30, continue: 31,
-    continueHeaders: 32, userBlock: 40, modeHeaders: 45, gpc: 50});
+    mode: 7, embed: 8, params: 9, clean: 10, scanner: 11, scannerPass: 12, embedCookies: 13, relax: 14,
+    list: 17, surrogate: 18, userAllow: 20, exception: 21, grantHeaders: 22, isolation: 24, threat: 30, continue: 31,
+    continueHeaders: 32, userBlock: 40, modeHeaders: 45, isolationHeaders: 46, gpc: 50});
   // Each URL filter list's own block / exception pair.
   const FILTER_PRIORITY = Object.freeze({easylist: {block: PRIORITY.easylist, allow: PRIORITY.easylistAllow},
     easyprivacy: {block: PRIORITY.easyprivacy, allow: PRIORITY.easyprivacyAllow}});
@@ -72,6 +72,7 @@
     surrogates: {label: "Tracker answered by a stub"},
     preparation: {label: "Strict preparation"},
     strict: {label: "Strict mode (third party)"},
+    isolated: {label: "Isolation (cross-site resource)"},
     noscript: {label: "Scripts off for this site"},
     embeds: {label: "Embed held until clicked"},
     user: {label: "Your rules"},
@@ -82,9 +83,12 @@
   const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   /** Glob path ("*" = any run of characters) -> anchored URL regex for one exact host. */
-  function endpointRegex(host, pathPattern) {
+  function endpointRegex(host, pathPattern, {includeWebSockets = false} = {}) {
     const path = pathPattern.split("*").map(escapeRegex).join("[^?#]*");
-    return `^https?://${escapeRegex(host)}\\.?(?::[0-9]+)?${path}(?:[?#].*)?$`;
+    // A saved "other" deny includes socket handshakes. Expanding allow rules here
+    // would silently create transport permissions from older HTTP-only grants.
+    const scheme = includeWebSockets ? "(?:https?|wss?)" : "https?";
+    return `^${scheme}://${escapeRegex(host)}\\.?(?::[0-9]+)?${path}(?:[?#].*)?$`;
   }
 
   /** Drop any domain whose parent domain is also listed: DNR requestDomains already covers subdomains. */
@@ -131,7 +135,7 @@
   }
 
   /**
-   * Static ruleset that strips tracking parameters from page and frame navigations. One plain urlFilter
+   * Static ruleset that strips tracking parameters from GET page navigations. One plain urlFilter
    * rule per parameter ("?name=" and "&name="), each removing the whole set: a single regex with every
    * name exceeds Chrome's compiled-regex size limit and is silently dropped.
    */
@@ -146,8 +150,8 @@
     const action = redirect([...globalNames]);
     for (const name of globalNames) {
       for (const sep of ["?", "&"]) {
-        out.push({id: id++, priority: PRIORITY.clean, action,
-          condition: {urlFilter: `${sep}${name}=`, isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame", "sub_frame"], excludedRequestDomains}});
+        out.push({id: id++, priority: PRIORITY.params, action,
+          condition: {urlFilter: `${sep}${name}=`, isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame"], requestMethods: ["get"], excludedRequestDomains}});
       }
     }
     // A scoped rule removes its own names and every global one. If a global rule wins the race on the same
@@ -157,20 +161,24 @@
       const scopedAction = redirect([...globalNames, ...names]);
       for (const name of names) {
         for (const sep of ["?", "&"]) {
-          out.push({id: id++, priority: PRIORITY.clean, action: scopedAction,
-            condition: {urlFilter: `${sep}${name}=`, isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame", "sub_frame"], requestDomains: [...scope.domains], excludedRequestDomains}});
+          out.push({id: id++, priority: PRIORITY.params, action: scopedAction,
+            condition: {urlFilter: `${sep}${name}=`, isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame"], requestMethods: ["get"], requestDomains: [...scope.domains], excludedRequestDomains}});
         }
       }
     }
     // Amazon's "/ref=…" path segment: cut out of the path, the rest of the address untouched.
     for (const rule of params.PATH_RULES) {
-      out.push({id: id++, priority: PRIORITY.clean, action: {type: "redirect", redirect: {regexSubstitution: "\\1\\2"}},
-        condition: {regexFilter: "^(https?://[^/?#]+/[^?#]*?)/ref=[^/?#]*(.*)$", requestDomains: [...rule.domains], excludedRequestDomains, resourceTypes: ["main_frame"]}});
+      out.push({id: id++, priority: PRIORITY.params, action: {type: "redirect", redirect: {regexSubstitution: "\\1\\2"}},
+        condition: {regexFilter: "^(https?://[^/?#]+/[^?#]*?)/ref=[^/?#]*(.*)$", requestDomains: [...rule.domains], excludedRequestDomains, resourceTypes: ["main_frame"], requestMethods: ["get"]}});
     }
     // Unsubscribe, opt-out and preference pages keep every parameter (allow beats redirect at equal priority). The
-    // page cleaner applies the same test (params.preservedPath).
-    out.push({id: id++, priority: PRIORITY.clean, action: {type: "allow"},
-      condition: {regexFilter: params.PRESERVE_REGEX, isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame", "sub_frame"]}});
+    // page cleaner applies the same test (params.preservedPath). This must never
+    // apply to frames: a generic allow would lift Strict's cross-site frame block.
+    // Headers stay above this brake, so preserving tokens cannot restore cookies.
+    for (const regexFilter of params.PRESERVE_URL_REGEXES || [params.PRESERVE_REGEX]) {
+      out.push({id: id++, priority: PRIORITY.params, action: {type: "allow"},
+        condition: {regexFilter, isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"], requestMethods: ["get"], excludedRequestDomains}});
+    }
     return out;
   }
 
@@ -228,7 +236,7 @@
     {id: "tiktok", name: "TikTok", domains: ["tiktok.com", "tiktokcdn.com", "ttwstatic.com"]},
     {id: "disqus", name: "Disqus", domains: ["disqus.com", "disquscdn.com"]},
   ]);
-  const SITE_MODES = Object.freeze(["relaxed", "standard", "strict", "noscript"]);
+  const SITE_MODES = Object.freeze(["relaxed", "standard", "strict", "noscript", "isolated"]);
   // Tracking hosts that stay reachable (embeds, share buttons, sign-in elsewhere on the same company's domains) and
   // so are not on the block lists: their third-party requests lose their cookies instead.
   const TRACKER_COOKIE_HOSTS = Object.freeze(["facebook.com", "facebook.net", "instagram.com", "twitter.com", "x.com", "twimg.com", "linkedin.com",
@@ -254,6 +262,8 @@
    *   strict   third-party scripts, frames and fonts blocked (FUNCTIONAL_HOSTS and the hosts you allowed excepted);
    *            third-party Cookie / Set-Cookie removed; the Referer removed from third-party frames; embeds held.
    *   noscript every script the site's pages request is blocked and a `script-src 'none'` policy is added to them.
+   *   isolated all cross-top-site subresources are blocked, without compatibility exemptions;
+   *            HTTP credentials/referrers are removed for its resources and navigations to it.
    */
   const topScope = (site) => {
     const excluded = hosts.scopeExclusions(site);
@@ -290,7 +300,7 @@
     const sites = (modes && modes.sites) || {};
     const allowHosts = (modes && modes.allowHosts) || {};
     const defaultMode = modes && modes.defaultMode === "strict" ? "strict" : "standard";
-    const by = {relaxed: [], standard: [], strict: [], noscript: []};
+    const by = {relaxed: [], standard: [], strict: [], noscript: [], isolated: []};
     for (const [site, mode] of Object.entries(sites)) if (by[mode] && hosts.siteOf(site) === site && hosts.canScopeSite(site)) by[mode].push(site);
     for (const k of Object.keys(by)) by[k].sort();
     const rules = [];
@@ -322,7 +332,7 @@
       : by.strict;
     if (strictSites.length) strictSets.push({topDomains: strictSites});
     if (defaultMode === "strict") {
-      const excluded = [...by.relaxed, ...by.standard, ...strictSites, ...by.noscript];
+      const excluded = [...by.relaxed, ...by.standard, ...strictSites, ...by.noscript, ...by.isolated];
       for (const scope of preparationScopes(excluded)) {
         add("preparation", PRIORITY.mode, {type: "block"}, {...scope, resourceTypes: ["script", "sub_frame", "font", "object"]});
         // The hold grants no implicit functional-host exception. Named policy
@@ -359,6 +369,24 @@
             {...scopeWho, requestDomains: nested, excludedRequestDomains: [...FUNCTIONAL_HOSTS, "youtube.com", "youtube-nocookie.com"], resourceTypes: ["sub_frame"]});
         }
       }
+    }
+    for (const site of by.isolated) {
+      const scope = topScope(site), nested = hosts.scopeExclusions(site);
+      // No functional-host list, saved host allowance or ordinary permission can
+      // override this tier. A site's own inline/first-party code remains enabled.
+      add("isolated", PRIORITY.isolation, {type: "block"},
+        {...scope, excludedRequestDomains: [site], resourceTypes: [...SUBRESOURCE_TYPES]});
+      // requestDomains includes children: restore independent tenants below PSL
+      // boundaries inside the otherwise same-site destination exclusion.
+      if (nested.length) add("isolated", PRIORITY.isolation, {type: "block"},
+        {...scope, requestDomains: nested, resourceTypes: [...SUBRESOURCE_TYPES]});
+      const sanitize = {type: "modifyHeaders", requestHeaders: [
+        {header: "cookie", operation: "remove"}, {header: "authorization", operation: "remove"}, {header: "referer", operation: "remove"}],
+      responseHeaders: [{header: "set-cookie", operation: "remove"}]};
+      add(null, PRIORITY.isolationHeaders, sanitize, {...scope, resourceTypes: [...SUBRESOURCE_TYPES]});
+      // Destination-scoped: the first omnibox navigation is covered without a
+      // worker/navigation-event race. It does not claim to contain navigation away.
+      add(null, PRIORITY.isolationHeaders, sanitize, {requestDomains: [site], ...(nested.length ? {excludedRequestDomains: nested} : {}), resourceTypes: ["main_frame"]});
     }
     for (const site of by.noscript) {
       const scope = topScope(site), excluded = hosts.scopeExclusions(site);
@@ -431,8 +459,9 @@
     const sources = {};
     let id = firstId;
     const push = (sourceId, priority, actionType, site, host, path, types, party, map, sourceTabId) => {
-      const condition = {regexFilter: endpointRegex(host, path), isUrlFilterCaseSensitive: true, requestDomains: [host],
-        topDomains: [site], resourceTypes: chromeTypes(types, map)};
+      const resourceTypes = chromeTypes(types, map);
+      const condition = {regexFilter: endpointRegex(host, path, {includeWebSockets: actionType === "block" && resourceTypes.includes("websocket")}), isUrlFilterCaseSensitive: true, requestDomains: [host],
+        topDomains: [site], resourceTypes};
       const excludedTop = hosts.scopeExclusions(site);
       if (excludedTop.length) condition.excludedTopDomains = excludedTop;
       // Destination is exact and site is known, so party is evaluated against the top

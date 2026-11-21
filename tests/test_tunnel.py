@@ -175,11 +175,14 @@ class TunnelPolicyTests(unittest.TestCase):
     def test_handshake_uses_current_policy_for_both_names(self):
         addon = EgressGuard()
         policy = Mock()
+        policy.transport = {"profile": "compatible", "connect_ports": [443], "address_guard": False}
         policy.enforceable.return_value = True
         policy.decision.side_effect = lambda name, port: {
             "decision": "blocked" if name == "blocked.test" else "allowed", "source": "local-block",
         }
         addon.runtime = SimpleNamespace(policy=policy)
+        addon._address_guard = Mock()
+        addon._address_guard.ready.return_value = True
         addon.ledger = Mock()
         self.assertFalse(addon._admit_tunnel("blocked.test", 443, "allowed.test"))
         policy.decision.assert_called_once_with("blocked.test", 443)

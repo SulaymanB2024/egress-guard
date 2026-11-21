@@ -24,6 +24,7 @@ from .config import config_path, load_config
 from .health import proxy_health
 from .paths import data_dir, private_dir, supports_private_identity
 from .policy import Policy
+from . import transport_policy
 
 HOST_NAME = "org.egress_guard.receipts"
 MAX_REQUEST_BYTES = 8192
@@ -180,7 +181,11 @@ def status_receipt(state: Path | None = None) -> dict:
                if isinstance(logging, dict) else None)
     logging_applied = bool(logging and logging.get("applied") is True and all(
         logging.get(key) == value for key, value in config["logging"].items()))
-    pending = reported.get("pending") is not False or revision != policy.revision or not logging_applied
+    transport = transport_policy.runtime_receipt(reported.get("transport"))
+    saved_transport = transport_policy.settings(config)
+    transport_applied = transport_policy.applied(saved_transport, transport)
+    pending = (reported.get("pending") is not False or revision != policy.revision
+               or not logging_applied or not transport_applied)
     applied = revision == policy.revision and not pending
     return {"checked_at": int(time.time()), "proxy_ready": health.get("ready") is True,
             "policy": {"saved_revision": policy.revision, "applied_revision": revision,
@@ -188,7 +193,8 @@ def status_receipt(state: Path | None = None) -> dict:
                        "degraded": policy.degraded() or reported.get("degraded") is not False or not applied,
                        "complete": policy.ready() and reported.get("complete") is True,
                        "coverage": dict(policy.coverage)},
-            "logging": {"saved": dict(config["logging"]), "runtime": logging}}
+            "logging": {"saved": dict(config["logging"]), "runtime": logging},
+            "transport": {"saved": dict(saved_transport), "runtime": transport}}
 
 
 def _read_exact(stream, size: int, deadline: float) -> bytes:

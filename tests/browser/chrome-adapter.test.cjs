@@ -16,7 +16,7 @@ const fixture = JSON.parse(read("tests/browser/fixtures/publisher/rules.json"));
 const ID = dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 const EXT = `chrome-extension://${ID}/`;
 const START = Date.UTC(2026, 10, 20, 12, 0, 0);
-const WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/browser-privacy.js", "background-chrome.js"];
+const WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/browser-privacy.js", "background-chrome.js"];
 const event = () => { const fns = []; return {addListener: (fn) => fns.push(fn), fns, fire: (...a) => Promise.all(fns.map((f) => f(...a)))}; };
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setImmediate); };
 
@@ -1049,4 +1049,179 @@ test("tab replacement retires the old sender, prewarm and grants without relying
   assert.equal(scriptBlockedByMode(w.dynamic(), "replacement.example"), false);
   assert.equal(w.sessionRules().length, 0);
   assert.deepEqual(w.local.egressGuard.exceptions, []);
+});
+
+test("Isolation activation removes cross-site repairs and a prior pause before the named policy is applied", async () => {
+  const w = await worker({stored: null});
+  const tabUrl = "https://publisher.example/article";
+  const cross = await w.popup({type: "add-exception", tabId: 1, tabUrl, host: "collector.example", path: "/resource", resourceType: "image", minutes: 5});
+  const own = await w.popup({type: "add-exception", tabId: 1, tabUrl, host: "publisher.example", path: "/resource", resourceType: "image", minutes: 5});
+  assert.ok(cross.ok && own.ok);
+  assert.equal((await w.page({type: "load-embed", embed: "youtube", cookies: true})).ok, true);
+  assert.equal((await w.popup({type: "strict-allow", tabUrl, host: "collector.example"})).ok, true);
+  const persistent = await w.api.store.addRule({kind: "request", site: "publisher.example", host: "collector.example", path: "/resource", types: ["image"], action: "allow"});
+  const timedAllow = await w.api.store.addRule({kind: "request", site: "publisher.example", host: "collector.example", path: "/temporary", types: ["image"], action: "allow", expiresAt: START + 5 * 60000});
+  assert.equal((await w.popup({type: "pause-site", tabUrl})).ok, true);
+  const commits = [], sessionsBeforeIsolation = [];
+  w.faults.localWrite = (items) => { if (items.egressGuardModes?.sites?.["publisher.example"] === "isolated") commits.push(JSON.parse(JSON.stringify(items))); return false; };
+  const update = w.chrome.declarativeNetRequest.updateDynamicRules;
+  w.chrome.declarativeNetRequest.updateDynamicRules = async (change) => {
+    if (change.addRules?.some((r) => r.priority === dnr.PRIORITY.isolation)) sessionsBeforeIsolation.push(JSON.parse(JSON.stringify(w.sessionRules())));
+    return update(change);
+  };
+  const result = await w.popup({type: "set-mode", tabUrl, mode: "isolated"});
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.cleared, null, "Isolation does not delete application or cache storage");
+  assert.equal(w.browsingCalls.length, 0);
+  assert.equal(w.reloads.length, 0, "no automatic reload or replay");
+  assert.equal(commits.length, 1);
+  assert.deepEqual(commits[0].egressGuardPauses.items, {}, "mode and pause removal share one saved-intent write");
+  assert.equal(sessionsBeforeIsolation.length, 1);
+  assert.ok(!sessionsBeforeIsolation[0].some((r) => r.priority === dnr.PRIORITY.exception && r.condition.requestDomains.includes("collector.example")));
+  assert.ok(!sessionsBeforeIsolation[0].some((r) => [dnr.PRIORITY.embed, dnr.PRIORITY.embedCookies].includes(r.priority)));
+  assert.deepEqual(w.local.egressGuard.exceptions.map((e) => e.id), [own.value.id], "same-site repair remains sanitized and source-tab bound");
+  assert.ok(w.local.egressGuard.rules.some((r) => r.id === persistent.id), "persistent explicit intent is retained below the isolation block tier");
+  assert.ok(!w.local.egressGuard.rules.some((r) => r.id === timedAllow.id), "expiring saved allows are temporary resource permissions and are revoked too");
+  assert.ok(w.dynamic().some((r) => r.priority === dnr.PRIORITY.isolation));
+  assert.equal(relaxFor(w, "publisher.example"), false);
+  const state = await stateOf(w);
+  assert.equal(state.mode, "isolated");
+  assert.equal(state.paused, null);
+  assert.equal(state.isolation.state, "applied");
+  assert.equal(state.isolation.active, true);
+  assert.equal(state.isolation.revision, state.policy.dynamicRevision);
+  assert.equal(state.isolation.existingConnections, "not-revoked");
+  assert.equal(state.isolation.reloadNeeded, true);
+  assert.deepEqual(state.isolation.httpHeaders, ["cookie", "authorization", "referer", "set-cookie"]);
+  assert.equal((await w.page({type: "guard-config"})).mode, "isolated");
+});
+
+test("Isolation rejects cross-site repairs and Pause; only an explicit site-mode change relaxes it", async () => {
+  const w = await worker({stored: null});
+  const tabUrl = "https://publisher.example/article";
+  assert.match((await w.page({type: "set-mode", tabUrl, mode: "isolated"})).error, /Not allowed/);
+  assert.equal((await w.popup({type: "set-mode", tabUrl, mode: "isolated"})).ok, true);
+  for (const msg of [
+    {type: "add-exception", tabId: 1, tabUrl, host: "collector.example", path: "/resource", resourceType: "image", minutes: 5},
+    {type: "strict-allow", tabUrl, host: "cdn.jsdelivr.net"},
+    {type: "pause-site", tabUrl},
+  ]) assert.match((await w.popup(msg)).error, /Isolation.*explicitly/, msg.type);
+  for (const cookies of [false, true]) assert.match((await w.page({type: "load-embed", embed: "youtube", cookies})).error, /Isolation.*explicitly/);
+  assert.equal(w.sessionRules().length, 0);
+  assert.equal((await w.popup({type: "set-default-mode", mode: "strict"})).ok, true);
+  assert.equal((await stateOf(w)).mode, "isolated", "a default change does not replace an explicit site mode");
+  assert.equal((await w.popup({type: "resume-site", tabUrl})).ok, true);
+  assert.equal((await stateOf(w)).mode, "isolated");
+  assert.equal((await w.popup({type: "set-mode", tabUrl, mode: "standard"})).ok, true);
+  assert.equal((await stateOf(w)).isolation, null);
+  assert.equal((await w.popup({type: "pause-site", tabUrl})).ok, true, "Pause becomes available after the user changes the site mode");
+});
+
+test("Isolation intent and old pause roll back together when preference storage fails", async () => {
+  const w = await worker({stored: null});
+  const tabUrl = "https://publisher.example/article";
+  await w.popup({type: "pause-site", tabUrl});
+  const oldRules = JSON.stringify(w.dynamic());
+  w.faults.localWrite = (items) => items.egressGuardModes?.sites?.["publisher.example"] === "isolated";
+  assert.match((await w.popup({type: "set-mode", tabUrl, mode: "isolated"})).error, /localWrite/);
+  const state = await stateOf(w);
+  assert.equal(state.requestedMode, "standard");
+  assert.equal(state.mode, "relaxed");
+  assert.equal(state.isolation, null);
+  assert.equal(state.paused, START + 15 * 60000);
+  assert.equal(JSON.stringify(w.dynamic()), oldRules, "no unsaved mode reaches Chrome");
+  assert.equal(w.local.egressGuardPauses.items["publisher.example"], START + 15 * 60000);
+});
+
+test("Isolation receipts distinguish rejected activation, retained applied protection and failed readback", async () => {
+  const w = await worker({stored: null});
+  const tabUrl = "https://publisher.example/article";
+  w.faults.dynamicUpdate = 1;
+  assert.match((await w.popup({type: "set-mode", tabUrl, mode: "isolated"})).error, /dynamicUpdate/);
+  let state = await stateOf(w);
+  assert.equal(state.mode, "standard");
+  assert.equal(state.requestedMode, "isolated");
+  assert.equal(state.isolation.state, "degraded");
+  assert.equal(state.isolation.active, false);
+  assert.equal(state.isolation.revision, null);
+  assert.match((await w.popup({type: "pause-site", tabUrl})).error, /cannot be paused/);
+  assert.equal((await w.popup({type: "retry-policy"})).ok, true);
+  state = await stateOf(w);
+  assert.equal(state.isolation.state, "applied");
+  assert.equal(state.isolation.active, true);
+  w.faults.dynamicUpdate = 1;
+  assert.match((await w.popup({type: "set-mode", tabUrl, mode: "standard"})).error, /dynamicUpdate/);
+  state = await stateOf(w);
+  assert.equal(state.requestedMode, "standard");
+  assert.equal(state.mode, "isolated");
+  assert.equal(state.isolation.state, "degraded");
+  assert.equal(state.isolation.active, true, "confirmed old policy remains active after a rejected relaxation");
+  assert.match((await w.popup({type: "pause-site", tabUrl})).error, /cannot be paused/);
+  assert.equal((await w.popup({type: "retry-policy"})).ok, true);
+  assert.equal((await stateOf(w)).isolation, null);
+
+  let reads = 0;
+  w.faults.dynamicRead = () => ++reads === 2;
+  assert.match((await w.popup({type: "set-mode", tabUrl, mode: "isolated"})).error, /dynamicRead/);
+  state = await stateOf(w);
+  assert.equal(state.mode, "unknown");
+  assert.equal(state.isolation.active, false, "installed but unread rules cannot attest active protection");
+  assert.equal(state.isolation.revision, null);
+  w.faults.dynamicRead = false;
+  w.faults.localWrite = (items) => Boolean(items.egressGuardController);
+  assert.match((await w.popup({type: "retry-policy"})).error, /localWrite/);
+  state = await stateOf(w);
+  assert.equal(state.isolation.state, "degraded");
+  assert.equal(state.isolation.active, true, "independent dynamic readback is known despite failed final bookkeeping");
+  assert.equal(state.policy.appliedRevision, null);
+  assert.equal(state.isolation.revision, state.policy.dynamicRevision);
+});
+
+test("Isolation capacity refusal preserves old policy and does not install a reduced fallback", async () => {
+  const w = await worker({stored: null});
+  const old = JSON.stringify(w.dynamic());
+  w.chrome.declarativeNetRequest.MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES = 1;
+  assert.match((await w.popup({type: "set-mode", tabUrl: "https://publisher.example/", mode: "isolated"})).error, /capacity/);
+  const state = await stateOf(w);
+  assert.equal(state.mode, "standard");
+  assert.equal(state.isolation.state, "degraded");
+  assert.equal(state.isolation.active, false);
+  assert.equal(JSON.stringify(w.dynamic()), old);
+});
+
+test("Isolation survives conservative scope migration and defeats stale paused/granted state on restart", async () => {
+  const first = await worker({stored: null});
+  const tabUrl = "https://publisher.example/article";
+  assert.equal((await first.popup({type: "add-exception", tabId: 1, tabUrl, host: "collector.example", path: "/resource", resourceType: "image", minutes: 5})).ok, true);
+  assert.equal((await first.page({type: "load-embed", embed: "youtube", cookies: true})).ok, true);
+  const revived = await worker(restartOptions(first, {extraLocal: {...first.local,
+    egressGuardModes: {...first.local.egressGuardModes, psl: "old-psl-version", sites: {"publisher.example": "isolated", "other.example": "relaxed"}},
+    egressGuardPauses: {schema: 2, scope: "top-level-psl-v2", items: {"publisher.example": START + 5 * 60000}},
+  }}));
+  const state = await stateOf(revived);
+  assert.equal(state.mode, "isolated");
+  assert.equal(state.isolation.active, true);
+  assert.equal(state.paused, null);
+  assert.equal(revived.local.egressGuardModes.sites["other.example"], undefined, "permissive migration remains conservative");
+  assert.deepEqual(revived.local.egressGuardPauses.items, {});
+  assert.deepEqual(revived.local.egressGuard.exceptions, []);
+  assert.equal(revived.sessionRules().length, 0, "even matching old journal/rules cannot resurrect a cross-site repair under Isolation");
+  const again = await worker(restartOptions(revived, {extraSession: {}, initialSession: []}));
+  assert.equal((await stateOf(again)).isolation.active, true, "persistent Isolation does not depend on a session journal");
+});
+
+test("Isolation refuses unrepresentable addresses and never attests a parent mode on a wildcard base", async () => {
+  const w = await worker({stored: null});
+  for (const url of ["http://127.0.0.1:8042/", "http://localhost/", "https://kawasaki.jp/", "https://af-south-1.airflow.amazonaws.com/"]) {
+    assert.ok((await w.popup({type: "set-mode", tabUrl: url, mode: "isolated"})).error, url);
+  }
+  assert.equal((await w.popup({type: "set-mode", tabUrl: "https://amazonaws.com/", mode: "isolated"})).ok, true);
+  const unsupported = await w.popup({type: "popup-state", tabId: 1, tabUrl: "https://af-south-1.airflow.amazonaws.com/"});
+  assert.equal(unsupported.isolation.state, "unsupported");
+  assert.equal(unsupported.isolation.active, false);
+  assert.equal(unsupported.mode, "unknown");
+  assert.match(unsupported.isolation.reason, /wildcard-registry/);
+  const tenant = await w.popup({type: "popup-state", tabId: 1, tabUrl: "https://alice.s3.amazonaws.com/"});
+  assert.equal(tenant.mode, "standard");
+  assert.equal(tenant.isolation, null, "independent tenant is not the parent's site");
 });

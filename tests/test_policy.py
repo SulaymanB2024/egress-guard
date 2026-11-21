@@ -111,6 +111,21 @@ class PolicyTests(unittest.TestCase):
             old_cache = Policy(self.config, self.state)
         self.assertEqual(old_cache.decision("203.0.113.9")["source"], "malware-feed")
 
+    def test_actual_addresses_have_independent_ip_only_decisions(self):
+        self.assertEqual(self.policy.decision("accounts.google.com")["source"], "safety-list")
+        self.assertEqual(self.policy.address_decision("::ffff:203.0.113.9")["source"], "malware-feed")
+        self.assertEqual(self.policy.address_decision("::ffff:8.8.8.8")["source"], "doh-feed")
+        self.assertEqual(self.policy.address_decision("accounts.google.com")["source"], "invalid-host")
+        config = {"block": {"block_encrypted_dns": False},
+                  "transport": {"profile": "hardened", "address_guard": True}}
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            changed = Policy(config, self.state)
+        # The literal CONNECT floor must not deny every hostname's numeric sockaddr.
+        self.assertEqual(changed.address_decision("8.8.8.8")["decision"], "allowed")
+        self.assertEqual(changed.address_decision("203.0.113.9")["decision"], "blocked")
+        self.assertFalse(changed.address_decision("203.0.113.9")["can_allow"])
+
     def test_grants_and_pause_are_immutable_until_a_new_revision_is_applied(self):
         config_path = self.state / "config.toml"
         with patch("egress_guard.policy.load_cached_feed",

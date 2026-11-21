@@ -29,6 +29,8 @@ const reasons = {
   'local-block': 'Your block rule', 'local-allow': 'Your allow rule', 'temporary-exception': 'Temporarily allowed',
   'tracker-paused': 'Ad filtering paused', 'dashboard-exception': 'Exempt dashboard host', 'no-match': 'No rule matched',
   'plaintext-credentials': 'Password sent unencrypted', 'not-ready': 'Filters not ready', 'non-tls-tunnel': 'Non-TLS tunnel refused',
+  'plaintext-http': 'Hardened profile requires HTTPS', 'literal-connect': 'Literal CONNECT target refused',
+  'connect-port': 'CONNECT port not admitted', 'address-guard-unavailable': 'TCP address guard unavailable',
   'invalid-host': 'Malformed hostname', 'invalid-request': 'Malformed request', doh: 'Encrypted DNS server',
   'malware-feed': 'Malware list', 'phishing-feed': 'Phishing list', 'lookalike-domain': 'Look-alike domain',
   'doh-feed': 'Encrypted DNS server', 'safety-list': 'Built-in safety list',
@@ -345,7 +347,8 @@ function renderHealth() {
     const ready = feedsReady(filters);
     const causes = [];
     if (!ready) causes.push('block lists not downloaded');
-    if (!proxyUp) causes.push('proxy not running');
+    if (status?.transport?.runtime?.address_guard?.state === 'unavailable') causes.push('transport guard unavailable');
+    else if (!proxyUp) causes.push('proxy not running');
     if (ready && proxyUp) causes.push('saved rules not applied yet');
     const fact = causes.join(' · ');
     setStatus('unprotected', 'Not protecting', fact.charAt(0).toUpperCase() + fact.slice(1));
