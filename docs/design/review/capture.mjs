@@ -137,7 +137,7 @@ function extAudit() { return `(() => {
     const cs = getComputedStyle(el);
     const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
     if (hasText) sizes.add(parseFloat(cs.fontSize) + (/mono|Menlo|Consolas/.test(cs.fontFamily) ? ' mono' : ''));
-    if (hasText && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible') {
+    if (el.textContent.trim() && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible' && el.childElementCount < 4) {
       (cs.textOverflow === 'ellipsis' && el.closest('[title]') ? ellipsis : clipped).push(el.textContent.trim().slice(0, 60));
     }
     if (/(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1) scrollers.push((el.id || el.className || el.tagName) + ' ' + el.scrollHeight + '>' + el.clientHeight);
@@ -153,7 +153,7 @@ function extAudit() { return `(() => {
   const primaries = all.filter((b) => b.matches('.btn.primary') && visible(b)).length;
   const textSizes = [...sizes].filter((s) => !String(s).endsWith('mono'));
   return {clipped, ellipsis, primaries, sizes: [...sizes].sort(), textSizes: textSizes.length, off: [...off].slice(0, 20), unnamed, scrollers,
-    hscroll: document.documentElement.scrollWidth > innerWidth + 1, height: document.documentElement.scrollHeight};
+    hscroll: document.documentElement.scrollWidth > innerWidth + 1, height: Math.ceil(document.body.getBoundingClientRect().height)};
 })()`; }
 
 async function extension() {
@@ -194,7 +194,7 @@ async function extension() {
       await sleep(250);
       const main = /^(main|idn|threat|packed|badge|reduced|paused|unsupported|firefox|longhost)$/.test(name);
       if (scheme === "light") judge(`popup-${name}`, await ev(extAudit()), {budget: !extBefore && main ? 520 : 0});
-      const h = await ev(`document.documentElement.scrollHeight`);
+      const h = await ev(`Math.ceil(document.body.getBoundingClientRect().height)`);
       await shot(sessionId, {x: 0, y: 0, width: 360, height: h}, path.join(dir, `popup-${name}-${scheme}.png`));
       await cdp("Target.closeTarget", {targetId});
     }

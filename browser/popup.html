@@ -7,80 +7,122 @@
 <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-<header class="top">
-  <p class="brand"><span class="brand-symbol" aria-hidden="true"></span>Egress Guard</p>
-  <p id="site" class="site">Loading…</p>
+<header class="bar">
+  <span class="mark" aria-hidden="true"></span>
+  <span id="site" class="site host">Loading…</span>
+  <p id="status" class="status" data-state="neutral"><span class="dot hollow" id="status-dot" aria-hidden="true"></span><span class="word" id="status-word">Checking…</span></p>
 </header>
-<p id="error" class="error" role="alert" hidden></p>
+<div id="tabs" class="tabs" role="tablist" aria-label="Popup sections">
+  <button type="button" role="tab" id="tab-page" aria-controls="panel-page" aria-selected="true">This page</button>
+  <button type="button" role="tab" id="tab-blocked" aria-controls="panel-blocked" aria-selected="false" tabindex="-1">Blocked <span class="count" id="blocked-tab-count"></span></button>
+  <button type="button" role="tab" id="tab-rules" aria-controls="panel-rules" aria-selected="false" tabindex="-1">Rules <span class="count" id="rules-tab-count"></span></button>
+  <button type="button" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
+</div>
 
-<section class="hero" aria-labelledby="blocked-h">
-  <p class="eyebrow" id="blocked-h">Blocked on this page</p>
-  <p class="count"><span id="blocked-count">0</span> <span id="blocked-unit">requests</span></p>
-  <ul id="breakdown" class="breakdown"></ul>
-  <p id="hero-note" class="note" hidden></p>
-</section>
+<main>
+<p id="error" class="inline-error" role="alert" hidden></p>
 
-<section class="cleaning" id="cleaning" aria-label="Link and cookie cleaning" hidden>
-  <p class="stats"><span><b id="links-cleaned">0</b> <span id="links-unit">links cleaned</span></span><span><b id="cookies-removed">0</b> <span id="cookies-unit">tracking cookies removed</span></span></p>
-  <p id="clean-note" class="note"></p>
-  <button id="clean-toggle" type="button" aria-pressed="false">Stop cleaning on this site</button>
-</section>
-
-<section class="block" id="protection" aria-labelledby="mode-h">
-  <h2 id="mode-h">Protection on this site</h2>
-  <div id="modes" class="modes" role="radiogroup" aria-labelledby="mode-h"></div>
-  <p id="mode-note" class="note"></p>
-  <ul id="strict-allowed" class="rows" hidden></ul>
-  <label class="default-mode">Default for other sites
-    <select id="default-mode"><option value="standard">Standard</option><option value="strict">Strict</option></select>
-  </label>
-  <p id="worker-note" class="note" hidden></p>
-  <details class="experimental">
-    <summary>Mail scanner links</summary>
-    <label class="check"><input type="checkbox" id="scanned-direct"> Always open scanned links directly</label>
-    <p class="note">Off (the default): a Safe Links, Proofpoint, Mimecast, Barracuda or Trend Micro link first shows where it leads, and Continue goes through your mail's scanner. On: every scanned link whose address is readable opens straight away, skipping the scanner's click-time check. Malware and phishing blocking applies either way.</p>
-  </details>
-</section>
-
-<section class="block" aria-labelledby="list-h">
-  <h2 id="list-h">What was blocked</h2>
-  <ul id="blocked" class="rows"></ul>
-</section>
-
-<section class="block" aria-labelledby="hidden-h">
-  <h2 id="hidden-h">Hidden on this page</h2>
-  <p id="hidden" class="note"></p>
-  <p id="generic-note" class="note" hidden></p>
-  <div class="actions">
-    <button id="generic" type="button" hidden>Show ad slots on this site</button>
-    <button id="pick" type="button">Block an element…</button>
-    <button id="restore" type="button">Restore this page</button>
+<section id="panel-page" class="panel" role="tabpanel" aria-labelledby="tab-page">
+  <div id="page-view">
+    <p class="metric focal" id="focal">
+      <span class="value t-display" id="blocked-count">0</span>
+      <span class="label" id="blocked-unit">requests blocked on this page</span>
+    </p>
+    <p id="threat-line" class="status threat-line" data-state="threat" hidden><span class="dot" aria-hidden="true"></span><span class="word" id="threat-count"></span></p>
+    <div class="metric-row facts" id="facts">
+      <p class="metric" id="fact-links"><span class="value" id="links-cleaned">0</span><span class="label" id="links-unit">links cleaned</span></p>
+      <p class="metric" id="fact-cookies"><span class="value" id="cookies-removed">0</span><span class="label" id="cookies-unit">cookies removed</span></p>
+      <p class="metric" id="fact-hidden"><span class="value" id="hidden-count">0</span><span class="label" id="hidden-unit">elements hidden</span></p>
+    </div>
+    <div id="rebuilt" class="callout" data-state="reduced" role="status" hidden>
+      <p><strong class="state-text">Newer lists have been built.</strong> Reload Egress Guard in chrome://extensions to use them.</p>
+    </div>
+    <div id="paused" class="callout" data-state="reduced" hidden>
+      <p class="state-text strong" id="paused-text">Hiding is paused on this page</p>
+      <button type="button" class="btn" id="resume">Resume</button>
+    </div>
+    <div class="control" id="protection">
+      <div class="head">
+        <h2 id="mode-h">Protection on this site</h2>
+        <button type="button" class="btn quiet" id="pause" aria-label="Pause hiding on this page" title="Show everything Egress Guard hid on this page until you resume. Blocking continues.">Pause</button>
+      </div>
+      <div id="modes" class="seg" role="group" aria-labelledby="mode-h"></div>
+      <p id="worker-note" class="note t-caption muted" role="status" hidden></p>
+    </div>
+  </div>
+  <div id="unsupported" class="empty" hidden>
+    <p class="t-title" id="unsupported-title">Browser pages can't be filtered</p>
+    <p class="muted">Open a website to see what Egress Guard blocks on it.</p>
   </div>
 </section>
 
-<section class="block" aria-labelledby="rules-h">
-  <h2 id="rules-h">Rules for this site</h2>
-  <ul id="rules" class="rows"></ul>
-  <details>
-    <summary>Add an endpoint rule</summary>
-    <form id="add-rule">
-      <label>Host <input id="rule-host" name="host" required autocomplete="off" spellcheck="false"></label>
-      <label>Path <input id="rule-path" name="path" required autocomplete="off" spellcheck="false" placeholder="/collect"></label>
-      <fieldset id="rule-types">
+<section id="panel-blocked" class="panel" role="tabpanel" aria-labelledby="tab-blocked" hidden>
+  <section class="group" id="breakdown-group" hidden>
+    <h2>By reason <span class="num">Requests</span></h2>
+    <ul id="breakdown" class="list"></ul>
+  </section>
+  <div id="blocked"></div>
+  <div id="blocked-empty" class="empty" hidden>
+    <p class="t-title" id="blocked-empty-title">Nothing blocked on this page</p>
+    <p class="muted" id="blocked-empty-text">Requests appear here as the page makes them.</p>
+  </div>
+  <p id="hero-note" class="note t-caption muted" hidden></p>
+</section>
+
+<section id="panel-rules" class="panel" role="tabpanel" aria-labelledby="tab-rules" hidden>
+  <section class="group" id="rules-group">
+    <h2><span id="rules-h">Rules for this site</span> <button type="button" class="btn quiet" id="rule-add" aria-expanded="false" aria-controls="add-rule">Add…</button></h2>
+    <form id="add-rule" class="rule-form" aria-labelledby="rule-form-h" hidden>
+      <p class="t-caption muted" id="rule-form-h">Block an endpoint on this site</p>
+      <label class="field-row"><span>Host</span><input class="field host" id="rule-host" name="host" required autocomplete="off" spellcheck="false" placeholder="Host"></label>
+      <label class="field-row"><span>Path</span><input class="field host" id="rule-path" name="path" required autocomplete="off" spellcheck="false" placeholder="Path"></label>
+      <fieldset id="rule-types" class="types">
         <legend>Request types</legend>
       </fieldset>
-      <button type="submit" class="primary">Block endpoint</button>
+      <div class="form-actions">
+        <button type="submit" class="btn">Block endpoint</button>
+        <button type="button" class="btn quiet" id="rule-cancel">Cancel</button>
+      </div>
     </form>
-  </details>
+    <ul id="rules" class="list"></ul>
+  </section>
+  <section class="group" id="exceptions-group">
+    <h2>Allowed for now</h2>
+    <ul id="exceptions" class="list"></ul>
+  </section>
+  <div id="rules-empty" class="empty" hidden>
+    <p class="t-title">No rules for this site</p>
+    <p class="muted">Block a host here, or allow one for 15 minutes from Blocked.</p>
+    <button type="button" class="btn" id="rule-add-empty" aria-controls="add-rule">Add a rule…</button>
+  </div>
+  <section class="group" id="tools-group">
+    <h2>On this page</h2>
+    <ul class="list tools">
+      <li><button type="button" class="row tool" id="pick"><span class="main"><span class="line1">Block an element…</span></span><span class="trail" aria-hidden="true">›</span></button></li>
+      <li id="generic-item" hidden><button type="button" class="row tool" id="generic" aria-describedby="generic-note"><span class="main"><span class="line1" id="generic-label">Show hidden ad slots</span><span class="line2" id="generic-note"></span></span><span class="trail" aria-hidden="true">›</span></button></li>
+      <li><button type="button" class="row tool" id="restore" aria-describedby="hidden"><span class="main"><span class="line1" id="restore-label">Restore everything hidden here</span><span class="line2" id="hidden"></span></span><span class="trail" aria-hidden="true">›</span></button></li>
+      <li id="clean-item" hidden><button type="button" class="row tool" id="clean-toggle" aria-pressed="false" aria-describedby="clean-note"><span class="main"><span class="line1" id="clean-label">Stop cleaning on this site</span><span class="line2" id="clean-note"></span></span><span class="trail" aria-hidden="true">›</span></button></li>
+    </ul>
+  </section>
 </section>
 
-<section class="block" aria-labelledby="exc-h">
-  <h2 id="exc-h">Temporary exceptions</h2>
-  <ul id="exceptions" class="rows"></ul>
+<section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
+  <section class="group" id="defaults-group">
+    <h2 id="default-h">Default for other sites</h2>
+    <div id="default-modes" class="seg" role="group" aria-labelledby="default-h"></div>
+    <label class="setting"><span>Always open scanned links directly</span><input class="switch" type="checkbox" id="scanned-direct" aria-describedby="scanned-desc"></label>
+    <p id="scanned-desc" hidden>Off, the default: a Safe Links, Proofpoint, Mimecast, Barracuda or Trend Micro link first shows where it leads, and Continue goes through your mail's scanner. On: every scanned link whose address is readable opens straight away, skipping the scanner's click-time check. Malware and phishing blocking applies either way.</p>
+  </section>
+  <section class="group provenance">
+    <h2>Block lists <span class="num">Updated</span></h2>
+    <ul id="lists" class="list"></ul>
+    <details class="disclosure" id="sources" hidden>
+      <summary>List files and hashes</summary>
+      <ul id="hashes" class="hashes"></ul>
+    </details>
+  </section>
 </section>
-
-<p id="rebuilt" class="note rebuilt" role="status" hidden>Newer lists have been built. Open chrome://extensions and press the reload arrow on Egress Guard to use them.</p>
-<footer id="lists" class="lists"></footer>
+</main>
 <script src="popup.js"></script>
 </body>
 </html>

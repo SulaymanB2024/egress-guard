@@ -1,61 +1,234 @@
-/* Shared tokens for the popup and warning page. Light values match the dashboard (src/egress_guard/web/app.css). */
+/* Egress Guard extension UI: the design system's tokens and base components, then the few shared additions
+   every extension surface needs. The block from ":root {" down to the end of the copied component set is
+   docs/design/tokens.css byte for byte (tests/browser/ui-tokens.test.cjs fails if they drift): change it there and
+   copy it here, never here alone. Rules: docs/design/DESIGN.md. */
+
 :root {
   color-scheme: light dark;
-  --paper: #f5f5ef;
-  --white: #fdfdfa;
-  --ink: #182721;
-  --muted: #536158;
-  --line: #d9dfd5;
-  --accent: #235843;
-  --forest: #19382e;
-  --forest-soft: #c4dfca;
-  --on-forest: #fdfdfa;
-  --ok: #246243;
-  --warn: #82521d;
-  --bad: #913f37;
-  --bad-soft: #f6e7e4;
-  --chip: #e9ece3;
-  --focus: #4b8d78;
-  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+
+  /* Spacing: 4/8 scale. Every margin, padding and gap is one of these. */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+
+  /* Type: five sizes, two weights. Web values; macOS values in .mac below. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --t-caption: 12px; --lh-caption: 16px;
+  --t-body: 14px;    --lh-body: 20px;
+  --t-title: 16px;   --lh-title: 22px;
+  --t-headline: 24px; --lh-headline: 30px;
+  --t-display: 48px; --lh-display: 48px;
+  --w-regular: 400; --w-strong: 600;
+
+  /* Ground and ink (light). */
+  --paper: #f5f5ef;      /* page ground */
+  --raised: #fbfbf7;     /* controls, popover body, the one raised surface per view */
+  --sunken: #ebebe3;     /* segmented-control track, bar tracks, skeletons */
+  --ink: #182721;        /* text, 14.2:1 on paper */
+  --muted: #56645d;      /* secondary text, 5.7:1 on paper */
+  --faint: #7d8882;      /* graphics only (allowed bars, ticks), 3.4:1; never text */
+  --line: #dcddd3;       /* hairline between repeating rows only; decorative, no contrast duty */
+  --edge: #7c8780;       /* control boundary (inputs, secondary buttons), 3.4:1 */
+  --fill-primary: #19382e;  /* forest: the one primary button per view, brand mark */
+  --on-primary: #fbfbf7;    /* 12.3:1 on forest */
+  --focus: #2f6f58;         /* focus ring, 5.4:1 */
+  --select: rgba(24, 39, 33, .07); /* hovered or selected row; not a state */
+
+  /* State: the only hues. Each passes 4.5:1 as text on paper and raised. */
+  --protected: #235843;     /* 7.5:1 */
+  --reduced: #82521d;       /* 6.1:1 */
+  --unprotected: #913f37;   /* 6.5:1 */
+  --threat: var(--unprotected);
+  --neutral: var(--muted);
+  --protected-tint: #e3eee6;  /* protected text on it 6.9:1 */
+  --reduced-tint: #f4ead9;    /* reduced text on it 5.6:1 */
+  --threat-tint: #f5e6e2;     /* unprotected text on it 5.8:1 */
+
+  /* Shape, elevation, motion. */
+  --r-control: 6px;
+  --r-surface: 10px;
+  --shadow-pop: 0 8px 24px rgba(24, 39, 33, .14), 0 0 0 .5px rgba(24, 39, 33, .18);
+  --dur-fast: 120ms; --dur: 200ms; --ease: cubic-bezier(.2, 0, 0, 1);
+  --hit: 28px;        /* desktop minimum target */
+  --hit-touch: 44px;  /* touch minimum target */
 }
+
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #101814;
-    --white: #16211c;
-    --ink: #e7eee9;
-    --muted: #9db0a4;
-    --line: #2a3a32;
-    --accent: #8fc9ac;
-    --forest: #1b3d31;
-    --forest-soft: #b4d6bd;
-    --on-forest: #f2f7f3;
-    --ok: #8fc9ac;
-    --warn: #e2b77a;
-    --bad: #f0a59b;
-    --bad-soft: #3a211e;
-    --chip: #213029;
+    --paper: #0f1713;
+    --raised: #17221d;
+    --sunken: #0a110e;
+    --ink: #e6e8df;        /* 14.7:1 */
+    --muted: #9aa69f;      /* 7.2:1 */
+    --faint: #76827b;      /* graphics only, 4.6:1 */
+    --line: #26332d;
+    --edge: #64726b;       /* 3.6:1 */
+    --fill-primary: #cfe3d6;
+    --on-primary: #0f1713; /* 13.6:1 */
     --focus: #8fc9ac;
+    --select: rgba(230, 232, 223, .08);
+    --protected: #7fb89c;  /* 8.0:1 */
+    --reduced: #d6a25f;    /* 8.0:1 */
+    --unprotected: #e08a7f;/* 7.0:1 */
+    --protected-tint: #16271f;
+    --reduced-tint: #2b2216;
+    --threat-tint: #2e1b18;
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, .5), 0 0 0 .5px rgba(255, 255, 255, .12);
   }
 }
-* { box-sizing: border-box; }
-html, body { background: var(--paper); color: var(--ink); }
-body { margin: 0; font: 13px/1.45 var(--sans); }
-h1, h2, h3, p, dl, dd { margin: 0; }
+
+/* macOS mapping (SwiftUI reference and the HTML app mockups): same roles, HIG point sizes. */
+.mac {
+  --t-caption: 11px; --lh-caption: 14px;
+  --t-body: 13px;    --lh-body: 17px;
+  --t-title: 15px;   --lh-title: 20px;
+  --t-headline: 22px; --lh-headline: 28px;
+  --t-display: 44px; --lh-display: 44px;
+  --hit: 28px;
+}
+
+/* ---------- Base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: var(--w-regular) var(--t-body)/var(--lh-body) var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p, dl, dd, ul, ol, figure { margin: 0; padding: 0; }
+ul, ol { list-style: none; }
 [hidden] { display: none !important; }
-:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-code, .mono { font-family: var(--mono); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-control); }
 
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 730; letter-spacing: -.035em; font-size: 14px; white-space: nowrap; }
-.brand-symbol { width: 14px; height: 16px; position: relative; flex: 0 0 14px; background: var(--accent); clip-path: polygon(50% 0, 100% 20%, 93% 68%, 50% 100%, 7% 68%, 0 20%); }
-.brand-symbol::after { content: ""; position: absolute; top: 4px; left: 5px; width: 3px; height: 6px; border: solid var(--paper); border-width: 0 2px 2px 0; transform: rotate(45deg); }
-.eyebrow { font: 11px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+/* Type roles. Use these, never raw sizes. */
+.t-display  { font-size: var(--t-display);  line-height: var(--lh-display);  font-weight: var(--w-strong); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.t-headline { font-size: var(--t-headline); line-height: var(--lh-headline); font-weight: var(--w-strong); letter-spacing: -.01em; }
+.t-title    { font-size: var(--t-title);    line-height: var(--lh-title);    font-weight: var(--w-strong); }
+.t-body     { font-size: var(--t-body);     line-height: var(--lh-body); }
+.t-caption  { font-size: var(--t-caption);  line-height: var(--lh-caption); }
+.strong { font-weight: var(--w-strong); }
+.muted  { color: var(--muted); }
+.num    { font-variant-numeric: tabular-nums; }
+/* Mono is for machine identifiers only: hostnames, URLs, paths, relay names, IPs, rule text. */
+.host   { font-family: var(--font-mono); font-size: .93em; letter-spacing: 0; }
+.nowrap { white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-button { font: inherit; font-weight: 620; cursor: pointer; border-radius: 7px; min-height: 30px; padding: 4px 11px; border: 1px solid var(--line); background: var(--white); color: var(--accent); }
-button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled { color: var(--muted); cursor: default; opacity: .7; }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--paper); }
-button.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
-button.quiet { background: transparent; border-color: transparent; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
-.error { color: var(--bad); font-weight: 600; }
-@media (prefers-reduced-motion: no-preference) { button { transition: border-color .12s ease; } }
+/* State colour. Only these classes may set a hue. */
+[data-state="protected"]   { --state: var(--protected);   --state-tint: var(--protected-tint); }
+[data-state="reduced"]     { --state: var(--reduced);     --state-tint: var(--reduced-tint); }
+[data-state="unprotected"] { --state: var(--unprotected); --state-tint: var(--threat-tint); }
+[data-state="threat"]      { --state: var(--threat);      --state-tint: var(--threat-tint); }
+[data-state="neutral"]     { --state: var(--neutral);     --state-tint: var(--sunken); }
+.state-text { color: var(--state); }
+
+/* ---------- Components ---------- */
+
+/* State dot: 8px, always next to a word that says the same thing. */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--state, var(--neutral)); flex: none; }
+.dot.hollow { background: transparent; box-shadow: inset 0 0 0 1.5px var(--state, var(--neutral)); }
+
+/* Status header: dot + state word + one fact. */
+.status { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.status .word { font-weight: var(--w-strong); color: var(--state); white-space: nowrap; }
+.status .fact { color: var(--muted); min-width: 0; }
+
+/* Metric: value above label. Size comes from the role class on .value. */
+.metric { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+.metric .value { font-variant-numeric: tabular-nums; font-weight: var(--w-strong); }
+.metric .label { color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); }
+.metric-row { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: var(--s4); }
+
+/* Buttons: primary (filled, at most one per view), secondary (edged), quiet (text). */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  min-height: var(--hit); padding: 0 var(--s3); border-radius: var(--r-control);
+  font: var(--w-strong) var(--t-body)/1 var(--font-sans); white-space: nowrap; cursor: pointer;
+  border: 1px solid var(--edge); background: var(--raised); color: var(--ink);
+}
+.btn.primary { background: var(--fill-primary); border-color: var(--fill-primary); color: var(--on-primary); }
+.btn.quiet { background: transparent; border-color: transparent; color: var(--ink); padding: 0; min-width: var(--hit); text-decoration: underline; text-decoration-color: var(--edge); text-underline-offset: 3px; }
+.btn.lg { min-height: 40px; padding: 0 var(--s4); }
+.btn[disabled] { opacity: .5; cursor: default; }
+.btn .kbd { color: var(--muted); font-weight: var(--w-regular); }
+
+/* Segmented control: one choice of 2-4. Track is sunken, selected segment raised. */
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 2px; gap: 2px; background: var(--sunken); border-radius: var(--r-control); }
+.seg button { min-height: calc(var(--hit) + 4px); border: 0; border-radius: calc(var(--r-control) - 2px); background: transparent; color: var(--muted); font: var(--w-regular) var(--t-body)/1 var(--font-sans); padding: 0 var(--s2); white-space: nowrap; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--raised); color: var(--ink); font-weight: var(--w-strong); box-shadow: 0 0 0 .5px var(--edge), 0 1px 2px rgba(0,0,0,.08); }
+
+/* Switch: an on/off setting that applies at once. Track 32x20; on = ink fill (not a state colour). */
+.switch { appearance: none; -webkit-appearance: none; flex: none; width: 32px; height: 20px; margin: 4px 0; border-radius: 10px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--edge); position: relative; cursor: pointer; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--raised); box-shadow: 0 0 0 .5px var(--edge), 0 1px 2px rgba(0,0,0,.15); transition: transform var(--dur-fast) var(--ease); }
+.switch:checked { background: var(--fill-primary); box-shadow: none; }
+.switch:checked::after { transform: translateX(12px); }
+
+/* Text field: same height as a button beside it; placeholder is a noun, never instructions. */
+.field { min-height: calc(var(--hit) + 4px); padding: 0 var(--s3); border: 1px solid var(--edge); border-radius: var(--r-control); background: var(--raised); color: var(--ink); font: var(--t-body)/1 var(--font-sans); min-width: 0; }
+.field::placeholder { color: var(--muted); }
+
+/* Setting row: label (and optional value) left, control right, on one 8px baseline. */
+.setting { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); min-height: 44px; }
+
+/* Tabs: text with a 2px ink underline on the current tab. */
+.tabs { display: flex; gap: var(--s4); border-bottom: 1px solid var(--line); }
+.tabs a { display: inline-flex; align-items: center; gap: var(--s1); min-height: 36px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tabs a[aria-current="page"] { color: var(--ink); font-weight: var(--w-strong); border-bottom-color: var(--ink); }
+.tabs .count { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: var(--w-regular); }
+
+/* List row: lead / main / trailing. A hairline only between rows of the same list. */
+/* Rows bleed 8px into the gutter so a hover or selection fill does not touch the text; the hairline stays on the text edges. */
+.list > li { position: relative; }
+.list > li + li::before { content: ""; position: absolute; left: var(--s2); right: var(--s2); top: 0; height: 1px; background: var(--line); }
+.row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: var(--s3); min-height: 44px; padding: var(--s2); margin: 0 calc(-1 * var(--s2)); border-radius: var(--r-control); }
+.row .main { min-width: 0; }
+.row .main .line1 { white-space: nowrap; overflow: hidden; }
+.row .main .line2 { color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); }
+.row .trail { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Trailing action: hidden at rest, shown on hover, keyboard focus or selection. Never repeated down a list at rest. */
+.row .act { display: none; }
+.row:hover, .row:focus-within, .row[aria-selected="true"] { background: var(--select); }
+.row:hover .act, .row:focus-within .act, .row[aria-selected="true"] .act { display: inline-flex; }
+
+/* Disclosure: a quiet row with a chevron. */
+.disclosure > summary { list-style: none; display: flex; align-items: center; gap: var(--s2); min-height: var(--hit); cursor: pointer; color: var(--ink); }
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before { content: ""; width: 6px; height: 6px; border: solid var(--muted); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform var(--dur-fast) var(--ease); }
+.disclosure[open] > summary::before { transform: rotate(45deg); }
+
+/* Bar strip: equal bars on a baseline. Blocked = ink, allowed = faint, the current period = full ink, empty = track. */
+.bars { display: flex; align-items: flex-end; gap: 2px; height: var(--bars-h, 32px); }
+.bars i { flex: 1 1 0; min-width: 2px; background: var(--faint); border-radius: 1px 1px 0 0; height: var(--h, 0%); }
+.bars i.b { background: var(--ink); }
+.bars i.zero { height: 1px; background: var(--line); }
+.bars.stack i { display: flex; flex-direction: column-reverse; background: var(--faint); opacity: 1; }
+.bars-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); font-variant-numeric: tabular-nums; margin-top: var(--s1); }
+
+/* Tag: a noun label for a category in a list. Not for state, not for counts, never more than one per row. */
+.tag { display: inline-block; padding: 0 var(--s2); border-radius: 4px; background: var(--sunken); color: var(--muted); font-size: var(--t-caption); line-height: 20px; white-space: nowrap; }
+
+/* Empty, loading, error, toast. */
+.empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s2); padding: var(--s6) 0; }
+.empty .t-title { color: var(--ink); }
+.skeleton { background: var(--sunken); border-radius: 4px; color: transparent; }
+.inline-error { display: flex; gap: var(--s2); align-items: baseline; color: var(--unprotected); }
+.toast { display: inline-flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3); border-radius: var(--r-control); background: var(--ink); color: var(--paper); box-shadow: var(--shadow-pop); }
+.toast .btn.quiet { color: var(--paper); text-decoration-color: currentColor; }
+
+/* Callout: the only tinted block. Used for a threat or reduced state that needs action, one per view. */
+.callout { padding: var(--s3) var(--s4); border-radius: var(--r-control); background: var(--state-tint); border-left: 3px solid var(--state); }
+
+/* Brand mark: shield, forest. 16px in chrome, never larger than the title beside it. */
+.mark { width: 14px; height: 16px; flex: none; background: var(--fill-primary); clip-path: polygon(50% 0, 100% 18%, 94% 66%, 50% 100%, 6% 66%, 0 18%); }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; } }
+@media (pointer: coarse) { :root { --hit: var(--hit-touch); } }
+
+/* ---- Extension additions (same grammar; no new colours, sizes or spacing) ---------------------------------- */
+/* End of the copied block. Everything below uses only the tokens above. */
+button { font: inherit; color: inherit; }
+.btn.quiet:hover { text-decoration-color: currentColor; }
+.btn:not(.primary):not(.quiet):hover { border-color: var(--ink); }
+.btn { transition: border-color var(--dur-fast) var(--ease), text-decoration-color var(--dur-fast) var(--ease); }
+/* Brand bar on decision pages: mark and name, on the column's left edge. */
+.brand { display: flex; align-items: center; gap: var(--s2); font-weight: var(--w-strong); white-space: nowrap; }
