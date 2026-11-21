@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capture: the real click-to-load placeholder</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../mockups/sheet.css">
+<style>
+  /* Someone else's article around the placeholder, as in mockups/placeholder.html. */
+  .host-page { padding: var(--s5); background: #ffffff; color: #222; font: 16px/1.6 Georgia, serif; }
+  @media (prefers-color-scheme: dark) { .host-page { background: #1c1c1e; color: #ddd; } }
+  .host-page p { max-width: 60ch; }
+</style>
+</head>
+<body>
+<div class="sheet">
+<figure><figcaption>Video, 640 × 360 slot</figcaption>
+<section class="frame host-page" data-name="placeholder-video" style="width:688px">
+  <p>The council approved the plan on Tuesday after a long session. Watch the full meeting below.</p>
+  <div id="video"></div>
+  <p>Residents can comment until December 4.</p>
+</section></figure>
+<figure><figcaption>Post, 300 × 250 slot (narrow)</figcaption>
+<section class="frame host-page" data-name="placeholder-narrow" style="width:348px"><div id="narrow"></div></section></figure>
+<figure><figcaption>Refused click</figcaption>
+<section class="frame host-page" data-name="placeholder-refused" style="width:348px"><div id="refused"></div></section></figure>
+<figure><figcaption>Scripted embed, no size (Disqus)</figcaption>
+<section class="frame host-page" data-name="placeholder-comments" style="width:688px"><div id="comments"></div></section></figure>
+</div>
+<script>
+  // Review only: open shadow roots so the capture can press a button (a synthetic click is the "refused" path).
+  const attach = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function () { return attach.call(this, {mode: "open"}); };
+  window.chrome = {runtime: {sendMessage: async () => ({})}};
+</script>
+<script src="../../../browser/core/links.js"></script>
+<script src="../../../browser/core/params.js"></script>
+<script src="../../../browser/page-guard.js"></script>
+<script>
+  const size = (w, h) => { const d = document.createElement("div"); d.setAttribute("width", w); d.setAttribute("height", h); return d; };
+  const put = (id, provider, from) => { const box = __EGPageGuard.placeholder(provider, () => {}, from); document.getElementById(id).append(box); return box; };
+  put("video", {id: "youtube", name: "YouTube"}, size(640, 360));
+  put("narrow", {id: "instagram", name: "Instagram"}, size(300, 250));
+  const refused = put("refused", {id: "instagram", name: "Instagram"}, size(300, 250));
+  put("comments", {id: "disqus", name: "Disqus"}, null);
+  refused.shadowRoot.querySelector("button").click();
+</script>
+</body>
+</html>
