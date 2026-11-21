@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Egress Guard: before and after</title>
+<link rel="stylesheet" href="../tokens.css">
+<style>
+  .wrap { max-width: 1440px; margin: 0 auto; padding: var(--s6) var(--s6) var(--s8); }
+  header p { color: var(--muted); max-width: 72ch; margin-top: var(--s2); }
+  section { margin-top: var(--s7); padding-top: var(--s5); border-top: 1px solid var(--line); }
+  section > p { margin-top: var(--s2); max-width: 90ch; }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--s6); margin-top: var(--s4); align-items: start; }
+  .col h3 { font-size: var(--t-body); font-weight: var(--w-strong); color: var(--muted); margin-bottom: var(--s2); }
+  .imgs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s4); align-items: start; }
+  .before .imgs { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  figure img { display: block; width: 100%; height: auto; box-shadow: 0 0 0 1px var(--line); border-radius: 4px; }
+  figcaption { font-size: var(--t-caption); line-height: var(--lh-caption); color: var(--muted); margin-top: var(--s1); }
+  @media (max-width: 800px) { .wrap { padding: var(--s5) var(--s4); } .pair { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1 class="t-headline">Egress Guard: before and after</h1>
+  <p>Every surface at its real size, light and dark. Rules: <a href="../DESIGN.md">DESIGN.md</a>. Annotated failures: <a href="../do-dont.html">do / don't</a>. Click an image for full size.</p>
+</header>
+<section>
+  <h2 class="t-title">Browser popup · 360 wide</h2>
+  <p>Eight stacked sections (~1,330 px tall) become one number, three facts and one control (~410 px); the blocked list, rules and settings move to tabs, and Allow 15 min appears only on the selected row.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/popup-light.png"><img src="before/popup-light.png" alt="before popup-light.png" loading="lazy"></a><figcaption>popup-light</figcaption></figure><figure><a href="before/popup-dark.png"><img src="before/popup-dark.png" alt="before popup-dark.png" loading="lazy"></a><figcaption>popup-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/popup-main-light.png"><img src="after/popup-main-light.png" alt="after popup-main-light.png" loading="lazy"></a><figcaption>popup-main-light</figcaption></figure><figure><a href="after/popup-blocked-light.png"><img src="after/popup-blocked-light.png" alt="after popup-blocked-light.png" loading="lazy"></a><figcaption>popup-blocked-light</figcaption></figure><figure><a href="after/popup-reduced-dark.png"><img src="after/popup-reduced-dark.png" alt="after popup-reduced-dark.png" loading="lazy"></a><figcaption>popup-reduced-dark</figcaption></figure><figure><a href="after/popup-rules-light.png"><img src="after/popup-rules-light.png" alt="after popup-rules-light.png" loading="lazy"></a><figcaption>popup-rules-light</figcaption></figure><figure><a href="after/popup-settings-dark.png"><img src="after/popup-settings-dark.png" alt="after popup-settings-dark.png" loading="lazy"></a><figcaption>popup-settings-dark</figcaption></figure><figure><a href="after/popup-paused-light.png"><img src="after/popup-paused-light.png" alt="after popup-paused-light.png" loading="lazy"></a><figcaption>popup-paused-light</figcaption></figure><figure><a href="after/popup-zero-longhost-dark.png"><img src="after/popup-zero-longhost-dark.png" alt="after popup-zero-longhost-dark.png" loading="lazy"></a><figcaption>popup-zero-longhost-dark</figcaption></figure><figure><a href="after/popup-unsupported-light.png"><img src="after/popup-unsupported-light.png" alt="after popup-unsupported-light.png" loading="lazy"></a><figcaption>popup-unsupported-light</figcaption></figure><figure><a href="after/popup-blocked-empty-dark.png"><img src="after/popup-blocked-empty-dark.png" alt="after popup-blocked-empty-dark.png" loading="lazy"></a><figcaption>popup-blocked-empty-dark</figcaption></figure><figure><a href="after/popup-rules-empty-light.png"><img src="after/popup-rules-empty-light.png" alt="after popup-rules-empty-light.png" loading="lazy"></a><figcaption>popup-rules-empty-light</figcaption></figure></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="t-title">Threat warning page · 1440 and 390</h2>
+  <p>A card with an eyebrow and a paragraph becomes one decision on one column edge: Go back is the filled, focused button; Continue takes two steps and names the host.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/warning-1440-light.png"><img src="before/warning-1440-light.png" alt="before warning-1440-light.png" loading="lazy"></a><figcaption>warning-1440-light</figcaption></figure><figure><a href="before/warning-390-dark.png"><img src="before/warning-390-dark.png" alt="before warning-390-dark.png" loading="lazy"></a><figcaption>warning-390-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/warning-1440-light.png"><img src="after/warning-1440-light.png" alt="after warning-1440-light.png" loading="lazy"></a><figcaption>warning-1440-light</figcaption></figure><figure><a href="after/warning-confirm-1440-dark.png"><img src="after/warning-confirm-1440-dark.png" alt="after warning-confirm-1440-dark.png" loading="lazy"></a><figcaption>warning-confirm-1440-dark</figcaption></figure><figure><a href="after/warning-390-dark.png"><img src="after/warning-390-dark.png" alt="after warning-390-dark.png" loading="lazy"></a><figcaption>warning-390-dark</figcaption></figure><figure><a href="after/warning-confirm-390-light.png"><img src="after/warning-confirm-390-light.png" alt="after warning-confirm-390-light.png" loading="lazy"></a><figcaption>warning-confirm-390-light</figcaption></figure></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="t-title">Scanner-link interstitial · 1440 and 390</h2>
+  <p>The question becomes the headline; the scanner path is the primary button; the fine print about popup settings is removed; look-alike names get one callout.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/interstitial-1440-light.png"><img src="before/interstitial-1440-light.png" alt="before interstitial-1440-light.png" loading="lazy"></a><figcaption>interstitial-1440-light</figcaption></figure><figure><a href="before/interstitial-390-dark.png"><img src="before/interstitial-390-dark.png" alt="before interstitial-390-dark.png" loading="lazy"></a><figcaption>interstitial-390-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/interstitial-1440-light.png"><img src="after/interstitial-1440-light.png" alt="after interstitial-1440-light.png" loading="lazy"></a><figcaption>interstitial-1440-light</figcaption></figure><figure><a href="after/interstitial-390-dark.png"><img src="after/interstitial-390-dark.png" alt="after interstitial-390-dark.png" loading="lazy"></a><figcaption>interstitial-390-dark</figcaption></figure><figure><a href="after/interstitial-idn-390-light.png"><img src="after/interstitial-idn-390-light.png" alt="after interstitial-idn-390-light.png" loading="lazy"></a><figcaption>interstitial-idn-390-light</figcaption></figure><figure><a href="after/interstitial-unread-1440-dark.png"><img src="after/interstitial-unread-1440-dark.png" alt="after interstitial-unread-1440-dark.png" loading="lazy"></a><figcaption>interstitial-unread-1440-dark</figcaption></figure></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="t-title">Click-to-load placeholder · in the embed's own box</h2>
+  <p>A dashed box with a paragraph and two link-style buttons becomes a quiet held block: provider as the title, one Load button, one quiet signed-in option.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/placeholder-video-light.png"><img src="before/placeholder-video-light.png" alt="before placeholder-video-light.png" loading="lazy"></a><figcaption>placeholder-video-light</figcaption></figure><figure><a href="before/placeholder-narrow-dark.png"><img src="before/placeholder-narrow-dark.png" alt="before placeholder-narrow-dark.png" loading="lazy"></a><figcaption>placeholder-narrow-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/placeholder-video-light.png"><img src="after/placeholder-video-light.png" alt="after placeholder-video-light.png" loading="lazy"></a><figcaption>placeholder-video-light</figcaption></figure><figure><a href="after/placeholder-narrow-dark.png"><img src="after/placeholder-narrow-dark.png" alt="after placeholder-narrow-dark.png" loading="lazy"></a><figcaption>placeholder-narrow-dark</figcaption></figure><figure><a href="after/placeholder-refused-light.png"><img src="after/placeholder-refused-light.png" alt="after placeholder-refused-light.png" loading="lazy"></a><figcaption>placeholder-refused-light</figcaption></figure></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="t-title">Web dashboard · 1440 and 390</h2>
+  <p>Health strip, hero, chart, two breakdowns and a table at equal volume become one answer above the fold (status, blocked today, one-series chart, four reasons) and drill-down tabs.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/dashboard-1440-light.jpg"><img src="before/dashboard-1440-light.jpg" alt="before dashboard-1440-light.jpg" loading="lazy"></a><figcaption>dashboard-1440-light</figcaption></figure><figure><a href="before/dashboard-390-dark.jpg"><img src="before/dashboard-390-dark.jpg" alt="before dashboard-390-dark.jpg" loading="lazy"></a><figcaption>dashboard-390-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/dashboard-1440-light.png"><img src="after/dashboard-1440-light.png" alt="after dashboard-1440-light.png" loading="lazy"></a><figcaption>dashboard-1440-light</figcaption></figure><figure><a href="after/dashboard-390-dark.png"><img src="after/dashboard-390-dark.png" alt="after dashboard-390-dark.png" loading="lazy"></a><figcaption>dashboard-390-dark</figcaption></figure><figure><a href="after/dashboard-reduced-1440-dark.png"><img src="after/dashboard-reduced-1440-dark.png" alt="after dashboard-reduced-1440-dark.png" loading="lazy"></a><figcaption>dashboard-reduced-1440-dark</figcaption></figure><figure><a href="after/dashboard-empty-390-light.png"><img src="after/dashboard-empty-390-light.png" alt="after dashboard-empty-390-light.png" loading="lazy"></a><figcaption>dashboard-empty-390-light</figcaption></figure></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="t-title">KPI scorecard · 1440 and 390</h2>
+  <p>Two forest hero cards and paragraph-per-KPI become one count off target, three groups, and one aligned line per KPI with a 7-day state strip; evidence moves into each row's disclosure.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/scorecard-1440-light.png"><img src="before/scorecard-1440-light.png" alt="before scorecard-1440-light.png" loading="lazy"></a><figcaption>scorecard-1440-light</figcaption></figure><figure><a href="before/scorecard-390-dark.png"><img src="before/scorecard-390-dark.png" alt="before scorecard-390-dark.png" loading="lazy"></a><figcaption>scorecard-390-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/scorecard-1440-light.png"><img src="after/scorecard-1440-light.png" alt="after scorecard-1440-light.png" loading="lazy"></a><figcaption>scorecard-1440-light</figcaption></figure><figure><a href="after/scorecard-390-dark.png"><img src="after/scorecard-390-dark.png" alt="after scorecard-390-dark.png" loading="lazy"></a><figcaption>scorecard-390-dark</figcaption></figure></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="t-title">Mac menu-bar popover · 340 pt</h2>
+  <p>The mini Perimeter and one-line layer rows that clipped ("In 11 of 1…e profiles") become status, three numbers and two-line layer rows that hold the longest real strings.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/popover-light.png"><img src="before/popover-light.png" alt="before popover-light.png" loading="lazy"></a><figcaption>popover-light</figcaption></figure><figure><a href="before/popover-dark.png"><img src="before/popover-dark.png" alt="before popover-dark.png" loading="lazy"></a><figcaption>popover-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/popover-reduced-light.png"><img src="after/popover-reduced-light.png" alt="after popover-reduced-light.png" loading="lazy"></a><figcaption>popover-reduced-light</figcaption></figure><figure><a href="after/popover-reduced-dark.png"><img src="after/popover-reduced-dark.png" alt="after popover-reduced-dark.png" loading="lazy"></a><figcaption>popover-reduced-dark</figcaption></figure><figure><a href="after/popover-unprotected-light.png"><img src="after/popover-unprotected-light.png" alt="after popover-unprotected-light.png" loading="lazy"></a><figcaption>popover-unprotected-light</figcaption></figure><figure><a href="after/popover-restore-dark.png"><img src="after/popover-restore-dark.png" alt="after popover-restore-dark.png" loading="lazy"></a><figcaption>popover-restore-dark</figcaption></figure><figure><a href="after/popover-loading-light.png"><img src="after/popover-loading-light.png" alt="after popover-loading-light.png" loading="lazy"></a><figcaption>popover-loading-light</figcaption></figure><figure><a href="after/popover-protected-dark.png"><img src="after/popover-protected-dark.png" alt="after popover-protected-dark.png" loading="lazy"></a><figcaption>popover-protected-dark</figcaption></figure></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="t-title">Mac main window, Overview · 1180 × 760</h2>
+  <p>A captioned ring graphic competing with three number treatments becomes one focal element, the Path, labelled in place, with three numbers and a one-series day strip below.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/mac-overview-light.png"><img src="before/mac-overview-light.png" alt="before mac-overview-light.png" loading="lazy"></a><figcaption>mac-overview-light</figcaption></figure><figure><a href="before/mac-overview-dark.png"><img src="before/mac-overview-dark.png" alt="before mac-overview-dark.png" loading="lazy"></a><figcaption>mac-overview-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/mac-overview-light.png"><img src="after/mac-overview-light.png" alt="after mac-overview-light.png" loading="lazy"></a><figcaption>mac-overview-light</figcaption></figure><figure><a href="after/mac-overview-reduced-dark.png"><img src="after/mac-overview-reduced-dark.png" alt="after mac-overview-reduced-dark.png" loading="lazy"></a><figcaption>mac-overview-reduced-dark</figcaption></figure><figure><a href="after/mac-overview-down-light.png"><img src="after/mac-overview-down-light.png" alt="after mac-overview-down-light.png" loading="lazy"></a><figcaption>mac-overview-down-light</figcaption></figure></div></div>
+  </div>
+</section>
+<section>
+  <h2 class="t-title">Mac main window, Activity · 1180 × 760</h2>
+  <p>Same table, aligned to four column edges, tabular times, hostnames truncated by label, threat rows marked in the threat colour only.</p>
+  <div class="pair">
+    <div class="col before"><h3>Before (v0.5.0)</h3><div class="imgs"><figure><a href="before/mac-activity-light.png"><img src="before/mac-activity-light.png" alt="before mac-activity-light.png" loading="lazy"></a><figcaption>mac-activity-light</figcaption></figure><figure><a href="before/mac-activity-dark.png"><img src="before/mac-activity-dark.png" alt="before mac-activity-dark.png" loading="lazy"></a><figcaption>mac-activity-dark</figcaption></figure></div></div>
+    <div class="col after"><h3>After</h3><div class="imgs"><figure><a href="after/mac-activity-light.png"><img src="after/mac-activity-light.png" alt="after mac-activity-light.png" loading="lazy"></a><figcaption>mac-activity-light</figcaption></figure><figure><a href="after/mac-activity-dark.png"><img src="after/mac-activity-dark.png" alt="after mac-activity-dark.png" loading="lazy"></a><figcaption>mac-activity-dark</figcaption></figure></div></div>
+  </div>
+</section>
+</div>
+</body>
+</html>

@@ -31,6 +31,7 @@ for (const f of ["mac-overview.html", "mac-overview.html#reduced", "mac-overview
 // Before: the current warning page, rendered from browser/warning.html with a stubbed extension API.
 const stub = `window.chrome={runtime:{sendMessage:async(m)=>m.type==="warning-info"?{list:{label:"Malware and phishing",name:"HaGeZi Threat Intelligence (Medium)",published_at:1763424000},minutes:10}:{}},tabs:{update:async()=>{}}};`;
 for (const w of [1440, 390]) jobs.push({kind: "page", before: true, url: pathToFileURL(path.join(repo, "browser/warning.html")).href + "?list=threats#https://login-verify.example-phish.test/account/session?continue=%2Fwallet", width: w, file: `warning-${w}`, init: stub});
+jobs.push({kind: "frames", before: true, url: pathToFileURL(path.join(here, "before-placeholder.html")).href, prefix: "before-placeholder"});
 
 const filter = process.argv[2];
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "eg-design-"));
@@ -54,20 +55,52 @@ const shot = async (sessionId, clip, file) => {
   fs.writeFileSync(file, Buffer.from(data, "base64"));
 };
 
+// Measured checks run on every capture (light only): clipped text, horizontal page overflow, type sizes in use,
+// spacing values off the 4/8 scale, and more than one filled primary button per frame.
+const AUDIT = `(() => {
+  const scale = new Set([0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64]);
+  const roots = document.querySelectorAll('.frame[data-name]').length ? [...document.querySelectorAll('.frame[data-name]')] : [document.body];
+  const out = [];
+  for (const root of roots) {
+    const name = root.dataset ? root.dataset.name || 'page' : 'page';
+    const clipped = [], sizes = new Set(), off = new Set();
+    for (const el of root.querySelectorAll('*')) {
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || el.closest('[hidden]')) continue;
+      const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+      if (hasText) sizes.add(cs.fontSize + (cs.fontFamily.includes('mono') ? ' mono' : ''));
+      if (hasText && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible') clipped.push(el.textContent.trim().slice(0, 50));
+      if (el.closest('.sheet > figure > figcaption') || el.matches('.lights i, .bars i, .days i, .dot, .mark, svg *, .switch, .sk')) continue;
+      for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap']) {
+        const v = parseFloat(cs[p]); if (!isNaN(v) && !scale.has(Math.abs(Math.round(v))) && Math.abs(v - Math.round(v)) < .01) off.add(p + ':' + v + ' ' + (el.className || el.tagName));
+      }
+    }
+    const primaries = [...root.querySelectorAll('.btn.primary')].filter((b) => b.offsetParent && !b.closest('[hidden]')).length;
+    out.push({name, clipped, primaries, sizes: [...sizes].sort(), off: [...off].slice(0, 12), hscroll: document.documentElement.scrollWidth > innerWidth + 1 && !document.querySelector('.sheet')});
+  }
+  return out;
+})()`;
+const auditLog = [];
+
 for (const job of jobs) {
   const tag = job.file || job.prefix;
   if (filter && !tag.includes(filter)) continue;
   for (const scheme of schemes) {
     if (job.kind === "frames") {
       const {sessionId, targetId, ev} = await open(job.url, 1600, 1200, scheme, 2);
+      if (scheme === "light" && !job.before) auditLog.push({tag, result: await ev(AUDIT)});
+      const dest = job.before ? before : out;
       const rects = await ev(`[...document.querySelectorAll('.frame[data-name]')].map(e=>{const r=e.getBoundingClientRect();return {name:e.dataset.name,x:r.left+scrollX,y:r.top+scrollY,width:r.width,height:r.height}})`);
-      for (const r of rects) await shot(sessionId, {x: r.x, y: r.y, width: r.width, height: r.height}, out(`${r.name}-${scheme}.png`));
-      const full = await ev(`({w:document.documentElement.scrollWidth,h:document.documentElement.scrollHeight})`);
-      await shot(sessionId, {x: 0, y: 0, width: full.w, height: full.h}, out(`${job.prefix}-sheet-${scheme}.png`));
+      for (const r of rects) await shot(sessionId, {x: r.x, y: r.y, width: r.width, height: r.height}, dest(`${r.name}-${scheme}.png`));
+      if (!job.before) {
+        const full = await ev(`({w:document.documentElement.scrollWidth,h:document.documentElement.scrollHeight})`);
+        await shot(sessionId, {x: 0, y: 0, width: full.w, height: full.h}, out(`${job.prefix}-sheet-${scheme}.png`));
+      }
       await cdp("Target.closeTarget", {targetId});
     } else {
       const dpr = job.width <= 400 ? 2 : 1;
       const {sessionId, targetId, ev} = await open(job.url, job.width, job.height || 900, scheme, dpr, job.init);
+      if (scheme === "light" && !job.before) auditLog.push({tag, result: await ev(AUDIT)});
       const h = job.height || await ev(`Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)`);
       await shot(sessionId, {x: 0, y: 0, width: job.width, height: h}, (job.before ? before : out)(`${job.file}-${scheme}.png`));
       await cdp("Target.closeTarget", {targetId});
@@ -75,5 +108,6 @@ for (const job of jobs) {
   }
   console.log("ok", tag);
 }
+fs.writeFileSync(path.join(here, filter ? `audit-${filter}.json` : "audit.json"), JSON.stringify(auditLog, null, 1));
 await chrome.close();
 fs.rmSync(profile, {recursive: true, force: true});
