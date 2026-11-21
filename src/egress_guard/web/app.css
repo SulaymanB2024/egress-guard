@@ -254,12 +254,11 @@ main:focus { outline: none; }
 .setup { counter-reset: step; display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s5); max-width: 72ch; }
 .setup li { counter-increment: step; display: grid; grid-template-columns: var(--s5) minmax(0, 1fr); }
 .setup li::before { content: counter(step); font-weight: var(--w-strong); font-variant-numeric: tabular-nums; color: var(--muted); }
-.setup .host, .empty .host { white-space: nowrap; }
+.setup .host, .hero-empty .host { white-space: nowrap; }
 .checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--s5); }
-.checks h2, .checks .check-head { margin-top: var(--s4); }
+.checks .check-head { margin-top: var(--s4); }
 .checks > div > :first-child { margin-top: 0; }
 .check-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-height: var(--hit); }
-.check-head h2 { margin-top: 0; }
 .check { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
 .check .line2 { overflow-wrap: anywhere; }
 .state-word { display: inline-flex; align-items: center; gap: var(--s2); white-space: nowrap; }
@@ -319,6 +318,7 @@ main:focus { outline: none; }
 .list .line1 { white-space: nowrap; overflow: hidden; }
 .row[tabindex] { cursor: default; }
 button.row { width: calc(100% + var(--s4)); border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.row .main > * { display: block; }
 .row .main .line2 { overflow-wrap: anywhere; }
 .row .trail .act .btn { min-height: var(--hit); }
 .table .row { grid-template-columns: 88px minmax(0, 1fr) 240px 88px; column-gap: var(--s3); padding: 0 var(--s2); }
@@ -361,7 +361,9 @@ dialog::backdrop { background: color-mix(in srgb, var(--ink) 40%, transparent); 
   .reasons { --cols: 2; row-gap: var(--s4); }
   .tools .search, .tools .field, .tools .seg { width: 100%; }
   .tools .sp { display: none; }
-  .table .row { grid-template-columns: 64px minmax(0, 1fr) auto; min-height: 56px; padding: var(--s2); }
+  /* Line 2: decision in a 64 column so reasons start on one edge (mockup: text at 80), time on the right. */
+  .table .row { grid-template-columns: 64px minmax(0, 1fr) auto; column-gap: 0; min-height: 56px; padding: var(--s2); }
+  .table .trail { padding-left: var(--s3); }
   .table .host-c { grid-column: 1 / -1; }
   .table .dec, .table .why, .table .trail { grid-row: 2; font-size: var(--t-caption); line-height: var(--lh-caption); }
 }

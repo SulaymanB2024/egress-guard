@@ -377,8 +377,10 @@ function renderHealth() {
   // Calm when fine; open with numbered steps when protection is not running.
   if (!detailTouched) setDetail(Boolean(status) && (state === 'degraded' || state === 'unknown'));
   renderSetup(state, filters, proxyUp);
-  const proxyRows = proxies.map((item, index) => index === 0 && footprintText()
-    ? {...item, detail: [item.detail, footprintText()].filter(Boolean).join(' · ')} : item);
+  // The proxy row carries the footprint line when the proxy reports one; a proxy that is not running reads "Off".
+  const proxyRows = proxies.map((item, index) => index ? item : {...item,
+    state: item.state === 'degraded' ? 'down' : item.state,
+    detail: [item.detail, footprintText()].filter(Boolean).join(' · ')});
   renderChecks('proxies', status ? proxyRows : null);
   for (const id of ['canaries', 'filters', 'maintenance', 'security']) renderChecks(id, status?.[id]);
   $('security-section').hidden = !Array.isArray(status?.security) || !status.security.length;
@@ -755,7 +757,7 @@ function renderActivity() {
 
   let empty = null;
   if (!events) empty = ['Activity could not be loaded', 'Refresh to try again.'];
-  else if (history === 'none') empty = ['History is off', 'Nothing is kept on disk. Enter a domain above to check how it would be handled.'];
+  else if (history === 'none') empty = ['Check a domain', 'History is off, so no activity is kept. Enter a domain above to see how it would be handled.'];
   else if (!events.length) empty = ['No activity yet', 'Decisions appear here as apps go online through the proxy.'];
   else if (!filtered.length) empty = ['No matches', search ? 'Press Enter to check how ' + search + ' would be handled.' : 'Nothing recent matches this filter.'];
   $('activity-empty').hidden = !empty;
