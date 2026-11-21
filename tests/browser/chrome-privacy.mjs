@@ -284,7 +284,7 @@ try {
     onScan && (await evaluate(page, "document.getElementById('scan-host').textContent")) === "clean-fixture.test" && (await evaluate(page, "location.protocol")) === "chrome-extension:" && hits.length === 0,
     JSON.stringify({host: await evaluate(page, "document.getElementById('scan-host').textContent"), hits: hitPaths()}));
   check("scanner: Continue through the scanner has the focus; Open directly says it skips the scan",
-    (await evaluate(page, "document.activeElement && document.activeElement.id")) === "through" && /skips the mail scan/.test(await evaluate(page, "document.getElementById('direct').textContent")));
+    (await evaluate(page, "document.activeElement && document.activeElement.id")) === "through" && /skips the mail scan/.test(await evaluate(page, "document.getElementById('direct').getAttribute('aria-label')")));
   const framed = await evaluate(page, `new Promise((r) => { const f = document.createElement("iframe"); f.src = location.href; f.onload = () => { try { r(f.contentDocument ? f.contentDocument.getElementById("scan") && !f.contentDocument.getElementById("scan").hidden : false); } catch (e) { r(false); } }; document.body.append(f); setTimeout(() => r(false), 3000); })`);
   check("scanner: the interstitial does not render inside a frame", framed === false, String(framed));
   await click(page, "#through");

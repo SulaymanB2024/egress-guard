@@ -30,17 +30,22 @@
     root.addEventListener("hashchange", () => { lock(); root.location.reload(); });
     $("host").textContent = target.host;
     $("url").textContent = target.url;
+    // The button names the host it opens; a host too long for one button line is named above it instead.
+    if (target.host.length <= 32) $("continue").textContent = `Open ${target.host} once`;
     document.title = `Blocked: ${target.host}`;
     $("back").addEventListener("click", () => {
       if (root.history.length > 1) root.history.back();
       else B.tabs.update({url: "chrome://newtab/"}).catch(() => {});
     });
-    $("reveal").addEventListener("click", () => {
-      const open = $("confirm").hidden;
+    const reveal = (open) => {
       $("confirm").hidden = !open;
       $("reveal").setAttribute("aria-expanded", String(open));
-      if (open) $("continue").focus();
-    });
+      (open ? $("continue") : $("reveal")).focus();
+    };
+    $("reveal").addEventListener("click", () => reveal($("confirm").hidden));
+    // Escape closes the confirmation step.
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("confirm").hidden) { event.preventDefault(); reveal(false); } });
+    $("back").focus();
     $("continue").addEventListener("click", async () => {
       $("continue").disabled = true;
       const reply = await B.runtime.sendMessage({type: "continue-once", url: target.url});
@@ -49,7 +54,7 @@
     });
     const info = await B.runtime.sendMessage({type: "warning-info", list: target.list}).catch(() => null);
     if (info && info.list) {
-      $("list").textContent = `${info.list.label} · ${info.list.name}`;
+      $("list").textContent = info.list.name || info.list.label;
       $("updated").textContent = date(info.list.published_at || info.list.updated_at);
     }
     if (info && info.minutes) $("minutes").textContent = String(info.minutes);

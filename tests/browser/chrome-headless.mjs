@@ -280,7 +280,7 @@ try {
   const onWarning = await until(page, `location.href.startsWith("chrome-extension://${id}/warning.html")`, "threat navigation redirected to the warning page");
   await until(page, `document.getElementById('list').textContent.includes('HaGeZi')`, "warning page shows the list");
   const warnText = await evaluate(page, "document.body.innerText");
-  check("threat: warning page names the host and the list", onWarning && warnText.includes("malware-fixture.test") && /Malware and phishing/.test(warnText) && /HaGeZi Threat Intelligence/.test(warnText), warnText.split("\n").slice(0, 8).join(" | "));
+  check("threat: warning page names the host and the list", onWarning && warnText.includes("malware-fixture.test") && /malware and phishing/i.test(warnText) && /HaGeZi Threat Intelligence/.test(warnText), warnText.split("\n").slice(0, 8).join(" | "));
   check("threat: the flagged site received no request", !hits.some((h) => h.host === "malware-fixture.test"));
   if (shots) {
     for (const scheme of ["light", "dark"]) {

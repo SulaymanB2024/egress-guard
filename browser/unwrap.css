@@ -1,25 +1,8 @@
-/* Unwrap page and the mail-scanner interstitial (Chrome). Builds on ui.css and warning.css. */
-.card.scan { border-top-color: var(--warn); }
-.card.scan .eyebrow { color: var(--warn); }
-.card.unwrap { border-top-color: var(--muted); }
-.card.unwrap .eyebrow { color: var(--muted); }
-.scan .label { margin-top: 20px; font: 11px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-.scan .host { margin-top: 6px; font-size: clamp(22px, 4.4vw, 30px); line-height: 1.2; letter-spacing: -.01em; }
-.scan .host.unknown { font: 600 18px/1.3 var(--sans); color: var(--muted); }
-.scan .idn { margin-top: 8px; padding: 8px 10px; border-radius: 7px; background: var(--bad-soft); color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
-.scan .idn b { font-family: var(--mono); font-weight: 600; }
-.scan .url { margin-top: 8px; max-height: 6em; }
-.scan .body { margin-top: 18px; }
-.scan .actions { margin-top: 22px; }
-.scan .actions button { min-height: 42px; }
-button.secondary { background: transparent; border-color: var(--line); color: var(--ink); font-weight: 560; }
-button.secondary .sub { color: var(--muted); font-weight: 450; }
-.scan .fine { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); max-width: 60ch; }
-.scan .fine b { font-weight: 600; color: var(--ink); }
-.scan #scan-error { margin-top: 12px; }
-@media (max-width: 480px) {
-  .warning { padding-top: 28px; }
-  .card { padding: 20px 18px 18px; }
-  .scan .actions { flex-direction: column; align-items: stretch; }
-  .scan .actions button { width: 100%; }
-}
+/* Scanner interstitial and unwrap failure: builds on ui.css and warning.css (docs/design/mockups/interstitial.html). */
+.kind { font-weight: var(--w-regular); }
+.scan .callout { margin-top: var(--s5); }
+.scan .callout .host { white-space: nowrap; }
+.dest .h.full { font-weight: var(--w-regular); }
+.dest .unknown { font-family: var(--font-sans); color: var(--muted); }
+.reason { margin-top: var(--s1); }
+@media (max-width: 480px) { .actions .btn { width: 100%; } }

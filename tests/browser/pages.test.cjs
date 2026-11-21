@@ -73,7 +73,9 @@ test("placeholder: the host carries !important styles and all:initial; a click c
   const walk = (n) => { if (n.localName === "button") buttons.push(n); for (const c of n.childNodes) walk(c); };
   walk(shadow);
   const [load, withCookies] = buttons;
-  assert.equal(withCookies.textContent, "Load with cookies (signed in)");
+  assert.equal(withCookies.textContent, "Load signed in");
+  assert.equal(withCookies.getAttribute("aria-label"), "Load signed in, with cookies", "the quiet option says it sends cookies");
+  assert.equal(load.textContent, "Load video");
   // The heuristics, one by one.
   const ev = (extra = {}) => ({...event("click"), ...extra});
   const now = 10000;
@@ -184,10 +186,11 @@ test("scanner interstitial: shows the destination, never opens anything by itsel
   assert.equal(p.$("scan").hidden, false);
   assert.equal(p.$("scan-host").textContent, "example.org");
   assert.equal(p.$("scan-url").textContent, "https://example.org/doc?id=3");
-  assert.equal(p.$("scan-title").textContent, "This link goes through Microsoft Safe Links");
+  assert.equal(p.$("scan-title").textContent, "Open this link through Microsoft Safe Links?");
+  assert.equal(p.$("through").textContent, "Continue through Safe Links");
   assert.equal(p.doc.activeElement, p.$("through"), "Continue through the scanner has the focus");
   assert.equal(p.$("direct").hidden, false);
-  assert.match(p.$("direct").textContent, /skips the mail scan/);
+  assert.match(p.$("direct").getAttribute("aria-label"), /^Open directly.*skips the mail scan/, "the accessible name starts with the visible label and names the consequence");
   p.$("through").dispatchEvent(event("click"));
   await settle();
   assert.deepEqual(p.sent.filter((m) => m.type === "scanner-continue"), [{type: "scanner-continue", url: scanner}]);

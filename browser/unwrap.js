@@ -16,6 +16,8 @@
   const links = root.EGLinks;
   const send = (message) => Promise.resolve().then(() => B.runtime.sendMessage(message)).catch(() => null);
   let busy = false;
+  // Button labels must fit one line at 390 px: the scanners' short names (the full name is in the headline).
+  const SHORT = {safelinks: "Safe Links", proofpoint2: "Proofpoint", proofpoint3: "Proofpoint", mimecast: "Mimecast", barracuda: "Barracuda", trendmicro: "Trend Micro"};
 
   function fail(original, reason) {
     $("scan").hidden = true;
@@ -23,6 +25,15 @@
     $("url").textContent = original || "Unknown address";
     $("reason").textContent = reason ? `Reason: ${reason}.` : "";
     $("back").addEventListener("click", () => { if (root.history.length > 1) root.history.back(); else root.close(); });
+    // Copy link: the address as text, for someone who knows where it should lead. Nothing is opened.
+    $("copy").addEventListener("click", async () => {
+      try { await root.navigator.clipboard.writeText(original || ""); $("copy").textContent = "Copied"; } catch {
+        const range = document.createRange(); range.selectNodeContents($("url"));
+        const selection = root.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        $("copy").textContent = "Selected: press Ctrl+C or ⌘C";
+      }
+    });
+    $("back").focus();
     return {error: reason || "failed"};
   }
 
@@ -44,26 +55,27 @@
     $("scan").hidden = false;
     const name = scan.scanner.name;
     document.title = `${name} link`;
-    $("scan-eyebrow").textContent = `${name}`;
-    $("scan-title").textContent = `This link goes through ${name}`;
+    $("scan-title").textContent = `Open this link through ${name}?`;
+    $("through").textContent = `Continue through ${SHORT[scan.scanner.id] || "the scanner"}`;
     if (scan.host) {
       $("scan-host").textContent = scan.host;
       const unicode = links.unicodeHost(scan.host);
       if (unicode && unicode !== scan.host) {
         $("scan-idn").hidden = false;
-        $("scan-idn").replaceChildren(document.createTextNode("Internationalized name. It displays as "), Object.assign(document.createElement("b"), {textContent: unicode}),
-          document.createTextNode(", which may imitate another site. The address above is what really opens."));
+        $("scan-idn").replaceChildren(Object.assign(document.createElement("strong"), {textContent: "Look-alike letters.", className: "state-text"}),
+          document.createTextNode(" This name displays as "), Object.assign(document.createElement("b"), {textContent: unicode, className: "host"}),
+          document.createTextNode(" but opens the address above."));
       }
     } else {
       $("scan-host").textContent = "Not shown by the scanner";
-      $("scan-host").className = "host unknown";
+      $("scan-host").className = "unknown";
     }
     $("scan-url").textContent = scan.url || original;
     if (!scan.url) {
       // The scanner keeps the full address on its server: it can only be opened through the scanner.
       $("direct").hidden = true;
-      $("scan-body").textContent = `${name} keeps the full address on its own server${scan.host ? "; only the host above is in the link" : ""}. Continue opens it through the scanner, which checks it on the way.`;
-      $("scan-fine").textContent = "Egress Guard checks the page the scanner opens against its malware and phishing list as usual.";
+      $("scan-body").hidden = false;
+      $("scan-body").textContent = `${name} keeps the full address on its own server${scan.host ? "; only the host above is in the link" : ""}.`;
     }
     $("through").addEventListener("click", async () => {
       if (busy) return;

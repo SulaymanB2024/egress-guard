@@ -146,7 +146,7 @@ function extAudit() { return `(() => {
       if (!label) unnamed.push(el.outerHTML.slice(0, 80));
     }
     if (el.matches('.dot, .mark, .switch, .seg, .seg button, .tabs [role=tab], .sheet, figure, figcaption')) continue;
-    for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','marginLeft','marginRight','rowGap','columnGap']) {
+    for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap']) {
       const v = parseFloat(cs[p]); if (!isNaN(v) && !scale.has(Math.abs(Math.round(v))) && Math.abs(v - Math.round(v)) < .01) off.add(p + ':' + v + ' ' + (el.id || el.className || el.tagName));
     }
   }

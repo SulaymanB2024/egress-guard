@@ -1,17 +1,25 @@
-body { min-height: 100vh; font-size: 15px; padding: 0 16px; }
-.warning { width: min(100%, 620px); margin: 0 auto; padding: 48px 0 40px; }
-.warning > .brand { margin-bottom: 22px; color: var(--muted); }
-.card { background: var(--white); border: 1px solid var(--line); border-top: 5px solid var(--bad); border-radius: 12px; padding: 26px 26px 24px; }
-.card .eyebrow { color: var(--bad); margin-bottom: 8px; }
-h1 { font-size: clamp(24px, 4vw, 31px); line-height: 1.15; font-weight: 700; letter-spacing: -.03em; max-width: 24ch; }
-.host { margin-top: 18px; font: 600 clamp(18px, 3vw, 22px)/1.25 var(--mono); overflow-wrap: anywhere; }
-.url { margin-top: 4px; font: 12px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; max-height: 4.2em; overflow: hidden; }
-.facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 18px 0; padding: 12px 0; border-block: 1px solid var(--line); }
-.facts dt { font: 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.facts dd { font-weight: 600; }
-.body { color: var(--muted); max-width: 56ch; }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
-.actions button { min-height: 38px; padding: 6px 16px; }
-.confirm { margin-top: 16px; padding: 14px 16px; border-radius: 9px; background: var(--bad-soft); }
-.confirm p { margin-bottom: 12px; max-width: 56ch; }
-#error { margin-top: 14px; }
+/* Decision pages (threat warning, scanner interstitial, unwrap failure): a brand bar, then one 560 column whose
+   left edge is the only alignment edge. Follows docs/design/mockups/warning.html; both boxes are content-box so the
+   brand mark and the column share one edge (the mockup's border-box page sat 24 px right of its bar). */
+body { min-height: 100vh; }
+.bar { display: flex; align-items: center; gap: var(--s2); height: 48px; max-width: 560px; margin: 0 auto; padding: var(--s5) var(--s5) 0; box-sizing: content-box; font-weight: var(--w-strong); }
+.page { max-width: 560px; margin: 0 auto; padding: var(--s7) var(--s5); box-sizing: content-box; display: flex; flex-direction: column; }
+.kind { display: flex; align-items: center; gap: var(--s2); font-weight: var(--w-strong); color: var(--state, var(--muted)); }
+h1 { margin-top: var(--s3); }
+.dest { margin-top: var(--s5); }
+.dest .label { color: var(--muted); }
+.dest .label + .h { margin-top: var(--s1); }
+.dest .h { font-weight: var(--w-strong); overflow-wrap: anywhere; }
+.dest .url { margin-top: var(--s1); color: var(--muted); overflow-wrap: anywhere; }
+.facts { margin-top: var(--s5); display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: var(--s4); row-gap: var(--s2); }
+.facts dt { color: var(--muted); }
+.facts dd { overflow-wrap: anywhere; }
+.said { margin-top: var(--s5); max-width: 72ch; }
+.actions { margin-top: var(--s6); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+.confirm { margin-top: var(--s5); display: flex; flex-direction: column; align-items: flex-start; gap: var(--s3); }
+.page > .inline-error { margin-top: var(--s4); }
+@media (max-width: 480px) {
+  .bar { padding: var(--s4) var(--s4) 0; }
+  .page { padding: var(--s6) var(--s4); }
+  .actions .btn.primary { width: 100%; }
+}

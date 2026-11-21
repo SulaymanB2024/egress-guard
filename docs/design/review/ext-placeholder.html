@@ -32,7 +32,7 @@
   // Review only: open shadow roots so the capture can press a button (a synthetic click is the "refused" path).
   const attach = Element.prototype.attachShadow;
   Element.prototype.attachShadow = function () { return attach.call(this, {mode: "open"}); };
-  window.chrome = {runtime: {sendMessage: async () => ({})}};
+  window.chrome = {runtime: {sendMessage: async () => ({}), onMessage: {addListener() {}}}};
 </script>
 <script src="../../../browser/core/links.js"></script>
 <script src="../../../browser/core/params.js"></script>
