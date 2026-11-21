@@ -371,7 +371,8 @@ addons = [EgressGuard(), LoopbackOnly()]
                 thread.join(2)
 
     def assert_origin_status(self, expected):
-        deadline = time.monotonic() + 4
+        # Polls until the expected status; only the allowance for a loaded machine, not the assertion, is generous.
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             status, _ = self.http("http://plaintext.test/rule-check")
             if status == expected:

@@ -1,5 +1,6 @@
 import ctypes
 import json
+import selectors
 import socket
 import subprocess
 import unittest
@@ -92,7 +93,20 @@ class DNSServiceTests(unittest.TestCase):
             ({1: [(0, 0, -65554)], 28: []}, (), ["negative", "timeout"], [1, 28]),
         ):
             lib = FakeDNSService(scripts, no_descriptor=socket_errors)
-            with self.subTest(expected=expected), patch("egress_guard.dnssd._dns_sd", return_value=lib):
+            # A virtual clock: it moves only when a selector wait finds nothing ready, by exactly the wait
+            # requested, so the outcome does not depend on how loaded the machine is.
+            now = [0.0]
+            real_select = selectors.DefaultSelector.select
+
+            def select(selector, timeout=None, now=now, real_select=real_select):
+                ready = real_select(selector, 0)
+                if not ready:
+                    now[0] += timeout or 0
+                return ready
+
+            with self.subTest(expected=expected), patch("egress_guard.dnssd._dns_sd", return_value=lib), \
+                    patch("egress_guard.dnssd.time.monotonic", lambda now=now: now[0]), \
+                    patch.object(selectors.DefaultSelector, "select", select):
                 rows = dnssd._resolve_native("x.example", 0.03)
                 self.assertEqual([row["status"] for row in rows], expected)
                 self.assertEqual(lib.freed, freed)
