@@ -30,13 +30,17 @@ const reasons = {
   'local-block': 'Your block rule', 'local-allow': 'Your allow rule', 'temporary-exception': 'Temporarily allowed',
   'tracker-paused': 'Ad filtering paused', 'dashboard-exception': 'Exempt dashboard host', 'no-match': 'No rule matched',
   'plaintext-credentials': 'Password sent unencrypted', 'not-ready': 'Filters not ready', 'non-tls-tunnel': 'Non-TLS tunnel refused',
-  'invalid-host': 'Malformed hostname', 'invalid-request': 'Malformed request', doh: 'Encrypted DNS bypass',
+  'invalid-host': 'Malformed hostname', 'invalid-request': 'Malformed request', doh: 'Encrypted DNS server',
+  'malware-feed': 'Malware list', 'phishing-feed': 'Phishing list', 'lookalike-domain': 'Look-alike domain',
+  'doh-feed': 'Encrypted DNS server', 'safety-list': 'Built-in safety list',
+  'ip-literal': 'Direct IP address (not filtered)', 'nonstandard-port': 'Unusual port (not filtered)',
 };
 const sourceCategory = {
   'threat-intel': 'threats', malware: 'threats', phishing: 'threats',
+  'malware-feed': 'threats', 'phishing-feed': 'threats', 'lookalike-domain': 'threats', 'doh-feed': 'doh', doh: 'doh',
   'tracker-feed': 'ads', tracker: 'ads', ads: 'ads', 'cname-feed': 'cname', 'cname-cloak': 'cname', 'local-block': 'manual',
 };
-const categoryLabels = {threats: 'Malware and phishing', ads: 'Ads and trackers', cname: 'Cloaked trackers (CNAME)', manual: 'Your block rules', other: 'Other protections'};
+const categoryLabels = {threats: 'Malware and phishing', ads: 'Ads and trackers', cname: 'Cloaked trackers (CNAME)', doh: 'Encrypted DNS servers', manual: 'Your block rules', other: 'Other protections'};
 
 const records = new Map();
 let status = null;
@@ -115,6 +119,9 @@ function reasonText(source) {
 }
 
 function categoryOf(source) {
+  // The service derives this from its policy table; the built-in table covers a page that has no insights yet.
+  const served = insights?.source_categories;
+  if (served && typeof served === 'object' && Object.hasOwn(served, source)) return served[source];
   return Object.hasOwn(sourceCategory, source) ? sourceCategory[source] : 'other';
 }
 
@@ -639,7 +646,7 @@ function renderBreakdown(mode) {
     name.type = 'button';
     name.title = 'Show in activity';
     name.addEventListener('click', () => focusHost(item.host));
-    row.append(name, element('span', threat ? 'Threat' : categoryLabels[item.category]?.split(' ')[0] === 'Cloaked' ? 'CNAME' : item.category === 'manual' ? 'Your rule' : '', threat ? 'tag threat' : 'tag'),
+    row.append(name, element('span', threat ? 'Threat' : categoryLabels[item.category]?.split(' ')[0] === 'Cloaked' ? 'CNAME' : item.category === 'manual' ? 'Your rule' : item.category === 'doh' ? 'DNS' : '', threat ? 'tag threat' : 'tag'),
       element('span', numberFormat.format(count(item.count)), 'count'));
     const meter = element('span', null, 'meter');
     const fill = element('span');

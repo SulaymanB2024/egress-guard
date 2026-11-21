@@ -20,6 +20,7 @@ import time
 from urllib.parse import quote
 
 from .ledger import HISTORY_MODES, MAX_EVENTS
+from .policy import CATEGORIES as POLICY_CATEGORIES
 
 # Block sources mapped to the categories the dashboard shows. Unknown or future sources fall back
 # to "other" so a new ledger value never breaks the page.
@@ -27,15 +28,23 @@ CATEGORIES = {
     "threats": "Malware and phishing",
     "ads": "Ads and trackers",
     "cname": "Cloaked trackers (CNAME)",
+    "doh": "Encrypted DNS servers",
     "manual": "Your block rules",
     "other": "Other protections",
 }
-SOURCE_CATEGORY = {
-    "threat-intel": "threats", "malware": "threats", "phishing": "threats",
-    "tracker-feed": "ads", "tracker": "ads", "ads": "ads",
-    "cname-feed": "cname", "cname-cloak": "cname",
-    "local-block": "manual",
+# Dashboard category for each policy category (``policy.CATEGORIES`` maps every ledger source to one).
+# Look-alike domains count as threats. Anything not listed here shows as "other".
+_POLICY_TO_DASHBOARD = {
+    "threat": "threats", "malware": "threats", "phishing": "threats", "lookalike": "threats",
+    "ads-trackers": "ads", "cname-cloak": "cname", "doh": "doh", "manual": "manual",
 }
+SOURCE_CATEGORY = {
+    source: _POLICY_TO_DASHBOARD.get(kind, "other") for source, kind in POLICY_CATEGORIES.items()
+}
+# Older ledgers may hold these shorter source names.
+SOURCE_CATEGORY.update({
+    "malware": "threats", "phishing": "threats", "tracker": "ads", "ads": "ads", "cname-cloak": "cname",
+})
 TOP_LIMIT = 8
 THREAT_LIMIT = 5
 DAYS = 7
@@ -62,6 +71,7 @@ def _base(history: str, now: float) -> dict:
         "hourly": None, "daily": None,
         "categories": None, "top_blocked": None, "threats": None,
         "categories_list": [{"id": key, "label": label} for key, label in CATEGORIES.items()],
+        "source_categories": dict(SOURCE_CATEGORY),
     }
 
 

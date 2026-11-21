@@ -80,7 +80,7 @@ class InsightsTest(unittest.TestCase):
         self.assertEqual(result["yesterday"]["blocked"], 2)
         self.assertEqual(result["same_time_yesterday"]["blocked"], 1)
         today = {item["id"]: item["blocked"] for item in result["categories"]["today"]}
-        self.assertEqual(today, {"threats": 1, "ads": 2, "cname": 1, "manual": 1, "other": 1})
+        self.assertEqual(today, {"threats": 1, "ads": 2, "cname": 1, "doh": 0, "manual": 1, "other": 1})
         self.assertEqual(result["threats"]["today"], 1)
         self.assertEqual(result["threats"]["week"], 2)
         self.assertEqual([item["host"] for item in result["threats"]["recent"]], ["bad.example", "malware.example"])
@@ -205,6 +205,41 @@ class DaylightSavingTest(TimeZoneCase):
         self.assertEqual(sum(item["blocked"] for item in result["hourly"]), 2)
         self.assertEqual(len(result["hourly"]), 24)
         self.assertEqual(result["today"]["blocked"], 2)
+
+
+class SourceCategoryTest(unittest.TestCase):
+    def test_every_policy_source_has_a_known_dashboard_category(self):
+        from egress_guard.policy import CATEGORIES as POLICY
+        for source in POLICY:
+            self.assertIn(category(source), CATEGORIES)
+
+    def test_new_sources_map_as_designed(self):
+        for source in ("threat-intel", "malware-feed", "phishing-feed", "lookalike-domain"):
+            self.assertEqual(category(source), "threats", source)
+        self.assertEqual(category("doh-feed"), "doh")
+        self.assertEqual(category("tracker-feed"), "ads")
+        self.assertEqual(category("cname-feed"), "cname")
+        self.assertEqual(category("local-block"), "manual")
+        for source in ("safety-list", "ip-literal", "nonstandard-port", "no-match", "brand-new-source", None, 7):
+            self.assertEqual(category(source), "other", source)
+
+    def test_new_sources_are_counted_and_listed_as_threats(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            rows = [(TODAY + 3600, "m.test", "blocked", "malware-feed"), (TODAY + 7200, "p.test", "blocked", "phishing-feed"),
+                    (TODAY + 10800, "l.test", "blocked", "lookalike-domain"), (TODAY + 14400, "d.test", "blocked", "doh-feed"),
+                    (TODAY + 18000, "s.test", "allowed", "safety-list")]
+            ledger(path, "full", rows, created=TODAY - 86400, retention=7)
+            result = read_insights(path, NOW)
+        today = {item["id"]: item["blocked"] for item in result["categories"]["today"]}
+        self.assertEqual(today["threats"], 3)
+        self.assertEqual(today["doh"], 1)
+        self.assertEqual(result["threats"]["today"], 3)
+        self.assertEqual({item["source"] for item in result["threats"]["recent"]},
+                         {"malware-feed", "phishing-feed", "lookalike-domain"})
+        self.assertEqual(result["source_categories"]["lookalike-domain"], "threats")
+        self.assertEqual(result["source_categories"]["doh-feed"], "doh")
+        self.assertIn({"id": "doh", "label": "Encrypted DNS servers"}, result["categories_list"])
 
 
 class CoverageTest(unittest.TestCase):
