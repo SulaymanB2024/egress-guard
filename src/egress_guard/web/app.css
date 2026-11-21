@@ -169,6 +169,7 @@ input::placeholder { color: var(--muted); opacity: .85; }
 .chart .bar-allowed { fill: var(--bar-allowed); }
 .chart .bar-blocked { fill: var(--bar-blocked); }
 .chart .bar-partial { opacity: .45; }
+.chart .bar-unknown { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: .7; }
 .chart .hit { fill: transparent; cursor: default; }
 .chart .hit:hover, .chart .hit.active { fill: var(--ink); opacity: .05; }
 .chart .hit:focus { outline: none; }
@@ -275,6 +276,7 @@ dialog p { color: var(--muted); overflow-wrap: anywhere; }
   .chart .bar-allowed, .chart .bar-blocked { transition: opacity .2s; }
 }
 @media (hover: hover) and (min-width: 761px) {
-  .row .act .button { opacity: 0; }
+  /* Quiet at rest so the actions can be found; full strength on row hover or keyboard focus. No layout shift. */
+  .row .act .button { opacity: .55; }
   .row:hover .act .button, .row:focus-within .act .button { opacity: 1; }
 }

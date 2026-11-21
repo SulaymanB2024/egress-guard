@@ -4,8 +4,10 @@ import http.client
 import json
 from pathlib import Path
 import sqlite3
+import os
 import tempfile
 import threading
+import time
 import unittest
 
 from egress_guard.dashboard_http import ProtectionServer
@@ -15,12 +17,17 @@ NOW = datetime(2026, 11, 20, 15, 30).astimezone().timestamp()
 TODAY = datetime(2026, 11, 20).astimezone().timestamp()
 
 
-def ledger(path, history, rows=()):
+def ledger(path, history, rows=(), created=0, retention=None, extra=()):
     connection = sqlite3.connect(path)
     with connection:
         connection.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         connection.execute("INSERT INTO meta VALUES ('history', ?)", (history,))
         connection.execute("INSERT INTO meta VALUES ('dropped', '3')")
+        if created is not None:  # None imitates a ledger made before the creation time was recorded.
+            connection.execute("INSERT INTO meta VALUES ('created', ?)", (str(created),))
+        if retention is not None:
+            connection.execute("INSERT INTO meta VALUES ('retention_days', ?)", (str(retention),))
+        connection.executemany("INSERT INTO meta VALUES (?, ?)", extra)
         if history == "full":
             connection.execute("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, host TEXT NOT NULL,"
                                " decision TEXT NOT NULL, source TEXT NOT NULL, transport TEXT NOT NULL)")
@@ -114,6 +121,163 @@ class InsightsTest(unittest.TestCase):
         self.assertEqual(category("doh"), "other")
         self.assertEqual(category(None), "other")
         self.assertIn("other", CATEGORIES)
+
+
+class TimeZoneCase(unittest.TestCase):
+    zone = "America/New_York"
+
+    def setUp(self):
+        self.old_zone = os.environ.get("TZ")
+        os.environ["TZ"] = self.zone
+        time.tzset()
+        self.temporary = tempfile.TemporaryDirectory()
+        self.path = Path(self.temporary.name) / "events.sqlite3"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+        if self.old_zone is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self.old_zone
+        time.tzset()
+
+    @staticmethod
+    def at(*parts):
+        return datetime(*parts).astimezone().timestamp()
+
+
+class DaylightSavingTest(TimeZoneCase):
+    def test_fall_back_days_hours_and_same_time_yesterday(self):
+        now = self.at(2026, 11, 2, 12)
+        rows = [(self.at(2026, 11, 1, 0, 30), "a.test", "blocked", "tracker-feed"),
+                (self.at(2026, 10, 27, 0, 30), "b.test", "blocked", "tracker-feed"),
+                (self.at(2026, 11, 1, 11, 59), "c.test", "blocked", "tracker-feed"),
+                (self.at(2026, 11, 1, 12, 1), "d.test", "blocked", "tracker-feed"),
+                (self.at(2026, 11, 2, 1, 0), "e.test", "blocked", "tracker-feed")]
+        ledger(self.path, "full", rows, created=self.at(2026, 10, 1), retention=30)
+        result = read_insights(self.path, now)
+        days = {item["day"]: item for item in result["daily"]}
+        self.assertEqual(days["2026-10-27"]["blocked"], 1)
+        self.assertEqual(days["2026-10-31"]["blocked"], 0)
+        self.assertEqual(days["2026-11-01"]["blocked"], 3)
+        self.assertEqual(result["yesterday"]["blocked"], 3)
+        # Same wall-clock time yesterday (12:00), which is 25 hours earlier, so the 12:01 event is out.
+        self.assertEqual(result["same_time_yesterday"]["blocked"], 2)
+        self.assertEqual(result["today"]["blocked"], 1)
+        self.assertEqual(sum(item["blocked"] for item in result["daily"]), 5)
+        self.assertTrue(all(item["complete"] for item in result["daily"]))
+
+    def test_fall_back_day_has_no_double_counted_hour(self):
+        # 2026-11-01 has 25 hours; the 01:00 hour happens twice.
+        first, second = self.at(2026, 11, 1, 1, 30), self.at(2026, 11, 1, 1, 30) + 3600
+        rows = [(first, "a.test", "blocked", "tracker-feed"), (second, "b.test", "blocked", "tracker-feed")]
+        ledger(self.path, "full", rows, created=self.at(2026, 10, 1), retention=30)
+        result = read_insights(self.path, self.at(2026, 11, 1, 23, 30))
+        self.assertEqual(sum(item["blocked"] for item in result["hourly"]), 2)
+        self.assertEqual(result["today"]["blocked"], 2)
+        self.assertEqual(result["daily"][-1]["blocked"], 2)
+
+    def test_spring_forward_day_is_23_hours(self):
+        # 2026-03-08: 02:00 does not exist.
+        now = self.at(2026, 3, 9, 12)
+        rows = [(self.at(2026, 3, 8, 0, 30), "a.test", "blocked", "tracker-feed"),
+                (self.at(2026, 3, 8, 3, 30), "b.test", "blocked", "tracker-feed"),
+                (self.at(2026, 3, 8, 23, 30), "c.test", "blocked", "tracker-feed"),
+                (self.at(2026, 3, 9, 0, 30), "d.test", "blocked", "tracker-feed"),
+                (self.at(2026, 3, 3, 0, 30), "e.test", "blocked", "tracker-feed")]
+        ledger(self.path, "full", rows, created=self.at(2026, 2, 1), retention=30)
+        result = read_insights(self.path, now)
+        days = {item["day"]: item["blocked"] for item in result["daily"]}
+        self.assertEqual(days["2026-03-08"], 3)
+        self.assertEqual(days["2026-03-09"], 1)
+        self.assertEqual(days["2026-03-03"], 1)
+        self.assertEqual(result["yesterday"]["blocked"], 3)
+        self.assertEqual(result["same_time_yesterday"]["blocked"], 2)
+        # The last 24 hours start at 13:00 on the 8th, so both late events count once.
+        self.assertEqual(sum(item["blocked"] for item in result["hourly"]), 2)
+
+    def test_spring_forward_hourly_buckets_across_the_gap(self):
+        now = self.at(2026, 3, 8, 6)
+        rows = [(self.at(2026, 3, 8, 1, 30), "a.test", "blocked", "tracker-feed"),
+                (self.at(2026, 3, 8, 3, 30), "b.test", "blocked", "tracker-feed")]
+        ledger(self.path, "full", rows, created=self.at(2026, 2, 1), retention=30)
+        result = read_insights(self.path, now)
+        self.assertEqual(sum(item["blocked"] for item in result["hourly"]), 2)
+        self.assertEqual(len(result["hourly"]), 24)
+        self.assertEqual(result["today"]["blocked"], 2)
+
+
+class CoverageTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.path = Path(self.temporary.name) / "events.sqlite3"
+        self.addCleanup(self.temporary.cleanup)
+
+    def flags(self, result):
+        return [item["complete"] for item in result["daily"]]
+
+    def test_retention_of_one_day_marks_older_days_incomplete(self):
+        rows = [(TODAY + 3600, "a.test", "blocked", "tracker-feed")]
+        ledger(self.path, "full", rows, created=TODAY - 30 * 86400, retention=1)
+        result = read_insights(self.path, NOW)
+        self.assertEqual(self.flags(result), [False] * 6 + [True])
+        self.assertFalse(result["yesterday"]["complete"])
+        self.assertFalse(result["same_time_yesterday"]["complete"])
+        self.assertTrue(result["hourly"][-1]["complete"])
+
+    def test_fresh_ledger_does_not_claim_earlier_days(self):
+        created = TODAY + 2 * 3600
+        ledger(self.path, "full", [(created + 60, "a.test", "blocked", "tracker-feed")], created=created, retention=7)
+        result = read_insights(self.path, NOW)
+        self.assertEqual(self.flags(result), [False] * 7)
+        self.assertFalse(result["yesterday"]["complete"])
+        self.assertEqual(result["today"]["blocked"], 1)
+        self.assertTrue(result["hourly"][-1]["complete"])
+        # The next day is fully covered.
+        later = read_insights(self.path, NOW + 86400)
+        self.assertEqual(self.flags(later)[-2:], [False, True])
+
+    def test_covered_ledger_is_complete(self):
+        ledger(self.path, "full", [(TODAY - 86400 + 3600, "a.test", "blocked", "tracker-feed")],
+               created=TODAY - 10 * 86400, retention=7)
+        result = read_insights(self.path, NOW)
+        self.assertEqual(self.flags(result), [True] * 7)
+        self.assertTrue(result["same_time_yesterday"]["complete"])
+
+    def test_legacy_ledger_uses_oldest_row(self):
+        rows = [(TODAY - 3 * 86400 + 3600, "a.test", "blocked", "tracker-feed")]
+        ledger(self.path, "full", rows, created=None)
+        result = read_insights(self.path, NOW)
+        self.assertEqual(self.flags(result), [False, False, False, False, True, True, True])
+
+    def test_legacy_ledger_without_rows_is_unknown(self):
+        ledger(self.path, "full", [], created=None)
+        result = read_insights(self.path, NOW)
+        self.assertEqual(self.flags(result), [False] * 7)
+        self.assertFalse(result["yesterday"]["complete"])
+
+    def test_capped_aggregate_marks_trimmed_days_incomplete(self):
+        day = int(TODAY) // 86400 * 86400
+        rows = [(day - 86400, "a.test", "blocked", "tracker-feed", 2), (day, "b.test", "blocked", "tracker-feed", 1)]
+        ledger(self.path, "aggregate", rows, created=day - 20 * 86400, retention=30,
+               extra=[("trimmed_through", str(day - 86400))])
+        result = read_insights(self.path, day + 3600)
+        self.assertEqual(self.flags(result)[-2:], [False, True])
+        self.assertFalse(result["yesterday"]["complete"])
+        self.assertEqual(result["today"]["blocked"], 1)
+
+    def test_aggregate_without_creation_time_falls_back_to_oldest_row(self):
+        day = int(TODAY) // 86400 * 86400
+        ledger(self.path, "aggregate", [(day - 2 * 86400, "a.test", "blocked", "tracker-feed", 1)], created=None)
+        result = read_insights(self.path, day + 3600)
+        self.assertEqual(self.flags(result), [False, False, False, False, True, True, True])
+
+    def test_aggregate_retention_one(self):
+        day = int(TODAY) // 86400 * 86400
+        ledger(self.path, "aggregate", [(day, "a.test", "blocked", "tracker-feed", 1)],
+               created=day - 20 * 86400, retention=1)
+        result = read_insights(self.path, day + 3600)
+        self.assertEqual(self.flags(result), [False] * 6 + [True])
 
 
 class InsightsEndpointTest(unittest.TestCase):

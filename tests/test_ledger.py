@@ -154,5 +154,55 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(read_activity(self.path)["events"][0]["host"], "old.test")
 
 
+    def meta(self):
+        return dict(self.rows("SELECT key, value FROM meta"))
+
+    def test_creation_time_is_written_once(self):
+        before = int(time.time())
+        ledger = self.ledger(retention_days=3)
+        self.assertTrue(wait_for(ledger.ready))
+        ledger.close()
+        created = int(self.meta()["created"])
+        self.assertGreaterEqual(created, before)
+        self.assertEqual(self.meta()["retention_days"], "3")
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("UPDATE meta SET value = '123' WHERE key = 'created'")
+        ledger = self.ledger()
+        self.assertTrue(wait_for(ledger.ready))
+        ledger.close()
+        self.assertEqual(self.meta()["created"], "123")
+
+    def test_existing_ledger_without_creation_time_keeps_its_oldest_row(self):
+        ledger = self.ledger()
+        self.assertTrue(wait_for(ledger.ready))
+        ledger.close()
+        old = int(time.time()) - 3 * 86400
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("DELETE FROM meta WHERE key = 'created'")
+            connection.execute("INSERT INTO events(ts, host, decision, source, transport) VALUES (?, 'x.test', 'allowed', 'no-match', 'http')", (old,))
+        ledger = self.ledger()
+        self.assertTrue(wait_for(ledger.ready))
+        ledger.close()
+        self.assertEqual(self.meta()["created"], str(old))
+
+    def test_capped_aggregate_trim_is_deterministic_and_marks_the_day(self):
+        day = int(time.time()) // 86400 * 86400
+        with patch("egress_guard.ledger.MAX_EVENTS", 3):
+            ledger = self.ledger(history="aggregate")
+            self.assertTrue(wait_for(ledger.ready))
+            ledger.close()
+            with sqlite3.connect(self.path) as connection:
+                connection.executemany(
+                    "INSERT INTO daily VALUES (?, ?, 'blocked', 'tracker-feed', ?)",
+                    [(day - 86400, "old1.test", 5), (day - 86400, "old2.test", 1), (day, "a.test", 1), (day, "b.test", 2)])
+            ledger = self.ledger(history="aggregate")
+            self.assertTrue(wait_for(ledger.ready))
+            self.assertTrue(ledger.record("c.test", "blocked", "tracker-feed", "connect"))
+            ledger.close()
+        rows = self.rows("SELECT day, host FROM daily ORDER BY day, host")
+        self.assertEqual(rows, [(day, "a.test"), (day, "b.test"), (day, "c.test")])
+        self.assertEqual(int(self.meta()["trimmed_through"]), day - 86400)
+
+
 if __name__ == "__main__":
     unittest.main()
