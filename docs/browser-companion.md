@@ -64,13 +64,31 @@ to the Chrome Web Store as is.
 | --- | --- | --- |
 | Ads and trackers | Every request type except top-level navigation, to the listed domains and their subdomains | HaGeZi Multi PRO++ (or the tier you build) |
 | Disguised (CNAME-cloaked) trackers | Same, for first-party subdomains that alias a tracker | AdGuard CNAME-cloaked ads and trackers |
-| Malware and phishing | Every request type, and navigations go to a local warning page | HaGeZi Threat Intelligence (Medium) |
+| Malware and phishing | Every request type, and navigations go to a local warning page | URLhaus (malware-filter), Phishing Army, HaGeZi Threat Intelligence (Full; Medium with `--threat-tier medium` or when only Medium is cached) |
+| Empty ad slots | One stylesheet hides common ad containers (AdSense and Google Publisher Tag slots, ad-server frames, AMP ads, Taboola and Outbrain widgets, labelled ad containers). Switch it off per site in the popup | First-party list in `browser/core/cosmetic.js` |
 | Tracking parameters | Removed from page and frame navigations before the request is sent | Built-in list in `browser/core/dnr.js` |
 
-These are the proxy's own feeds and tiers. With 2026-11-20 data the build
-holds about 257,000 tracker, 376,000 threat and 178,000 CNAME domains
-(about 25 MB of rules); Chrome indexed and enforced them in the headless
-check below.
+These are the proxy's own feeds and tiers. URLhaus also lists IP addresses;
+those are skipped (DNR matches host names). The proxy's DoH list is not used:
+DNR cannot see Chrome's own secure-DNS lookups, so blocking pages' requests to
+resolver hosts would protect nothing. With 2026-11-20 data the build holds
+about 257,000 tracker, 384,000 threat (Medium tier) and 178,000 CNAME
+domains. The Full threat tier is about 1.47 million names: a synthetic
+1.5 million-name threat list (68 MB) indexed and matched in headless Chrome
+157, both as one file and split. The build caps each ruleset file at 32 MB
+and splits larger lists (`threats`, `threats-2`, …), which the popup shows as
+one list.
+
+**Ad-slot stylesheet.** It is CSS only, added at `document_start`, with no
+per-element script. Selectors must be class, id-prefix or tag-qualified
+attribute selectors (Chrome matches those from a bucket), never `:has()` or a
+bare attribute, at most 80; a test enforces that. EasyList's generic hiding
+rules were evaluated: the licence (GPL-3.0 or CC BY-SA 3.0) fits next to the
+GPL HaGeZi data, but its generic section is thousands of selectors including
+costly universal ones, it is not in the proxy's verified feed cache (adding
+a feed belongs in `feeds.py`), and every selector would need the review this
+small set gets. The first-party set covers the common slot conventions; see
+the real-site results below for what it leaves.
 
 **Warning page.** A navigation to a threat-listed site never reaches it. The
 page shows the host, the full address, the list and its date. **Go back** is
@@ -102,30 +120,71 @@ working without them.
 
 **Popup.** It leads with what was blocked on this page: the count, a
 breakdown by list, then each endpoint with its type and list and **Allow 15
-min**. Below that: elements hidden on the page, this site's rules with
-**Remove**, timed exceptions, and the list versions the build contains. It
-follows the system light or dark setting. The toolbar badge shows Chrome's
-own per-tab count of blocked requests.
+min** (never for malware and phishing hosts, navigations, or WebSocket-like
+types). Below that: elements hidden on the page, the built-in ad-slot count
+with **Show ad slots on this site** / **Hide ad slots on this site**, this
+site's rules with **Remove**, timed exceptions, and the list versions the
+build contains. It follows the system light or dark setting. The toolbar
+badge shows Chrome's own per-tab count of blocked requests.
+
+What the popup can list depends on how the extension is installed, and it
+says which:
+
+| Install | Blocked list in the popup |
+| --- | --- |
+| Unpacked (Load unpacked, today's only route) | Every blocked endpoint with type and list (`onRuleMatchedDebug`) |
+| Packed | Counts by list since the page loaded (`getMatchedRules`, which reports rules, never addresses); the note says addresses are not available |
+| Neither API, or Chrome's `getMatchedRules` quota spent | The toolbar badge only, and the popup says so |
+
+**Fresh lists with no clicks.** Chrome reads an unpacked extension's files
+from its folder live. The build writes `rules/build.json` (a hash of the
+rulesets, list metadata and sources); the worker compares it with its own
+build id every hour and, when the folder was rebuilt, calls
+`runtime.reload()`, which re-reads the manifest and re-indexes the lists. It
+waits while a continue-once is active, since a reload ends those. It reads
+only its own file; no network request, no server, no local port. So running
+`node scripts/build-browser.mjs` after each proxy feed refresh (the same
+daily job) keeps the browser current without visiting `chrome://extensions`.
+The headless lifecycle check proves a rebuilt folder with a new tracker is
+picked up and enforced, and that user rules and exceptions survive.
+
+A loopback endpoint on the dashboard serving domain lists as dynamic rules
+was considered and not built. Dynamic and session rules share a 30,000-rule
+budget meant for user rules; Chrome documents no size limit for a dynamic
+rule's `requestDomains`, so a 1.5 million-name list there is untested
+territory; removals cannot be expressed against static rulesets without
+allow rules that could unblock a name still listed elsewhere; and a fixed
+loopback port is visible to every web page (port probing reveals that Egress
+Guard runs; CORS hides the body but timing does not), while DNS rebinding and
+CSRF checks would have to stay perfect on a new unauthenticated route. The
+rebuild-and-reload path gets the same freshness with none of that.
 
 ### What it does not do (Chrome)
 
-- **No YouTube or other in-stream video ads.** Those come from the same
-  hosts as the video and need script-level filtering. Not attempted, not
-  tested.
-- **No cosmetic filter lists.** Only elements you pick are hidden. Empty ad
-  slots may remain where a blocked ad was.
+- **No YouTube or other in-stream video ads.** In-stream ads are chosen in
+  the player's own data (`ytInitialPlayerResponse`, `/youtubei/v1/player`)
+  and served from the same hosts as the video. DNR can block separate ad
+  endpoints (for example `doubleclick.net`, already on the lists) but cannot
+  edit JSON responses. MV3 blockers that do this (uBlock Origin Lite) ship
+  bundled scriptlets injected into the page's main world with the
+  `scripting` permission: bundled code, not remote code, so it is possible,
+  but it needs a scriptlet per site, breaks when YouTube changes its player,
+  and could only be verified on a page that actually serves an ad. Headless
+  Chrome without a signed-in profile or consent state does not reliably get
+  ads, so nothing was implemented and nothing is claimed.
+- **Cosmetic hiding is a small built-in set plus your own rules.** No
+  third-party cosmetic lists, no `:has()`, no text matching: an
+  "Advertisement" label in plain text next to a hidden slot can remain.
 - **No path-level list filtering.** The lists are domain lists. A tracker
   served from a site's own domain is only blocked if you add an endpoint rule.
-- Lists update when you rebuild and reload, not daily on their own. The
-  build warns when a list is more than 48 hours old.
+- Lists update when the folder is rebuilt (see above); nothing in the
+  extension downloads them. The build warns when a list is more than 48 hours
+  old.
 - Domain blocking covers subdomains, so a CNAME entry also blocks names below
   it. The proxy matches those CNAME entries exactly.
 - Your per-site rules are scoped by the requesting frame's site (DNR
   `initiatorDomains`). On the page's own requests this is the page's site;
   requests made inside a third-party iframe are scoped to that iframe's site.
-- The list of blocked endpoints in the popup relies on Chrome's
-  `onRuleMatchedDebug`, which exists only for unpacked extensions. A packed
-  build would show the count badge only.
 - Fingerprinting. `warning.html` is web-accessible with `use_dynamic_url`, so
   a page cannot fetch it at the fixed id (the headless check confirms the
   fetch is refused); Chrome still performs the DNR redirect to it. A site can
