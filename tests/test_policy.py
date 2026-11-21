@@ -7,11 +7,17 @@ from unittest.mock import patch
 
 from egress_guard.config import load_config
 from egress_guard.feeds import CachedFeed
-from egress_guard.policy import MAX_CONTROL_BYTES, Policy, PolicyRuntime, normalize_host
+from egress_guard.ledger import SOURCES
+from egress_guard.policy import CATEGORIES, MAX_CONTROL_BYTES, Policy, PolicyRuntime, normalize_host
 
 
 def cached(names, published=None):
     return CachedFeed(set(names), "digest-" + "-".join(sorted(names)), published, None)
+
+
+def pick(snapshots, feed):
+    """Specific threat feeds have fixtures under their ledger source; others under their group."""
+    return snapshots[feed.source] if feed.source in snapshots else snapshots[feed.category]
 
 
 class PolicyTests(unittest.TestCase):
@@ -30,14 +36,17 @@ class PolicyTests(unittest.TestCase):
             "threat": {"danger.example"},
             "tracker": {"tracker.example", "dashboard.example", "analytics.example"},
             "cname": {"masked.example", "dashboard.danger.example", "manual.example"},
+            "doh": {"dns.example"},
+            "malware-feed": {"payload.example", "203.0.113.9"},
+            "phishing-feed": {"phish.example", "both.danger.example", "accounts.google.com"},
         }
         self.snapshots = snapshots
-        with patch("egress_guard.policy.load_cached_feed", side_effect=lambda _, feed: cached(snapshots[feed.category])):
+        with patch("egress_guard.policy.load_cached_feed", side_effect=lambda _, feed: cached(pick(snapshots, feed))):
             self.policy = Policy(self.config, self.state)
 
     def test_priorities_and_match_boundaries(self):
         self.assertEqual(self.policy.decision("A.Danger.Example."), {
-            "decision": "blocked", "source": "threat-intel",
+            "decision": "blocked", "source": "threat-intel", "category": "threat",
             "matched_domain": "danger.example", "can_allow": False,
         })
         self.assertEqual(self.policy.decision("dashboard.danger.example")["source"], "threat-intel")
@@ -49,6 +58,120 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(self.policy.decision("danger.example.other")["source"], "no-match")
         self.assertEqual(self.policy.decision("masked.example")["source"], "cname-feed")
         self.assertEqual(self.policy.decision("a.masked.example")["source"], "no-match")
+
+    def test_specific_threat_sources_and_categories(self):
+        decide = self.policy.decision
+        # The most specific threat feed names the source, even when HaGeZi also lists a parent.
+        self.assertEqual((decide("both.danger.example")["source"], decide("both.danger.example")["category"]),
+                         ("phishing-feed", "phishing"))
+        self.assertEqual(decide("x.payload.example")["category"], "malware")
+        self.assertEqual(decide("phish.example")["can_allow"], False)
+        # Allow rules, exemptions, pauses and timed exceptions never override threat feeds.
+        config = {"block": {"allow": ["phish.example", "payload.example"], "dashboard_hosts": ["phish.example"]}}
+        (self.state / "filter-controls.json").write_text(json.dumps({"tracker_pause_until": time.time() + 60}))
+        (self.state / "tracker-exceptions.json").write_text(json.dumps({"phish.example": time.time() + 60}))
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            relaxed = Policy(config, self.state)
+        self.assertEqual(relaxed.decision("phish.example")["source"], "phishing-feed")
+        self.assertEqual(relaxed.decision("payload.example")["source"], "malware-feed")
+        for source, category in CATEGORIES.items():
+            self.assertIn(source, SOURCES)
+            self.assertTrue(category)
+        self.assertLessEqual(set(SOURCES), set(CATEGORIES))
+
+    def test_ip_literal_targets(self):
+        decide = self.policy.decision
+        self.assertEqual(decide("203.0.113.9"), {"decision": "blocked", "source": "malware-feed",
+                                                 "category": "malware", "matched_domain": "203.0.113.9",
+                                                 "can_allow": False})
+        self.assertEqual(decide("1.1.1.1")["source"], "doh-feed")
+        self.assertEqual(decide("[2606:4700:4700::1111]")["source"], "doh-feed")
+        self.assertEqual(decide("93.184.215.14"), {"decision": "allowed", "source": "ip-literal",
+                                                   "category": "unfiltered", "matched_domain": "93.184.215.14",
+                                                   "can_allow": False})
+        for private in ("10.0.0.1", "127.0.0.1", "::1", "fe80::1"):
+            self.assertEqual(decide(private)["source"], "no-match")
+        # A listed IP is matched exactly, never as a DNS suffix.
+        self.assertEqual(decide("203.0.113.10")["source"], "no-match")
+
+    def test_encrypted_dns_servers(self):
+        decide = self.policy.decision
+        self.assertEqual((decide("a.dns.example")["source"], decide("dns.example")["category"]), ("doh-feed", "doh"))
+        self.assertTrue(decide("dns.example")["can_allow"])
+        (self.state / "filter-controls.json").write_text(json.dumps({"tracker_pause_until": time.time() + 60}))
+        self.policy.reload_controls()
+        self.assertEqual(decide("dns.example")["source"], "doh-feed")  # pausing ads does not unblock DoH
+        (self.state / "tracker-exceptions.json").write_text(json.dumps({"dns.example": time.time() + 60}))
+        self.policy.reload_controls()
+        self.assertEqual(decide("dns.example")["source"], "temporary-exception")
+        config = {"block": {"block_encrypted_dns": False}}
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            off = Policy(config, self.state)
+        self.assertNotIn("hagezi-doh", off.coverage)
+        self.assertEqual(off.decision("dns.example")["source"], "no-match")
+        self.assertEqual(off.decision("1.1.1.1")["source"], "ip-literal")
+
+    def test_safety_list_outranks_feeds_but_not_manual_blocks(self):
+        self.assertEqual(self.policy.decision("accounts.google.com"),
+                         {"decision": "allowed", "source": "safety-list", "category": "safety",
+                          "matched_domain": "accounts.google.com", "can_allow": False})
+        # Exact only: a listed subdomain of a safety host is still blocked.
+        self.assertEqual(self.policy.decision("x.accounts.google.com")["source"], "phishing-feed")
+        (self.state / "block.txt").write_text("accounts.google.com\n")
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            manual = Policy(self.config, self.state)
+        # The user's block removes the protection; feed matches then apply in their usual order.
+        self.assertEqual(manual.decision("accounts.google.com")["decision"], "blocked")
+        self.assertEqual(manual.decision("appleid.apple.com")["source"], "safety-list")
+        (self.state / "block.txt").write_text("appleid.apple.com\n")
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            manual = Policy(self.config, self.state)
+        self.assertEqual(manual.decision("appleid.apple.com")["source"], "local-block")
+
+    def test_lookalike_domains(self):
+        decide = self.policy.decision
+        for host, matched in (("xn--80ak6aa92e.com", "xn--80ak6aa92e.com"),  # аррӏе.com, all Cyrillic
+                              ("login.xn--pple-43d.com", "xn--pple-43d.com"),  # аpple.com
+                              ("xn--pypal-4ve.example", "xn--pypal-4ve.example"),  # pаypal
+                              ("xn--secure-pypal-49j.example", "xn--secure-pypal-49j.example")):
+            with self.subTest(host=host):
+                self.assertEqual(decide(host), {"decision": "blocked", "source": "lookalike-domain",
+                                                "category": "lookalike", "matched_domain": matched,
+                                                "can_allow": False})
+        for host in ("xn--bcher-kva.ch", "xn--mnchen-3ya.de", "xn--fiqs8s.xn--fiqs8s", "apple.com",
+                     "xn--bcher-apple-thb.example", "xn--zz-.example", "xn--a.example"):
+            with self.subTest(host=host):
+                self.assertNotEqual(decide(host)["source"], "lookalike-domain")
+        with patch("egress_guard.policy.load_cached_feed",
+                   side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
+            allowed = Policy({"block": {"allow": ["xn--pple-43d.com"]}}, self.state)
+        self.assertEqual(allowed.decision("xn--pple-43d.com")["source"], "no-match")
+
+    def test_nonstandard_ports_are_labelled_not_blocked(self):
+        decide = self.policy.decision
+        self.assertEqual(decide("plain.example", 443)["source"], "no-match")
+        self.assertEqual(decide("plain.example", 80)["source"], "no-match")
+        self.assertEqual(decide("plain.example")["source"], "no-match")
+        self.assertEqual(decide("plain.example", 8443),
+                         {"decision": "allowed", "source": "nonstandard-port", "category": "unfiltered",
+                          "matched_domain": None, "can_allow": False})
+        self.assertEqual(decide("analytics.example", 8443)["source"], "tracker-feed")
+
+    def test_full_threat_tier_substitutes_the_verified_medium_cache(self):
+        def only_medium(_, feed):
+            if feed.id == "hagezi-threat-intel-full":
+                return None
+            return cached(pick(self.snapshots, feed))
+
+        with patch("egress_guard.policy.load_cached_feed", side_effect=only_medium):
+            policy = Policy({}, self.state)
+        self.assertEqual(policy.coverage["hagezi-threat-intel-full"], "substitute")
+        self.assertEqual(policy.decision("danger.example")["source"], "threat-intel")
+        self.assertTrue(policy.ready() and policy.degraded())
 
     def test_temporary_exception_is_exact_and_bounded(self):
         (self.state / "tracker-exceptions.json").write_text(json.dumps({
@@ -105,15 +228,15 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(self.policy.degraded())
 
         def corrupt_cname(_, feed):
-            return None if feed.category == "cname" else cached(self.snapshots[feed.category])
+            return None if feed.category == "cname" else cached(pick(self.snapshots, feed))
 
         with patch("egress_guard.policy.load_cached_feed", side_effect=corrupt_cname):
             replacement = Policy(self.config, self.state, self.policy)
             fresh = Policy(self.config, self.state)
         # The running replacement keeps the verified CNAME component, and says so.
         self.assertEqual(replacement.decision("masked.example"),
-                         {"decision": "blocked", "source": "cname-feed", "matched_domain": "masked.example",
-                          "can_allow": True})
+                         {"decision": "blocked", "source": "cname-feed", "category": "cname-cloak",
+                          "matched_domain": "masked.example", "can_allow": True})
         self.assertTrue(replacement.degraded())
         self.assertIn("last-good", replacement.coverage.values())
         # Without a previous policy, an enabled feed with no data is never full readiness.
@@ -150,7 +273,7 @@ class PolicyTests(unittest.TestCase):
                 failures[0] -= 1
                 raise ValueError("block.txt could not be read as UTF-8")
             with patch("egress_guard.policy.load_cached_feed",
-                       side_effect=lambda _, feed: cached(self.snapshots[feed.category])):
+                       side_effect=lambda _, feed: cached(pick(self.snapshots, feed))):
                 return Policy(self.config, self.state, previous)
 
         observe = lambda: (block.stat().st_mtime_ns, block.stat().st_size) if block.exists() else None
@@ -182,7 +305,7 @@ class PolicyTests(unittest.TestCase):
         empty = [False]
 
         def load(previous):
-            source = (lambda *_: None) if empty[0] else (lambda _, feed: cached(self.snapshots[feed.category]))
+            source = (lambda *_: None) if empty[0] else (lambda _, feed: cached(pick(self.snapshots, feed)))
             with patch("egress_guard.policy.load_cached_feed", side_effect=source):
                 return Policy(self.config, self.state)  # no carry-forward, to force an empty candidate
 
@@ -201,7 +324,8 @@ class PolicyTests(unittest.TestCase):
                 self.assertIsNone(normalize_host(value))
                 self.assertEqual(self.policy.decision(value)["source"], "invalid-host")
         self.assertEqual(normalize_host("[2001:DB8::1]"), "2001:db8::1")
-        self.assertEqual(self.policy.decision("1.2.3.4")["source"], "no-match")
+        self.assertEqual(self.policy.decision("1.2.3.4")["source"], "ip-literal")
+        self.assertEqual(self.policy.decision("192.168.1.10")["source"], "no-match")
         self.assertEqual(normalize_host("xn--wgv71a.example."), "xn--wgv71a.example")
 
 
