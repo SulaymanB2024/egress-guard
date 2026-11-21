@@ -5,12 +5,14 @@ The application code is MIT licensed. Downloaded feeds retain their own licenses
 | Component | Role | License/source |
 | --- | --- | --- |
 | mitmproxy 12.3.1 | Local proxy transport | [MIT](https://github.com/mitmproxy/mitmproxy/blob/main/LICENSE) |
-| HaGeZi DNS Blocklists | Ad/tracker and threat data fetched at runtime | [GPL-3.0](https://github.com/hagezi/dns-blocklists/blob/main/LICENSE) |
+| HaGeZi DNS Blocklists | Ad/tracker, threat-intelligence and encrypted-DNS server data fetched at runtime | [GPL-3.0](https://github.com/hagezi/dns-blocklists/blob/main/LICENSE) |
 | AdGuard CNAME trackers | Exact alias data fetched at runtime | [MIT](https://github.com/AdguardTeam/cname-trackers/blob/master/LICENSE) |
+| URLhaus, via malware-filter `urlhaus-filter` | Malware-distribution hosts and IP addresses fetched at runtime | List: [CC0-1.0 and MIT](https://gitlab.com/malware-filter/urlhaus-filter#license); URLhaus data: [CC0](https://urlhaus.abuse.ch/) (abuse.ch does not endorse the republished list). Its popular-domain exclusions use Tranco (MIT), Cisco Umbrella and Cloudflare Radar rankings. |
+| Phishing Army | Phishing domains fetched at runtime | [Usage and licensing](https://phishing.army/license/): no restriction added by Phishing Army; generator code GPL-3.0. The list aggregates [upstream sources](https://phishing.army/sources/) whose own terms continue to apply, which matters for commercial use or redistribution. |
 | Thinkst Canarytokens | Optional remote history service | [Project](https://github.com/thinkst/canarytokens), [service terms](https://canarytokens.org/nest/legal) |
 | SponsorBlock community timings | Optional, explicit video hash-prefix lookup and local timing export | Data: [CC BY-NC-SA 4.0](https://github.com/ajayyy/SponsorBlock/wiki/Database-and-API-License), [service terms](https://gist.github.com/ajayyy/9e8100f069348e0bc062641f34d6af12) |
 
-Retain upstream attribution and licenses if redistributing downloaded feed caches. Release archives intentionally omit those caches and all device state.
+Each user's installation downloads these lists directly from their publishers for local filtering; nothing is mirrored or redistributed by this project. Retain upstream attribution and licenses if redistributing downloaded feed caches. Release archives intentionally omit those caches and all device state.
 
 SponsorBlock timing data is not bundled. Its noncommercial, attribution and share-alike terms apply separately from this application's MIT code license. Exports retain the provider, license link, retrieval time and description of format changes. Preserve that information when sharing exports; the code license does not relicense community data.
 

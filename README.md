@@ -8,7 +8,8 @@ Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps 
 
 ## What it does
 
-- Blocks domains from HaGeZi's ad/tracker and threat feeds, plus curated, exact-match AdGuard CNAME aliases.
+- Blocks domains from HaGeZi's ad/tracker and full threat-intelligence feeds, URLhaus malware hosts and IP addresses, Phishing Army phishing domains and curated, exact-match AdGuard CNAME aliases. Threat matches cannot be overridden by allow rules, exemptions, pauses or timed exceptions.
+- Blocks known DNS-over-HTTPS servers by name and the major public resolvers by address, and punycode look-alikes of well-known brands (for example `xn--pple-43d.com`, which displays as "аpple.com" with a Cyrillic "а"). A short, built-in list of exact sign-in, OS-update and certificate-revocation hosts for Apple, Google, Microsoft, DigiCert and Mozilla can never be blocked by a downloaded list. [Every block reason](#block-reasons).
 - Inspects additional CNAME chains through the macOS system resolver on explicit request, with portable offline analysis and separate policy results for each alias. Conflicting or incomplete answers remain indeterminate.
 - Fetches community sponsor-timing suggestions by a short video hash prefix on explicit request, checks the supplied current duration, and exports attributed local JSON for manual review.
 - Updates feeds daily when macOS background services are enabled. Invalid, truncated or failed downloads retain the last good copy; the dashboard shows publication age separately from download success.
@@ -79,15 +80,43 @@ Configure individual clients for `http://127.0.0.1:18080`. On macOS/Linux, run `
 
 Every enabled feed, including the CNAME feeds while `cname_protection = true`, must have a verified cache before filtering starts. The dashboard shows the saved policy revision next to the revision the proxy reports as applied. `egress-guard check host.example` reports `indeterminate` (exit code 2) instead of `allowed` while enabled feed coverage is incomplete.
 
+After upgrading from 0.3, run `egress-guard refresh` once: the new malware, phishing and encrypted-DNS feeds must download before the proxy reports full readiness. Until the full HaGeZi threat feed arrives, the proxy keeps enforcing a verified medium-tier cache and reports the feed as degraded.
+
 The default configuration exempts no hosts from tracker or CNAME decisions. To keep the Google Analytics, Microsoft Clarity and PostHog reporting consoles usable through the proxy, opt in with `exemption_presets = ["analytics-dashboards"]` under `[block]`, or list exact hosts in `dashboard_hosts`. Threat and manual block rules still apply to exempted hosts. Configurations created by earlier releases keep the six hosts they were written with in `dashboard_hosts`; set it to `[]` for the strict default.
 
 Download the source archive for its `requirements` directory as well as the wheel. The source installer refuses an existing environment; this alpha has no automatic application-upgrade transaction. Existing users should keep their current installation intact until choosing a manual update plan.
+
+## Block reasons
+
+Each decision carries a `source` (stored in the activity log) and a `category` (shown by `egress-guard check` and the dashboard). `egress_guard.policy.CATEGORIES` maps every source to its category.
+
+| Source | Category | Decision | Meaning | Can be overridden |
+| --- | --- | --- | --- | --- |
+| `malware-feed` | `malware` | blocked | URLhaus malware-distribution host or IP address | No |
+| `phishing-feed` | `phishing` | blocked | Phishing Army domain | No |
+| `threat-intel` | `threat` | blocked | HaGeZi Threat Intelligence (malware, scams, phishing, cryptojacking) | No |
+| `lookalike-domain` | `lookalike` | blocked | Punycode label that spells a listed brand with look-alike letters | `allow` rules only |
+| `local-block` | `manual` | blocked | Your `block.txt` or `hosts` rule | Remove the rule |
+| `doh-feed` | `doh` | blocked | Encrypted DNS server (HaGeZi DoH list, or a public resolver address) | Allow rules, exemptions, timed exceptions; not the ad pause |
+| `tracker-feed` | `ads-trackers` | blocked | HaGeZi Multi ad/tracker list | Yes |
+| `cname-feed` | `cname-cloak` | blocked | Exact AdGuard CNAME-cloaked tracker alias | Yes |
+| `safety-list` | `safety` | allowed | Built-in sign-in, update or revocation host | Your own block rule |
+| `ip-literal` | `unfiltered` | allowed | Public IP address with no listed match: no hostname to filter | — |
+| `nonstandard-port` | `unfiltered` | allowed | Unlisted host on a port other than 80 or 443 | — |
+
+Threat feeds are checked most specific first, so a host listed by both Phishing Army and HaGeZi is reported as `phishing-feed`. Other sources are unchanged from 0.3 (`no-match`, `local-allow`, `dashboard-exception`, `temporary-exception`, `tracker-paused`, `plaintext-credentials`, `non-tls-tunnel`, `invalid-host`).
+
+Why encrypted DNS is blocked by default: traffic sent through this proxy is filtered by name whatever resolver the client uses, but a client that resolves names privately over DoH can then connect by IP address and skip every hostname rule, and DoH is a known channel for malware command-and-control. Browsers fall back to the system resolver when their DoH server is unreachable, so breakage is rare. Set `block_encrypted_dns = false` under `[block]` to allow DoH. Raw IP addresses and unusual ports are labelled rather than blocked, because many legitimate applications use them; listed malware IPs and resolver addresses are still blocked. `threat_tier = "medium"` selects HaGeZi's smaller threat feed.
 
 ## Inspect disguised trackers and sponsor timings
 
 `egress-guard cname-check www.example.com` reports the current system resolver's alias chain and each hostname's policy. It leaves live filtering unchanged. Use `--answers-file /path/to/observations.json` for portable, offline analysis. Exit code 2 means the report is indeterminate, including when verified filter data is unavailable. [Details and resolver privacy](docs/cname-inspection.md).
 
 `egress-guard sponsor-fetch VIDEO_ID --duration SECONDS --output ./new-timings.json` explicitly asks SponsorBlock for community suggestions and atomically creates a new local file. It sends four hexadecimal hash characters and category filters; the provider still sees the connection and may identify the video from that prefix. Timings require manual review, and existing output files are preserved. No browser history is read and playback is unchanged. The optional browser companion is still under qualification. [Format, attribution and privacy](docs/sponsor-timings.md).
+
+## Measure blocking
+
+`EGRESS_GUARD_DATA=/path/to/refreshed-test-state PYTHONPATH=src python3 -B scripts/measure-coverage.py` reports entries per feed, entries no other enabled feed already covers, policy load time and memory, and decisions for the labelled public hostnames in `scripts/coverage-sample.txt`. It reads the local cache only. Use a temporary state directory, not a live installation.
 
 ## Dependency intelligence
 
