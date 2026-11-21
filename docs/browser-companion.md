@@ -184,9 +184,11 @@ dot and word) and four tabs, operable with the arrow keys:
   stopped malware or phishing request adds "1 threat stopped" in the threat
   colour), then links cleaned, cookies removed and elements hidden, then
   **Protection on this site**: Relaxed, Standard, Strict or No scripts, with a
-  quiet **Pause** beside the heading that shows everything hidden on this page
-  until **Resume** (blocking continues). "Newer lists have been built" and a
-  paused page each add one callout. It fits 520 px without scrolling.
+  quiet **Pause** beside the heading (see **Pause** below). A paused site
+  reads "Paused" in the header, a callout says "Paused on this site until
+  HH:MM" with a filled **Resume**, and the level control shows the level that
+  comes back, disabled. "Newer lists have been built" adds one callout. It
+  fits 520 px without scrolling.
 - **Blocked**: grouped by named category (Ads and trackers, Disguised
   trackers, Malware and phishing, First-party tracker script, Tracking
   request, Ad request, Fingerprinting or session replay, Third-party beacon,
@@ -672,6 +674,19 @@ first-party subdomains themselves, which is what a browser sees). Measured on
   selector (never class-only, since sponsored and organic cards often share
   every class), shows how many elements it matches, and saves a rule only
   after a real click on **Create rule**. **Undo** removes it.
+- **Pause.** **Pause** in the popup pauses the current site (its registrable
+  domain) for 15 minutes: it runs at Relaxed, nothing is hidden on its pages
+  and its links and cookies are not cleaned. Then the site's own level and
+  settings apply again by themselves. The pause is an overlay, not a change to
+  the saved settings; it is stored with its expiry in `storage.local` and a
+  `chrome.alarms` alarm ends it even when the service worker is asleep, and a
+  worker or browser that starts after the expiry lifts it on start. The threat
+  list, the warning page and your own block rules keep applying throughout
+  (they sit above Relaxed). Only the popup can start or end a pause (the same
+  sender check as every popup action); a page cannot trigger or extend one,
+  and a running pause cannot be extended. **Resume** ends it at once.
+  **Restore everything hidden here** (Rules tab) is the separate, page-only
+  undo for element hiding.
 - **Timed exceptions.** **Allow 15 min** on a blocked request allows that
   exact path, site and resource type only.
 

@@ -273,6 +273,20 @@ try {
   check("links: an unwrapped destination on the threat list lands on warning.html; the threat host is never contacted",
     toWarning && (await evaluate(page, "document.getElementById('host').textContent")) === "malware-fixture.test" && !hits.some((h) => h.host === "malware-fixture.test"), await evaluate(page, "location.href"));
 
+  // Pause: even with the threat-listed site itself and the page it is opened from both paused (Relaxed, no cleaning),
+  // the navigation still lands on the warning page and the site is never contacted.
+  const threatUrl = `http://malware-fixture.test:${port}/landing`;
+  const pausedThreat = await popupAct(tabId, threatUrl, {type: "pause-site"});
+  const pausedFrom = await popupAct(tabId, P("/fp"), {type: "pause-site"});
+  await navigate(page, P("/fp"));
+  hits.length = 0;
+  await evaluate(page, `location.href = ${JSON.stringify(threatUrl)}; true`);
+  const pausedWarning = await until(page, `location.href.startsWith("chrome-extension://${id}/warning.html") && document.getElementById("host").textContent === "malware-fixture.test"`, "threat navigation while paused");
+  check("pause: a threat-listed navigation still lands on the warning page while paused", pausedThreat.ok && pausedFrom.ok && pausedWarning && !hits.some((h) => h.host === "malware-fixture.test"),
+    JSON.stringify({pausedThreat, pausedFrom, at: await evaluate(page, "location.href")}));
+  await popupAct(tabId, threatUrl, {type: "resume-site"});
+  await popupAct(tabId, P("/fp"), {type: "resume-site"});
+
   // 2b. Mail scanners: the interstitial; nothing opens by itself; Continue goes through the scanner; Open directly is checked.
   const scanUrl = (dest) => `http://nam02.safelinks.protection.outlook.com:${port}/?url=${encodeURIComponent(dest)}&data=05%7C02&sdata=sig&utm_source=x`;
   const scanned = scanUrl(`http://clean-fixture.test:${port}/dest?s=1`);

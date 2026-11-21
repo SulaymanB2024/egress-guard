@@ -23,10 +23,10 @@ const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setIm
 const THREATS = ["bad.example", "other-bad.example"];
 const isListed = (host) => THREATS.some((d) => host === d || host.endsWith(`.${d}`));
 
-async function worker({stored = fixture, packed = false} = {}) {
-  const clock = {now: START};
+async function worker({stored = fixture, packed = false, extraLocal = {}, now = START} = {}) {
+  const clock = {now};
   const reloads = [];
-  const local = {egressGuard: stored && JSON.parse(JSON.stringify(stored))};
+  const local = {egressGuard: stored && JSON.parse(JSON.stringify(stored)), ...JSON.parse(JSON.stringify(extraLocal))};
   const session = {};
   const area = (obj) => ({
     get: async (key) => (typeof key === "string" ? {[key]: obj[key] && JSON.parse(JSON.stringify(obj[key]))} : {...obj}),
@@ -421,4 +421,92 @@ test("offscreen copy: only the extension's own worker may write the clipboard", 
   assert.equal(ask({id: ID}), null, "no sender URL");
   assert.deepEqual(ask({id: ID, url: `${EXT}background.js`}), {ok: true});
   assert.deepEqual(copies, ["https://example.org/"]);
+});
+
+// ---- timed per-site pause ----------------------------------------------------------------------------------------
+const relaxFor = (w, site) => w.dynamic().some((r) => r.priority === dnr.PRIORITY.relax && r.condition.requestDomains.includes(site));
+const cleanOffFor = (w, site) => w.dynamic().some((r) => r.priority === dnr.PRIORITY.clean && r.action.type === "allow" && r.condition.requestDomains.includes(site));
+const sent = (w, type, tabId = 1) => w.tabMessages.filter((m) => m.tabId === tabId && m.msg.type === type).map((m) => m.msg);
+
+test("pause: the popup pauses a site for 15 minutes (Relaxed, no hiding, no cleaning); it cannot be extended", async () => {
+  const w = await worker();
+  const tabUrl = "https://www.publisher.example/article";
+  assert.ok((await w.page({type: "page-rules"})).rules.length > 0, "cosmetic rules apply before");
+  const r = await w.popup({type: "pause-site", tabId: 1, tabUrl, minutes: 600});
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.site, "publisher.example", "scoped to the registrable domain");
+  assert.equal(r.until, START + 15 * 60000, "fixed length; the message cannot choose it");
+  assert.deepEqual({...w.local.egressGuardPauses}, {"publisher.example": START + 15 * 60000});
+  assert.equal(w.alarms.get("eg-expiry").when, START + 15 * 60000, "an alarm ends it even if the worker sleeps");
+  assert.ok(relaxFor(w, "publisher.example") && cleanOffFor(w, "publisher.example"));
+  assert.deepEqual({...w.local.egressGuardModes || {sites: {}}}.sites || {}, {}, "the saved level is not changed");
+  const state = await w.popup({type: "popup-state", tabId: 1, tabUrl});
+  assert.equal(state.paused, START + 15 * 60000);
+  assert.equal(state.mode, "relaxed");
+  assert.equal(state.resumeMode, "standard", "the level that comes back");
+  const pageRules = await w.page({type: "page-rules"});
+  assert.deepEqual([...pageRules.rules], []);
+  assert.equal(pageRules.generic, false);
+  assert.equal((await w.page({type: "guard-config"})).clean, false);
+  assert.deepEqual([...sent(w, "rules-changed").pop().rules], [], "open pages show what was hidden");
+  assert.equal(sent(w, "generic").pop().on, false);
+  assert.equal(sent(w, "clean-enabled").pop().on, false);
+  w.clock.now = START + 5 * 60000;
+  const again = await w.popup({type: "pause-site", tabId: 1, tabUrl});
+  assert.match(again.error, /already paused/);
+  assert.equal(w.local.egressGuardPauses["publisher.example"], START + 15 * 60000, "not extended");
+  // Resume ends it at once.
+  assert.equal((await w.popup({type: "resume-site", tabId: 1, tabUrl})).ok, true);
+  assert.equal(relaxFor(w, "publisher.example"), false);
+  assert.ok((await w.page({type: "page-rules"})).rules.length > 0);
+  assert.equal(sent(w, "generic").pop().on, true);
+});
+
+test("pause: ends on the alarm and restores the site's own level and settings", async () => {
+  const w = await worker();
+  const tabUrl = "https://publisher.example/article";
+  await w.popup({type: "set-mode", tabId: 1, tabUrl, mode: "strict"});
+  await w.popup({type: "pause-site", tabId: 1, tabUrl});
+  assert.equal((await w.popup({type: "popup-state", tabId: 1, tabUrl})).resumeMode, "strict");
+  w.clock.now = START + 15 * 60000;
+  await w.chrome.alarms.onAlarm.fire({name: "eg-expiry"});
+  await settle();
+  assert.deepEqual({...w.local.egressGuardPauses}, {});
+  assert.equal(relaxFor(w, "publisher.example"), false);
+  assert.equal(cleanOffFor(w, "publisher.example"), false);
+  const state = await w.popup({type: "popup-state", tabId: 1, tabUrl});
+  assert.equal(state.paused, null);
+  assert.equal(state.mode, "strict", "Strict is back");
+  assert.equal((await w.page({type: "guard-config"})).clean, true);
+  assert.ok(sent(w, "rules-changed").pop().rules.length > 0, "open pages hide again");
+});
+
+test("pause: survives a worker restart, and one that expired while the worker slept is lifted on start", async () => {
+  const until = START + 10 * 60000;
+  const running = await worker({extraLocal: {egressGuardPauses: {"publisher.example": until}}});
+  assert.ok(relaxFor(running, "publisher.example"), "a restarted worker keeps the pause");
+  assert.equal(running.alarms.get("eg-expiry").when, until);
+  assert.deepEqual([...(await running.page({type: "page-rules"})).rules], []);
+  const late = await worker({extraLocal: {egressGuardPauses: {"publisher.example": until}}, now: until + 60000});
+  assert.equal(relaxFor(late, "publisher.example"), false);
+  assert.deepEqual({...late.local.egressGuardPauses}, {}, "storage cleared");
+  await settle();
+  assert.ok(sent(late, "rules-changed").pop().rules.length > 0, "open pages are told to hide again");
+  // A stored entry longer than a pause can be (or not a site) is ignored.
+  const forged = await worker({extraLocal: {egressGuardPauses: {"publisher.example": START + 24 * 3600000, "www.other.example": START + 60000}}});
+  assert.equal(relaxFor(forged, "publisher.example"), false);
+  assert.deepEqual({...forged.ctx.__EGBackground.pauses}, {});
+});
+
+test("pause: only the popup may start or end it; content scripts and extension pages in tabs are refused", async () => {
+  const w = await worker();
+  const tabUrl = "https://publisher.example/article";
+  for (const msg of [{type: "pause-site", tabUrl}, {type: "resume-site", tabUrl}]) {
+    assert.match((await w.page(msg)).error, /Not allowed/, `${msg.type} from a content script`);
+    assert.match((await w.warning(msg)).error, /Not allowed/, `${msg.type} from the warning page`);
+    assert.match((await w.unwrapPage(msg, "https://www.google.com/url?q=https://example.org/")).error, /Not allowed/, `${msg.type} from the unwrap page`);
+  }
+  assert.equal(w.local.egressGuardPauses, undefined);
+  assert.equal(relaxFor(w, "publisher.example"), false);
+  assert.match((await w.popup({type: "pause-site", tabUrl: "chrome://newtab/"})).error, /web page/);
 });

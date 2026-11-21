@@ -240,3 +240,27 @@ test("truncation: hostnames in the middle by whole labels; URLs keep the host an
   assert.equal(api.fmt(12480), "12.5k");
   assert.equal(api.fmt(1870000), "1.9M");
 });
+
+test("popup: a paused site says Paused until HH:MM, offers a filled Resume, and shows the level that comes back, disabled", async () => {
+  const until = new Date(2026, 10, 20, 15, 42).getTime();
+  const p = await popupWith({...STATE, mode: "relaxed", resumeMode: "strict", paused: until});
+  assert.equal(p.text("status-word"), "Paused");
+  assert.equal(p.$("status").getAttribute("data-state"), "reduced");
+  assert.equal(p.$("paused").hidden, false);
+  assert.equal(p.text("paused-text"), "Paused on this site until 15:42");
+  assert.equal(p.$("resume").className, "btn primary", "Resume is the one filled button");
+  assert.equal(p.$("paused-note").hidden, false);
+  assert.equal(p.text("paused-note"), "Malware and phishing blocking stays on.");
+  assert.equal(p.$("pause").hidden, true);
+  const modes = p.$("modes").childNodes;
+  assert.ok(modes.every((b) => b.disabled), "levels cannot change while paused");
+  assert.equal(modes.find((b) => b.getAttribute("aria-pressed") === "true").textContent, "Strict", "the level that will be restored");
+  userClick(p.$("resume"));
+  await new Promise((r) => setImmediate(r));
+  assert.ok(p.sent.some((m) => m.type === "resume-site"));
+  const live = await popupWith(STATE);
+  assert.equal(live.$("paused").hidden, true);
+  userClick(live.$("pause"));
+  await new Promise((r) => setImmediate(r));
+  assert.ok(live.sent.some((m) => m.type === "pause-site"), "Pause asks the worker, not the page");
+});

@@ -70,7 +70,8 @@ export const POPUP = [
   ["badge", {...BASE, feedback: "badge", blocked: []}, PAGE, null],
   ["badge-blocked", null, null, null, "same:badge;tab:blocked"],
   ["reduced", {...BASE, rebuilt: true}, PAGE, null],
-  ["paused", BASE, {...PAGE, paused: true, reason: "Restored for this page load."}, null],
+  ["paused", {...BASE, mode: "relaxed", resumeMode: "standard", paused: Date.UTC(2026, 10, 20, 21, 42)}, {...PAGE, hidden: 0, generic: {available: true, on: false, wanted: false, slots: 0}}, null],
+  ["hiding-restored", BASE, {...PAGE, paused: true, reason: "Restored for this page load."}, null, "tab:rules"],
   ["unsupported", {site: null, lists: LISTS}, null, "chrome://newtab/"],
   ["firefox", {host: "publisher.example", site: "publisher.example", requestRules: [], cosmeticRules: [], exceptions: [], blocked: BLOCKED.slice(0, 3), types: TYPES}, PAGE, null],
 ];

@@ -38,13 +38,15 @@
       <p><strong class="state-text">Newer lists have been built.</strong> Reload Egress Guard in chrome://extensions to use them.</p>
     </div>
     <div id="paused" class="callout" data-state="reduced" hidden>
-      <p class="state-text strong" id="paused-text">Hiding is paused on this page</p>
-      <button type="button" class="btn" id="resume">Resume</button>
+      <p id="paused-text">Paused on this site</p>
+      <button type="button" class="btn primary" id="resume">Resume</button>
     </div>
+    <p id="paused-note" class="paused-note t-caption muted" hidden>Malware and phishing blocking stays on.</p>
     <div class="control" id="protection">
       <div class="head">
         <h2 id="mode-h">Protection on this site</h2>
-        <button type="button" class="btn quiet" id="pause" aria-label="Pause hiding on this page" title="Show everything Egress Guard hid on this page until you resume. Blocking continues.">Pause</button>
+        <button type="button" class="btn quiet" id="pause" aria-describedby="pause-desc" title="For 15 minutes: Relaxed level, no element hiding and no link or cookie cleaning on this site. Malware and phishing blocking stays on.">Pause</button>
+        <span id="pause-desc" hidden>Pauses protection on this site for 15 minutes. Malware and phishing blocking stays on.</span>
       </div>
       <div id="modes" class="seg" role="group" aria-labelledby="mode-h"></div>
       <p id="worker-note" class="note t-caption muted" role="status" hidden></p>

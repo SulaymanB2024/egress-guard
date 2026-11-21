@@ -44,6 +44,7 @@
     if (v < 1e6) return `${(v / 1000).toFixed(1).replace(/\.0$/, "")}k`;
     return `${(v / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
   }
+  const clock = (ms) => new Date(ms).toLocaleTimeString("en-GB", {hour: "2-digit", minute: "2-digit"});
   const shortDate = (seconds) => new Date(seconds * 1000).toLocaleDateString("en-US", {month: "short", day: "numeric"});
 
   // ---- truncation (DESIGN.md section 8) -------------------------------------------------------------------------
@@ -241,10 +242,13 @@
     $("protection").hidden = !supported;
     $("defaults-group").hidden = !supported;
     if (!supported) return;
-    const current = state.mode || "standard";
+    // While the site is paused the control shows the level that comes back, and cannot be changed.
+    const paused = typeof state.paused === "number";
+    const current = (paused ? state.resumeMode : state.mode) || "standard";
     $("modes").replaceChildren(...MODES.map(([id, label, about]) => {
       const button = el("button", label);
       button.type = "button";
+      button.disabled = paused;
       button.setAttribute("aria-pressed", String(id === current));
       button.setAttribute("title", `${about}${id === state.defaultMode ? " (the default for every site)" : ""}`);
       button.addEventListener("click", () => act({type: "set-mode", mode: id === state.defaultMode ? "default" : id}));
@@ -434,11 +438,17 @@
     }
     $("hidden-count").textContent = page ? fmt(page.paused ? 0 : page.hidden) : "–";
     $("hidden-unit").textContent = page && page.hidden === 1 && !page.paused ? "element hidden" : "elements hidden";
-    const paused = Boolean(page && page.paused);
-    $("paused").hidden = !paused;
-    $("paused").setAttribute("title", paused ? page.reason || "" : "");
-    $("pause").hidden = !page || paused;
-    setStatus(paused || state.rebuilt === true ? "reduced" : "protected", paused || state.rebuilt === true ? "Reduced" : "Protected");
+    const paused = Boolean(page && page.paused);   // element hiding restored on this page (Rules › Restore)
+    // Timed pause of the whole site: one callout with the filled Resume; the stale-lists callout waits.
+    const sitePaused = typeof state.paused === "number";
+    $("paused").hidden = !sitePaused;
+    $("paused-note").hidden = !sitePaused;
+    if (sitePaused) $("paused-text").replaceChildren(document.createTextNode("Paused on this site until "), el("strong", clock(state.paused), "num"));
+    $("rebuilt").hidden = sitePaused || state.rebuilt !== true;
+    $("pause").hidden = sitePaused;
+    for (const id of ["clean-toggle", "generic"]) $(id).disabled = sitePaused;
+    if (sitePaused) setStatus("reduced", "Paused");
+    else setStatus(state.rebuilt === true ? "reduced" : "protected", state.rebuilt === true ? "Reduced" : "Protected");
 
     // Built-in ad-slot hiding (Chrome): on by default, switchable per site, takes effect at once on open tabs.
     const genericShown = Boolean(page && page.generic && page.generic.available && typeof state.generic === "boolean");
@@ -512,8 +522,8 @@
     });
     $("pick").addEventListener("click", async () => { await tabMessage({type: "start-picker"}); root.close(); });
     $("restore").addEventListener("click", restoreOrResume);
-    $("pause").addEventListener("click", async () => { await tabMessage({type: "restore-page"}); await render(); $("resume").focus(); });
-    $("resume").addEventListener("click", async () => { await tabMessage({type: "resume"}); await render(); $("pause").focus(); });
+    $("pause").addEventListener("click", async () => { const r = await act({type: "pause-site"}); if (r && !r.error) $("resume").focus(); });
+    $("resume").addEventListener("click", async () => { const r = await act({type: "resume-site"}); if (r && !r.error) $("pause").focus(); });
     $("generic").addEventListener("click", () => act({type: "set-generic", on: !genericOn}));
     $("clean-toggle").addEventListener("click", () => act({type: "set-clean", on: !$("clean-toggle").__on}));
     $("scanned-direct").addEventListener("change", (event) => act({type: "set-scanned-direct", on: event.target.checked}));
