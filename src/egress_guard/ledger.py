@@ -30,7 +30,7 @@ SOURCES = frozenset({
     "invalid-host", "invalid-request", "threat-intel", "local-block", "tracker-feed",
     "cname-feed", "tracker-paused", "local-allow", "temporary-exception",
     "dashboard-exception", "no-match", "plaintext-credentials", "not-ready",
-    "non-tls-tunnel",
+    "non-tls-tunnel", "plaintext-http", "literal-connect", "connect-port", "address-guard-unavailable",
     # Added in 0.4: specific threat sources, built-in rules and unfiltered-target labels.
     # `egress_guard.policy.CATEGORIES` maps every source to its dashboard category.
     "malware-feed", "phishing-feed", "lookalike-domain", "doh-feed", "safety-list",

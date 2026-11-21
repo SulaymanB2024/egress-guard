@@ -12,14 +12,15 @@
   const FORM_TYPES = ["beacon", "ping", "xmlhttprequest", "image", "script", "sub_frame"];
   const EXCEPTION_MINUTES = 15;
   const LIST_LABELS = {threats: "Malware and phishing", trackers: "Ads and trackers", cname: "Disguised trackers", user: "Your rules"};
-  const LIST_ORDER = ["threats", "trackers", "cname", "fp-trackers", "easyprivacy", "replay", "beacons", "easylist", "links", "surrogates", "preparation", "strict", "noscript", "embeds", "user"];
+  const LIST_ORDER = ["threats", "trackers", "cname", "fp-trackers", "easyprivacy", "replay", "beacons", "easylist", "links", "surrogates", "preparation", "isolated", "strict", "noscript", "embeds", "user"];
   // Categories whose entries are a request you could let through for a while. Unwrapped links are navigations.
-  const NO_EXCEPTION = new Set(["threats", "links", "preparation"]);
+  const NO_EXCEPTION = new Set(["threats", "links", "preparation", "isolated"]);
   const MODES = [
     ["relaxed", "Relaxed", "Host lists, malware protection and your rules only. URL filters, beacon blocking and link unwrapping are off here."],
     ["standard", "Standard", "Host lists plus URL filters for first-party trackers, fingerprinting and session replay, beacons and link trackers."],
     ["strict", "Strict", "Standard, plus third-party scripts, frames and fonts blocked (payment, sign-in and captcha providers excepted), third-party cookies stripped and video or social embeds held until you click."],
     ["noscript", "No scripts", "Strict, plus blocked script requests and a script-restricting policy on network responses. Existing pages and cached content may need a fresh load."],
+    ["isolated", "Isolated", "Block every cross-site subresource, including images, fetches and socket handshakes. Remove Cookie, Authorization, Referer and Set-Cookie on this site's HTTP requests. Sign-in and embedded services may stop working. Change modes to relax isolation."],
   ];
   const TYPE_NAMES = {beacon: "Beacon", ping: "Ping", xmlhttprequest: "Fetch", image: "Image", imageset: "Image", script: "Script", stylesheet: "Stylesheet",
     font: "Font", media: "Media", sub_frame: "Frame", main_frame: "Page", object: "Plug-in", csp_report: "CSP report", websocket: "Socket",
@@ -249,11 +250,12 @@
     // While the site is paused the control shows the level that comes back, and cannot be changed.
     const paused = typeof state.paused === "number";
     const current = (paused ? state.resumeMode : state.mode) || "standard";
-    $("modes").replaceChildren(...(supported ? MODES : []).map(([id, label, about]) => {
+    $("modes").replaceChildren(...(supported ? MODES : []).filter(([id]) => id !== "isolated" || !IS_FIREFOX).map(([id, label, about]) => {
       const button = el("button", label);
       button.type = "button";
       button.disabled = paused;
       button.setAttribute("aria-pressed", String(id === current));
+      button.setAttribute("data-mode", id);
       button.setAttribute("title", `${about}${id === state.defaultMode ? " (the default for every site)" : ""}`);
       button.addEventListener("click", () => act({type: "set-mode", mode: id === state.defaultMode ? "default" : id}));
       return button;
@@ -286,6 +288,28 @@
     return preparation;
   }
 
+  function isolationSelected(state) {
+    return Boolean(state && (state.mode === "isolated" || state.requestedMode === "isolated" ||
+      state.isolation && state.isolation.active === true));
+  }
+
+  function renderIsolation(state) {
+    const receipt = state && state.isolation;
+    const selected = !IS_FIREFOX && (isolationSelected(state) || Boolean(receipt));
+    $("isolation-note").hidden = !selected;
+    if (!selected) return null;
+    const verified = receipt && receipt.state === "applied" && receipt.active === true;
+    $("isolation-note").setAttribute("data-state", verified ? "neutral" : "reduced");
+    $("isolation-note").textContent = verified
+      ? "Isolation rules are installed. New cross-site resource requests are blocked; HTTP cookies, authorization and referrers are removed. Existing connections are not forcibly closed. Reload for a fresh page. Sign-in may stop working. Site storage and your public IP remain visible to the site. Change modes to relax isolation."
+      : receipt && receipt.state === "unsupported"
+      ? "Isolation cannot be applied safely to this address. This page is not confirmed isolated."
+      : receipt && receipt.active === true
+      ? "The last verified isolation rules remain installed, but the requested change is not confirmed. Retry the policy update."
+      : "Isolation was requested but its rules are not confirmed. Retry the policy update before relying on it.";
+    return receipt || {state: "pending", active: false};
+  }
+
   /** Link and cookie cleaning: two facts on the main view; the per-site brake is a page tool. */
   function renderCleaning(state) {
     const c = state.cleaning;
@@ -300,6 +324,9 @@
     $("cookies-unit").textContent = plural(c.cookies, "cookie removed", "cookies removed");
     $("clean-label").textContent = c.on ? "Stop cleaning on this site" : "Clean links and cookies on this site";
     $("clean-note").textContent = c.on ? "Tracking parameters and cookies are removed here" : "Off: links keep their parameters, tracking cookies stay";
+    if (isolationSelected(state)) $("clean-note").textContent = c.on
+      ? "Tracking links are cleaned. Isolation also removes HTTP identity headers."
+      : "Optional link and tracker-cookie cleaning is off. Isolation still removes HTTP identity headers.";
     $("clean-toggle").setAttribute("aria-pressed", String(!c.on));
     $("clean-toggle").__on = c.on;
   }
@@ -338,12 +365,12 @@
     for (const b of items) { const id = b.list || "user"; if (!byList.has(id)) byList.set(id, []); byList.get(id).push(b); }
     $("blocked").replaceChildren(...[...byList].map(([list, rows]) => group(listLabel(list, lists), fmt(sums[list]), rows.map((b) => {
       // No one-click exception for malware and phishing hosts, navigations, or types an exception cannot name exactly.
-      const allowable = !NO_EXCEPTION.has(list) && b.type !== "main_frame" && (state.types || []).includes(b.type);
+      const allowable = !isolationSelected(state) && !NO_EXCEPTION.has(list) && b.type !== "main_frame" && (state.types || []).includes(b.type);
       const buttons = !allowable ? [] : [[`Allow ${EXCEPTION_MINUTES} min`,
         () => act({type: "add-exception", host: b.host, path: b.path, resourceType: b.type, minutes: EXCEPTION_MINUTES}),
         `Allow ${b.host}${b.path} (${b.type}) on this site for ${EXCEPTION_MINUTES} minutes`]];
       // Under Strict the repair is the whole host, for this site, until you remove it.
-      if (list === "strict") buttons.unshift(["Allow host", () => act({type: "strict-allow", host: b.host}), `Allow ${b.host} on this site under Strict`]);
+      if (list === "strict" && !isolationSelected(state)) buttons.unshift(["Allow host", () => act({type: "strict-allow", host: b.host}), `Allow ${b.host} on this site under Strict`]);
       return row({host: b.host, path: b.path, line2: `${typeName(b.type)}${b.count > 1 ? ` ×${fmt(b.count)}` : ""}`}, buttons);
     }), list === "threats" ? "threat" : null)));
 
@@ -425,20 +452,28 @@
       if (policy.error) $("policy-note").textContent += " " + String(policy.error).slice(0, 300);
     }
     const coverage = state && state.coverage;
-    const reduced = Boolean(coverage && (!coverage.complete || (coverage.stale || []).length || coverage.cosmetics && coverage.cosmetics.reduced));
+    const reduced = Boolean(coverage && (!coverage.complete || (coverage.stale || []).length ||
+      coverage.cosmetics && coverage.cosmetics.reduced || coverage.parameters && coverage.parameters.reduced));
     $("coverage-note").hidden = !reduced;
     if (reduced) {
       const parts = [];
       if ((coverage.missing || []).length) parts.push("Incomplete build: " + coverage.missing.join(", "));
-      if ((coverage.ineffective || []).length) parts.push("No compiled blocking rules for: " + coverage.ineffective.join(", "));
+      if ((coverage.ineffective || []).length) parts.push("No effective compiled rules for: " + coverage.ineffective.join(", "));
       if (coverage.development) parts.push("Development build: production feed-size checks were skipped");
       if (coverage.cosmetics && coverage.cosmetics.reduced) {
         if (coverage.cosmetics.disabledFamilies.length) parts.push("Imported hiding disabled by unsupported source exemptions: " + coverage.cosmetics.disabledFamilies.join(", "));
         if (coverage.cosmetics.quarantinedSelectors) parts.push(coverage.cosmetics.quarantinedSelectors + " imported selector(s) withheld because an exemption could not be represented");
       }
+      if (coverage.parameters && coverage.parameters.reduced) {
+        if (coverage.parameters.disabled) parts.push("Parameter cleaning was disabled because a source exception could not be represented safely");
+        if ((coverage.parameters.quarantined || []).length) parts.push(coverage.parameters.quarantined.length + " parameter name(s) were preserved because a source exception could not be represented");
+      }
       if (!coverage.complete && !parts.length) parts.push("Build completeness could not be verified");
       if ((coverage.stale || []).length) parts.push("Old list snapshots: " + coverage.stale.join(", "));
-      $("coverage-note").textContent = parts.join(". ") + ". Refresh the lists and rebuild.";
+      const refreshNeeded = (coverage.missing || []).length || (coverage.stale || []).length || (coverage.ineffective || []).length;
+      $("coverage-note").textContent = parts.join(". ") + (refreshNeeded
+        ? ". Refresh the lists and rebuild."
+        : ". Review the build coverage receipt before relying on the reduced policy.");
     }
     return {issue, reduced};
   }
@@ -454,21 +489,34 @@
       if (!value || value.schema !== 1 || value.ok !== true || value.product !== "egress-guard" ||
           !value.capabilities || value.capabilities.read_only !== true || value.capabilities.mutations !== false ||
           !value.status || typeof value.status.proxy_ready !== "boolean") throw new Error("The local host returned an invalid receipt.");
-      const status = value.status, policy = status.policy, logging = status.logging;
+      const status = value.status, policy = status.policy, logging = status.logging, transport = status.transport;
       if (!policy || typeof policy.applied !== "boolean" || typeof policy.complete !== "boolean" ||
           typeof policy.pending !== "boolean" || typeof policy.degraded !== "boolean" ||
           !/^[a-f0-9]{64}$/.test(policy.saved_revision) ||
           !(policy.applied_revision === null || /^[a-f0-9]{64}$/.test(policy.applied_revision)) ||
           !logging || !validLogging(logging.saved) ||
-          !(logging.runtime === null || validLogging(logging.runtime) && typeof logging.runtime.applied === "boolean")) throw new Error("The local host returned an incomplete receipt.");
+          !(logging.runtime === null || validLogging(logging.runtime) && typeof logging.runtime.applied === "boolean") ||
+          !transport || !validTransportSettings(transport.saved) ||
+          !(transport.runtime === null || validTransportRuntime(transport.runtime))) throw new Error("The local host returned an incomplete receipt.");
       const loggingApplied = Boolean(logging.runtime && logging.runtime.applied === true &&
         ["history", "retention_days", "max_queue"].every(key => logging.runtime[key] === logging.saved[key]));
+      const transportApplied = Boolean(transport.runtime && transport.runtime.applied === true &&
+        transport.runtime.profile === transport.saved.profile &&
+        JSON.stringify(transport.runtime.connect_ports) === JSON.stringify(transport.saved.connect_ports) &&
+        transport.runtime.address_guard.selected === transport.saved.address_guard &&
+        transport.runtime.address_guard.state === (transport.saved.address_guard ? "active" : "disabled"));
       const ready = status.proxy_ready && policy.applied && policy.complete && policy.pending === false &&
-        policy.degraded === false && policy.applied_revision === policy.saved_revision && loggingApplied;
+        policy.degraded === false && policy.applied_revision === policy.saved_revision && loggingApplied && transportApplied;
       let text = ready ? "Proxy ready; its saved policy is applied." : "Proxy not fully ready; its policy, feeds or process need attention.";
       text += " Saved history: " + logging.saved.history + ".";
       if (logging.runtime) text += " Runtime history: " + logging.runtime.history + (loggingApplied ? " (acknowledged)." : " (does not acknowledge saved settings).");
       else text += " No runtime logging acknowledgment.";
+      text += " Saved transport: " + transport.saved.profile + ".";
+      if (transport.runtime) {
+        text += " Runtime transport: " + transport.runtime.profile + (transportApplied ? " (acknowledged)." : " (does not acknowledge saved settings).");
+        text += " Experimental address guard: " + transport.runtime.address_guard.state + ".";
+        if (transport.runtime.address_guard.reason) text += " Guard status: " + transport.runtime.address_guard.reason + ".";
+      } else text += " No runtime transport acknowledgment.";
       note.textContent = text + " Browser routing and device-wide coverage are not verified by this receipt.";
     } catch (e) {
       note.textContent = "Could not verify the local proxy. " + String(e && e.message || e).slice(0, 300) + " Register the read-only native host using the setup instructions.";
@@ -479,6 +527,28 @@
       Number.isInteger(value.retention_days) && value.retention_days >= 1 && value.retention_days <= 30 &&
       Number.isInteger(value.max_queue) && value.max_queue >= 100 && value.max_queue <= 10000;
   }
+  function exactKeys(value, keys) {
+    return value && typeof value === "object" && !Array.isArray(value) &&
+      Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+  }
+  function validTransportSettings(value) {
+    return exactKeys(value, ["profile", "connect_ports", "address_guard"]) &&
+      ["compatible", "hardened"].includes(value.profile) && typeof value.address_guard === "boolean" &&
+      Array.isArray(value.connect_ports) && value.connect_ports.length >= 1 && value.connect_ports.length <= 32 &&
+      value.connect_ports.every((port, index) => Number.isInteger(port) && port >= 1 && port <= 65535 &&
+        (index === 0 || value.connect_ports[index - 1] < port));
+  }
+  function validTransportRuntime(value) {
+    if (!exactKeys(value, ["profile", "connect_ports", "address_guard", "scope", "applied"]) ||
+        !exactKeys(value.address_guard, ["selected", "state", "reason"]) ||
+        value.scope !== "proxy-tcp" || typeof value.applied !== "boolean") return false;
+    const guard = value.address_guard;
+    if (!validTransportSettings({profile: value.profile, connect_ports: value.connect_ports, address_guard: guard.selected})) return false;
+    return guard.state === "disabled" && guard.selected === false && guard.reason === null ||
+      guard.state === "active" && guard.selected === true && guard.reason === null ||
+      guard.state === "unavailable" && value.applied === false &&
+      ["unsupported-runtime", "ownership-conflict", "registration-failed", "self-test-failed", "ownership-lost", "stopped"].includes(guard.reason);
+  }
 
   async function render() {
     const state = await send({type: "popup-state"});
@@ -488,6 +558,7 @@
     const policyState = renderPolicy(state);
     renderModes(state || {});
     const preparation = renderPreparation(state);
+    const isolation = renderIsolation(state);
     renderLists(lists);
     $("rebuilt").hidden = !(state && state.rebuilt === true);
     if (!state || !state.site) {
@@ -538,10 +609,13 @@
     if (sitePaused) $("paused-text").replaceChildren(document.createTextNode("Paused on this site until "), el("strong", clock(state.paused), "num"));
     $("rebuilt").hidden = sitePaused || policyState.issue || state.rebuilt !== true;
     $("pause").hidden = sitePaused;
+    $("pause").disabled = isolationSelected(state);
+    $("pause").setAttribute("aria-describedby", isolationSelected(state) ? "isolation-note" : "pause-desc");
     for (const id of ["clean-toggle", "generic"]) $(id).disabled = sitePaused;
     const contentIssue = Boolean(page && (page.generic && (page.generic.error || page.generic.pending) ||
       page.imported && ((page.imported.degradedFamilies || []).length || (page.imported.limits || []).length)));
     if (policyState.issue) setStatus("reduced", state.policy.state === "pending" ? "Pending" : "Degraded");
+    else if (isolation && (isolation.state !== "applied" || isolation.active !== true)) setStatus("reduced", isolation.state === "pending" ? "Pending" : "Degraded");
     else if (sitePaused) setStatus("reduced", "Paused");
     else if (preparation && preparation.state === "held") setStatus("reduced", "Preparing");
     else if (preparation && preparation.state === "unknown") setStatus("reduced", "Degraded");

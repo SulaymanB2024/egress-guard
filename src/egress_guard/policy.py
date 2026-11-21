@@ -14,6 +14,7 @@ from egress_guard.config import EXEMPTION_PRESETS
 from egress_guard.feeds import (ALL_FEEDS, THREAT_TIERS, CachedFeed, HostSet, dns_name, ip_literal,
                                 load_cached_feed, selected_feeds)
 from egress_guard.heuristics import DOH_RESOLVER_IPS, SAFETY_HOSTS, lookalike
+from egress_guard.transport_policy import settings as transport_settings
 
 MAX_CONTROL_BYTES = 64 * 1024
 MAX_EXCEPTION_SECONDS = 24 * 60 * 60
@@ -29,6 +30,8 @@ CATEGORIES = {
     "lookalike-domain": "lookalike", "local-block": "manual", "doh-feed": "doh",
     "tracker-feed": "ads-trackers", "cname-feed": "cname-cloak",
     "plaintext-credentials": "transport", "non-tls-tunnel": "transport",
+    "plaintext-http": "transport", "literal-connect": "transport", "connect-port": "transport",
+    "address-guard-unavailable": "transport",
     "safety-list": "safety",
     "local-allow": "exception", "dashboard-exception": "exception", "temporary-exception": "exception",
     "tracker-paused": "exception",
@@ -142,6 +145,7 @@ class Policy:
         self.state = state
         self.logging = dict(config.get("logging", {}))
         self.proxy = dict(config.get("proxy", {}))
+        self.transport = transport_settings(config)
         block = config.get("block", {})
         self.feeds = selected_feeds(config)
         # Each enabled feed is validated on its own. An unusable snapshot keeps the
@@ -317,6 +321,17 @@ class Policy:
             "matched_domain": match,
             "can_allow": source in ALLOWABLE and dns_name(normalized) is not None,
         }
+
+    def address_decision(self, address: str) -> dict:
+        """Check an actual numeric TCP destination independently of hostname grants.
+
+        This intentionally ignores hostname safety exceptions and the hardened
+        profile's literal-request restriction: every resolved target is numeric.
+        """
+        normalized = ip_literal(address)
+        source, match = self._ip_source(normalized) if normalized else ("invalid-host", None)
+        return {"decision": "blocked" if source in BLOCKED else "allowed", "source": source,
+                "category": CATEGORIES[source], "matched_domain": match, "can_allow": False}
 
     def explain(self, host: str, port: int | None = None) -> dict:
         """A decision that says `indeterminate` when missing coverage could change an allow."""

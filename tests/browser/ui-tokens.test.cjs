@@ -164,6 +164,43 @@ test("unscopable Strict-held addresses retain a truthful receipt and default-mod
   assert.doesNotMatch(p.text("unsupported-title"), /can't be filtered/);
 });
 
+test("isolation shows its confirmed boundary and suppresses ordinary repair and Pause", async () => {
+  const p = await popupWith({...STATE, mode: "isolated", requestedMode: "isolated", isolation: {
+    state: "applied", active: true, revision: "fixture", existingConnections: "not-revoked", reloadNeeded: true},
+    cleaning: {...STATE.cleaning, on: false}, blocked: [...STATE.blocked,
+      {host: "external.example", path: "/pixel", type: "image", list: "isolated", count: 1},
+      {host: "external.example", path: "/library.js", type: "script", list: "strict", count: 1}]}, undefined, {chrome: true});
+  assert.equal(p.$("modes").children.length, 5);
+  assert.equal(p.$("modes").children.find(button => button.textContent === "Isolated").getAttribute("aria-pressed"), "true");
+  assert.equal(p.$("default-modes").children.length, 2, "isolation is a named-site choice");
+  assert.equal(p.$("pause").disabled, true);
+  assert.equal(p.$("isolation-note").hidden, false);
+  assert.match(p.text("isolation-note"), /rules are installed/);
+  assert.match(p.text("isolation-note"), /existing connections are not forcibly closed/i);
+  assert.match(p.text("isolation-note"), /Site storage and your public IP/);
+  assert.doesNotMatch(p.text("blocked"), /Allow 15|Allow host/);
+  assert.match(p.text("clean-note"), /Isolation still removes/);
+  assert.equal(p.sent.some(message => ["pause-site", "set-mode", "add-exception"].includes(message.type)), false);
+  userClick(p.$("modes").children.find(button => button.textContent === "Strict"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(p.sent.find(message => message.type === "set-mode").mode, "strict");
+});
+
+test("a requested isolation mode is never displayed as installed before readback", async () => {
+  for (const receipt of [undefined, {state: "pending", active: false}, {state: "unsupported", active: false}, {state: "degraded", active: false}]) {
+    const p = await popupWith({...STATE, requestedMode: "isolated", isolation: receipt}, undefined, {chrome: true});
+    assert.equal(p.$("pause").disabled, true);
+    assert.equal(p.$("isolation-note").hidden, false);
+    assert.doesNotMatch(p.text("isolation-note"), /^Isolation rules are installed/);
+    assert.match(p.text("isolation-note"), /not confirmed/);
+    assert.notEqual(p.text("status-word"), "Protected");
+  }
+  const retained = await popupWith({...STATE, requestedMode: "standard", mode: "isolated",
+    isolation: {state: "degraded", active: true}}, undefined, {chrome: true});
+  assert.match(retained.text("isolation-note"), /last verified isolation rules remain/);
+  assert.equal(retained.$("pause").disabled, true);
+});
+
 test("runtime cosmetic failures and hard work caps reduce the page receipt, source exemptions do not", async () => {
   const page = {paused: false, hidden: 3, shown: 0, protectedRules: [], overbroadRules: [],
     imported: {degradedFamilies: ["generic"], limits: ["subtree-nodes"], sourceExemptions: []}};
@@ -329,7 +366,9 @@ test("popup reports failed or pending built-in CSS instead of calling the page p
 test("Chrome browser alias keeps review visible and native receipts are read only after a permission gesture", async () => {
   const receipt = {schema: 1, ok: true, product: "egress-guard", capabilities: {read_only: true, mutations: false},
     status: {proxy_ready: true, policy: {applied: true, complete: true, pending: false, degraded: false, saved_revision: "a".repeat(64), applied_revision: "a".repeat(64)},
-      logging: {saved: {history: "none", retention_days: 7, max_queue: 1000}, runtime: {history: "none", retention_days: 7, max_queue: 1000, applied: true}}}};
+      logging: {saved: {history: "none", retention_days: 7, max_queue: 1000}, runtime: {history: "none", retention_days: 7, max_queue: 1000, applied: true}},
+      transport: {saved: {profile: "hardened", connect_ports: [443], address_guard: true}, runtime: {
+        profile: "hardened", connect_ports: [443], address_guard: {selected: true, state: "active", reason: null}, scope: "proxy-tcp", applied: true}}}};
   const p = await popupWith(STATE, undefined, {chrome: true, native: receipt});
   assert.equal(p.$("semantic-item").hidden, false);
   assert.equal(p.$("native-group").hidden, false);
@@ -341,6 +380,8 @@ test("Chrome browser alias keeps review visible and native receipts are read onl
   assert.equal(messages[1].host, "org.egress_guard.receipts");
   assert.equal(messages[1].value.command, "status");
   assert.match(p.text("native-note"), /Runtime history: none \(acknowledged\)/);
+  assert.match(p.text("native-note"), /Runtime transport: hardened \(acknowledged\)/);
+  assert.match(p.text("native-note"), /Experimental address guard: active/);
   assert.match(p.text("native-note"), /Browser routing and device-wide coverage are not verified/);
   const bad = await popupWith(STATE, undefined, {chrome: true, native: {...receipt, capabilities: {read_only: true, mutations: true}}});
   userClick(bad.$("native-check"));
@@ -356,4 +397,22 @@ test("Chrome browser alias keeps review visible and native receipts are read onl
   const malformed = await popupWith(STATE, undefined, {chrome: true, native: mismatch});
   userClick(malformed.$("native-check")); await new Promise(resolve => setImmediate(resolve));
   assert.match(malformed.text("native-note"), /incomplete receipt/);
+  for (const runtime of [null, {...receipt.status.transport.runtime, applied: false},
+    {...receipt.status.transport.runtime, profile: "compatible"},
+    {...receipt.status.transport.runtime, connect_ports: [443, 8443]}]) {
+    const altered = JSON.parse(JSON.stringify(receipt)); altered.status.transport.runtime = runtime;
+    const waiting = await popupWith(STATE, undefined, {chrome: true, native: altered});
+    userClick(waiting.$("native-check")); await new Promise(resolve => setImmediate(resolve));
+    assert.match(waiting.text("native-note"), /Proxy not fully ready/);
+    assert.doesNotMatch(waiting.text("native-note"), /^Proxy ready/);
+  }
+  for (const runtime of [{...receipt.status.transport.runtime, connect_ports: [443, 443]},
+    {...receipt.status.transport.runtime, address_guard: {selected: true, state: "unavailable", reason: "self-test-failed"}},
+    {...receipt.status.transport.runtime, peer: "private.example"}]) {
+    const altered = JSON.parse(JSON.stringify(receipt)); altered.status.transport.runtime = runtime;
+    const invalid = await popupWith(STATE, undefined, {chrome: true, native: altered});
+    userClick(invalid.$("native-check")); await new Promise(resolve => setImmediate(resolve));
+    assert.match(invalid.text("native-note"), /incomplete receipt/);
+    assert.doesNotMatch(invalid.text("native-note"), /private\.example/);
+  }
 });

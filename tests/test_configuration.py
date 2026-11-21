@@ -45,6 +45,24 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_config()
 
+    def test_transport_defaults_preserve_compatible_clients_and_validate_opt_in(self):
+        self.assertEqual(load_config()["transport"], {
+            "profile": "compatible", "connect_ports": [443], "address_guard": False,
+        })
+        for value in ('profile="strict"', 'address_guard=1', 'connect_ports=[]',
+                      'connect_ports=[443,443]', 'connect_ports=[8443,443]', 'connect_ports=[true]',
+                      'connect_ports=[0]', 'connect_ports=[65536]',
+                      'connect_ports=[' + ','.join(str(n) for n in range(1, 34)) + ']'):
+            with self.subTest(value=value):
+                (self.state / "config.toml").write_text('[transport]\n' + value + '\n')
+                with self.assertRaises(ValueError):
+                    load_config()
+        (self.state / "config.toml").write_text(
+            '[transport]\nprofile="hardened"\nconnect_ports=[443,8443]\naddress_guard=true\n')
+        self.assertEqual(load_config()["transport"], {
+            "profile": "hardened", "connect_ports": [443, 8443], "address_guard": True,
+        })
+
     def test_empty_cache_cannot_start_transport(self):
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
@@ -95,11 +113,15 @@ class ConfigurationTests(unittest.TestCase):
         self.addCleanup(loader.stop)
         application = Application(self.state, self.state / "config.toml")
         saved = application.policy().revision
+        transport = {"profile": "compatible", "connect_ports": [443],
+                     "address_guard": {"selected": False, "state": "disabled", "reason": None},
+                     "scope": "proxy-tcp", "applied": True}
         for reported, applied, state in (
             (None, False, "unknown"),
             ({"revision": "0" * 64, "pending": False, "degraded": False}, False, "degraded"),
             ({"revision": saved, "pending": True, "degraded": False}, False, "degraded"),
-            ({"revision": saved, "pending": False, "degraded": False}, True, "active"),
+            ({"revision": saved, "pending": False, "degraded": False}, False, "degraded"),
+            ({"revision": saved, "pending": False, "degraded": False, "transport": transport}, True, "active"),
         ):
             with self.subTest(reported=reported), patch(
                 "egress_guard.dashboard_app.proxy_health", return_value={"ready": True, "policy": reported}
@@ -111,6 +133,28 @@ class ConfigurationTests(unittest.TestCase):
             if not applied:
                 self.assertNotIn("applied by the proxy", data["proxies"][1]["detail"])
         self.assertEqual(data["filters"][0]["published_at"], "2023-11-14T22:13:20+00:00")
+        self.assertEqual(data["transport"]["runtime"], transport)
+        self.assertEqual(data["proxies"][3]["state"], "disabled")
+
+    def test_dashboard_keeps_unavailable_transport_and_restart_intent_explicit(self):
+        application = Application(self.state, self.state / "config.toml")
+        (self.state / "config.toml").write_text('[transport]\naddress_guard=true\n')
+        saved = application.policy().revision
+        runtime = {"profile": "compatible", "connect_ports": [443],
+                   "address_guard": {"selected": True, "state": "unavailable", "reason": "self-test-failed"},
+                   "scope": "proxy-tcp", "applied": False}
+        with patch("egress_guard.dashboard_app.proxy_health", return_value={"ready": False,
+                   "policy": {"revision": saved, "pending": False, "degraded": False, "transport": runtime}}):
+            result = application.status()
+        self.assertFalse(result["policy"]["applied"])
+        self.assertTrue(result["policy"]["pending"])
+        self.assertEqual(result["proxies"][3]["state"], "degraded")
+        self.assertIn("traffic is refused", result["proxies"][3]["detail"])
+        runtime["address_guard"] = {"selected": False, "state": "disabled", "reason": None}
+        runtime["applied"] = True
+        rows = application._transport_checks(load_config()["transport"], runtime)
+        self.assertEqual(rows[1]["state"], "degraded")
+        self.assertIn("restart", rows[1]["detail"])
 
     def test_check_is_indeterminate_without_complete_feed_coverage(self):
         output = io.StringIO()

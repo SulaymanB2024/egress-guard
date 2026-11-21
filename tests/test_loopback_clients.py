@@ -19,7 +19,7 @@ from egress_guard.paths import supports_private_identity
 
 
 @contextmanager
-def endpoint(key, *, first=None, second=None, mode="fast", large=None, slow_phase=None):
+def endpoint(key, *, first=None, second=None, mode="fast", large=None, slow_phase=None, transport=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -63,6 +63,16 @@ def endpoint(key, *, first=None, second=None, mode="fast", large=None, slow_phas
                 nonce = query["nonce"][0]
                 proof = hmac.new(key.encode(), f"egress-guard/v1:proxy:{nonce}:{self.server.server_port}".encode(), hashlib.sha256).hexdigest()
                 value = {"product": "egress-guard", "ready": True, "https_decryption": False, "proof": proof}
+                report = {"transport": {"profile": "compatible", "connect_ports": [443],
+                          "address_guard": {"selected": False, "state": "disabled", "reason": None},
+                          "scope": "proxy-tcp", "applied": True}}
+                if transport is False:
+                    report = {}
+                elif transport is not None:
+                    report = {"transport": transport}
+                canonical = json.dumps(report, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                message = f"egress-guard/v1:proxy-policy:{nonce}:{self.server.server_port}:{canonical}"
+                value.update(policy=report, policy_proof=hmac.new(key.encode(), message.encode(), hashlib.sha256).hexdigest())
             else:
                 client = query["client"][0]
                 nonce = "n" * 43
@@ -179,6 +189,20 @@ class LoopbackClientTests(unittest.TestCase):
             with patch.object(dashboard_app.webbrowser, "open", return_value=True) as browser:
                 dashboard_app.open_dashboard()
             self.assertEqual(browser.call_args.args[0], server.origin + "/#" + "b" * 43)
+
+    def test_health_requires_an_authenticated_applied_transport_receipt(self):
+        unavailable = {"profile": "compatible", "connect_ports": [443], "address_guard": {
+            "selected": True, "state": "unavailable", "reason": "self-test-failed"},
+            "scope": "proxy-tcp", "applied": False}
+        for value in (False, {"applied": True}, unavailable, {**unavailable, "applied": True}):
+            with self.subTest(value=value), endpoint(self.key, transport=value) as server:
+                result = health.proxy_health(server.server_port, self.state)
+                self.assertFalse(result["ready"])
+                self.assertIsInstance(result["policy"], dict)
+                if value == unavailable:
+                    self.assertEqual(result["policy"]["transport"], unavailable)
+                else:
+                    self.assertIsNone(result["policy"]["transport"])
 
 
 if __name__ == "__main__":

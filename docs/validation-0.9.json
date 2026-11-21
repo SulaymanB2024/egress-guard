@@ -1,0 +1,705 @@
+{
+  "schema": 1,
+  "date": "2026-11-21",
+  "version": "0.9.0",
+  "reviewed_base": "5b8d05fe36ba82511de09bc6a527a3eed4d71c9e",
+  "tests": {
+    "python": {
+      "command": "PYTHONPATH=src python -B -m unittest discover -s tests -v",
+      "passed": 307,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 62.781,
+      "includes_real_loopback_proxy": true,
+      "new_transport_integration_cases": 8,
+      "total_proxy_integration_cases": 21
+    },
+    "node": {
+      "command": "node --test --test-reporter=tap tests/browser/*.test.cjs",
+      "passed": 297,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "environment": "isolated compiler, worker, ChromeSetting, DOM and UI models; no native Chrome"
+    },
+    "parameter_boundary_probes": {
+      "cases": 2294,
+      "mismatches": 0,
+      "scope": "modeled DNR vs shared runtime policy for native-supported parameter names"
+    }
+  },
+  "runtime": {
+    "python": "3.12.14",
+    "node": "24.22.3",
+    "mitmproxy": "12.3.1",
+    "platform": "Linux",
+    "hatchling": "1.33.0"
+  },
+  "psl": {
+    "rules": 10470,
+    "version": "2026-11-20_10-39-09_UTC",
+    "source_sha256": "f3df783daf6bdf4c4d71759bc8a4b39f2d228a567078560a00e11f70df0703f4",
+    "generated_sha256": "efbbcb792620be0ed433ca98c339304c9f05d4547247ef80110e7ab44478badb",
+    "regeneration_matches": true
+  },
+  "source_validation": {
+    "proxy": {
+      "method": "Public HTTPS curl into isolated validation state; application direct downloader unchanged",
+      "sources": [
+        {
+          "id": "adguard-cname-ads",
+          "url": "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_ads_justdomains.txt",
+          "ok": true,
+          "bytes": 305312,
+          "entries": 13112,
+          "source_sha256": "792da6926afe70f158a065a3e96314ac5d2dd1f5809eb4cd54c304c094bbdef4",
+          "snapshot_sha256": "5ac35b203dc4e8a33df5c1f9bcb5afec2746b750acbe515afc02880a2812202b",
+          "published_at": 1793893734.0,
+          "checked_at": 1795290993.972322
+        },
+        {
+          "id": "adguard-cname-trackers",
+          "url": "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_trackers_justdomains.txt",
+          "ok": true,
+          "bytes": 9748285,
+          "entries": 306601,
+          "source_sha256": "f6a241680c4a3e561d4e7566ad67d77d8f0e9969f4dc71a9bf50ae2a1f406b42",
+          "snapshot_sha256": "8a238f6aa8db74c3707874211ba7a4fa83b3d9254c142524ef4858c84c4b6304",
+          "published_at": 1793893734.0,
+          "checked_at": 1795290996.0972795
+        },
+        {
+          "id": "hagezi-doh",
+          "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/doh-onlydomains.txt",
+          "ok": true,
+          "bytes": 64327,
+          "entries": 3571,
+          "source_sha256": "ce7d870a994c2aebc8c0a369693bcaa65cf4af10203e42ef23dba1b6c25459ed",
+          "snapshot_sha256": "1909749a45458da1deb3571b1b8bcb47f0435cd7c435d6d1c53bd8e05f05612a",
+          "published_at": 1795213200.0,
+          "checked_at": 1795290993.9025323
+        },
+        {
+          "id": "hagezi-pro.plus",
+          "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus-onlydomains.txt",
+          "ok": true,
+          "bytes": 5066957,
+          "entries": 257921,
+          "source_sha256": "dc39fb7daa6c547fb9643f39e5a084cd39f37fb63fa1124872800321e97d1424",
+          "snapshot_sha256": "5e8db44743b6e737f7e0d1ee10913f30930c95f5542a8a0e99df6ebff233d262",
+          "published_at": 1795250940.0,
+          "checked_at": 1795290992.5920234
+        },
+        {
+          "id": "hagezi-threat-intel-full",
+          "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt",
+          "ok": true,
+          "bytes": 28954910,
+          "entries": 1577490,
+          "source_sha256": "012eac430e86317546ab90895df080969a42fc84a2a4a29cd1c5b5c0ec89084c",
+          "snapshot_sha256": "39c848db6ca32bdb5efe122502d089a5cf2ad7253a9bd2a23b556d3d72d5e834",
+          "published_at": 1795248660.0,
+          "checked_at": 1795290998.285461
+        },
+        {
+          "id": "phishing-army",
+          "url": "https://phishing.army/download/phishing-army-domains.txt",
+          "ok": true,
+          "bytes": 3177857,
+          "entries": 146415,
+          "source_sha256": "97e43106060506dc1c7e86482c89f6d5b4c91827f0174f7566affe977786b600",
+          "snapshot_sha256": "495914a1ec7e1eafde8c5eda4ad6edf0e0fb34311e2447647dc30bc89feb25dd",
+          "published_at": 1795280427.0,
+          "checked_at": 1795290991.6223562
+        },
+        {
+          "id": "urlhaus-filter",
+          "url": "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-domains.txt",
+          "ok": true,
+          "bytes": 286974,
+          "entries": 18965,
+          "source_sha256": "a5af74fcf1a9aade4b112b2f7b143b120c18b719aa3122cc1a70d85c57da6941",
+          "snapshot_sha256": "8ea95e711280f070cfeb7c7894c8e4926ddc447afb69ad1378b9da56bc5a2827",
+          "published_at": 1795263019.0,
+          "checked_at": 1795290991.0092113
+        }
+      ]
+    },
+    "browser": {
+      "method": "Public HTTPS curl into isolated validation state; exact source bodies passed through build validators and cache transaction",
+      "sources": [
+        {
+          "id": "easyprivacy",
+          "name": "EasyPrivacy",
+          "url": "https://easylist.to/easylist/easyprivacy.txt",
+          "license": {
+            "name": "GPL-3.0 or CC BY-SA 3.0 (dual licensed)",
+            "url": "https://easylist.to/pages/licence.html"
+          },
+          "sha256": "eb509a55651e499956103e83480585c3b02d66a8cf1e8d29dca8a9acc3148b37",
+          "bytes": 1520577,
+          "fetched_at": 1795291042,
+          "version": "202611211948",
+          "last_modified": "21 Nov 2026 19:48 UTC",
+          "stale": false
+        },
+        {
+          "id": "easylist",
+          "name": "EasyList",
+          "url": "https://easylist.to/easylist/easylist.txt",
+          "license": {
+            "name": "GPL-3.0 or CC BY-SA 3.0 (dual licensed)",
+            "url": "https://easylist.to/pages/licence.html"
+          },
+          "sha256": "67241d1a1fa2ba2c3405923e656e7bae0c7b06b220dd5ffb517b699ae2dcaf49",
+          "bytes": 2080445,
+          "fetched_at": 1795291042,
+          "version": "202611211948",
+          "last_modified": "21 Nov 2026 19:48 UTC",
+          "stale": false
+        },
+        {
+          "id": "adguard-clickthroughs",
+          "name": "AdGuard disguised click-throughs",
+          "url": "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_clickthroughs_justdomains.txt",
+          "license": {
+            "name": "MIT",
+            "url": "https://github.com/AdguardTeam/cname-trackers/blob/master/LICENSE"
+          },
+          "sha256": "8eeaa753f30270bd47c05fb34f3e34b11eb55a086896796897946ec940c873d8",
+          "bytes": 774725,
+          "fetched_at": 1795291043,
+          "version": null,
+          "last_modified": null,
+          "stale": false
+        },
+        {
+          "id": "url-tracking",
+          "name": "AdGuard/uBO – URL Tracking Protection",
+          "url": "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy-removeparam.txt",
+          "license": {
+            "name": "GPL-3.0",
+            "url": "https://github.com/uBlockOrigin/uAssets/blob/master/LICENSE"
+          },
+          "sha256": "c7d4e2295262e9e509a522ba689cada33119ce05ddffb2cd18a2af00a641bf53",
+          "bytes": 182518,
+          "fetched_at": 1795291043,
+          "version": null,
+          "last_modified": null,
+          "stale": false
+        }
+      ]
+    },
+    "application_direct_downloader_changed": false,
+    "application_direct_downloader_network_path_qualified": false,
+    "publication_note": "Fresh retrieval does not change publisher dates; AdGuard CNAME sources retained November 5 publication times."
+  },
+  "browser_build": {
+    "build": "9f236d4cebcc20cef7e2a05c82451db9",
+    "built_at": 1795293048,
+    "required_sources_present": true,
+    "development_size_override": false,
+    "reviewed_parameter_quarantine": [
+      "analytics_trace_id"
+    ],
+    "complete_coverage": false,
+    "filter_syntax": "supported-subset",
+    "static_rules": 14113,
+    "static_regexes": 981,
+    "static_rule_budget": 30000,
+    "static_regex_budget": 1000,
+    "lists": {
+      "threats": {
+        "domains": 1628452,
+        "rules": 132,
+        "files": [
+          "rules/threats.json",
+          "rules/threats-2.json"
+        ],
+        "published_at": 1795248660,
+        "updated_at": 1795290990.2456255
+      },
+      "trackers": {
+        "domains": 257921,
+        "rules": 11,
+        "files": [
+          "rules/trackers.json"
+        ],
+        "published_at": 1795250940,
+        "updated_at": 1795290992.4817798
+      },
+      "cname": {
+        "domains": 178125,
+        "rules": 8,
+        "files": [
+          "rules/cname.json"
+        ],
+        "published_at": 1793893734,
+        "updated_at": 1795290993.9130847
+      }
+    },
+    "network_compilation": {
+      "easyprivacy": {
+        "lines": 57552,
+        "network": 56736,
+        "converted": 56724,
+        "rules": 9263,
+        "regex": 6,
+        "regexSplitFilters": 0,
+        "regexSplitRules": 0,
+        "countedRepeatBudget": 64,
+        "folded": 47653,
+        "dropped": {
+          "negated $document": 1,
+          "matches every request (no pattern and no domain)": 1,
+          "domain= entries DNR cannot express (entity or regex)": 2,
+          "$rewrite": 1,
+          "$csp": 2,
+          "$redirect-rule": 1,
+          "exception not anchored to a host": 3,
+          "regular expression exceeds supported counted-repetition expansion budget": 1
+        },
+        "suspicious": 3,
+        "suspiciousLines": [
+          "@@/cgi-bin/counter_module?action=list_models$subdocument,~third-party",
+          "@@||coremetrics.com*/eluminate.js",
+          "@@||media.foundit.*/trex/public/theme_3/dist/js/userTracking.js$script,~third-party"
+        ],
+        "exceptions": 852,
+        "blockingRules": 8423
+      },
+      "easylist": {
+        "lines": 79062,
+        "network": 53955,
+        "converted": 50228,
+        "rules": 3824,
+        "regex": 80,
+        "regexSplitFilters": 4,
+        "regexSplitRules": 72,
+        "countedRepeatBudget": 64,
+        "folded": 46625,
+        "dropped": {
+          "$document block (top-level navigations are never blocked)": 563,
+          "$popup only": 2969,
+          "$rewrite": 7,
+          "cosmetic-only exception ($elemhide, $generichide…)": 166,
+          "$csp": 4,
+          "exception not anchored to a host": 3,
+          "$document exception that is not a whole host": 3,
+          "exception scoped only to public suffixes": 1,
+          "regular expression exceeds supported counted-repetition expansion budget": 11
+        },
+        "suspicious": 7,
+        "suspiciousLines": [
+          "@@||cloudfront.net/js/common/invoke.js",
+          "@@||jokerly.com/Okidak/adSelectorDirect.htm?id=$document,subdocument",
+          "@@||jokerly.com/Okidak/vastChecker.htm$document,subdocument",
+          "@@||lastpass.com/ads.php$subdocument,domain=chrome-extension-scheme",
+          "@@/wp-content/plugins/blockalyzer-adblock-counter/*$image,script,~third-party,domain=~gaytube.com|~pornhub.com|~pornhubthbh7ap3u.onion|~redtube.com|~redtube.com.br|~tube8.com|~tube8.es|~tube8.fr|~xtub",
+          "@@||tab.gladly.io/newtab/|$document,subdocument",
+          "@@://xhamster.$script,~third-party"
+        ],
+        "exceptions": 535,
+        "blockingRules": 3314
+      }
+    },
+    "cosmetics": {
+      "lines": 25036,
+      "accepted": 9720,
+      "generic": 13079,
+      "relational": 482,
+      "entityScoped": 278,
+      "exceptions": 326,
+      "hideExceptions": 167,
+      "duplicate": 0,
+      "dropped": {
+        "procedural-or-scriptlet": 323,
+        "unsupported-selector": 934,
+        "unsupported-generic-selector": 479,
+        "unsupported-domain-scope": 8
+      },
+      "fallbacks": {}
+    },
+    "parameter_compilation": {
+      "sourceRows": 2749,
+      "removeparamRows": 2747,
+      "importedRules": 1977,
+      "exceptionRows": 80,
+      "effectiveNames": 1676,
+      "rules": 801,
+      "unsupported": 610,
+      "ignoredNonRemoval": 2,
+      "inactiveRows": 4,
+      "badfiltered": 0,
+      "keptRows": 25,
+      "coarsenedExceptions": 44,
+      "compatibilityExclusions": 3,
+      "quarantined": 1,
+      "coarsenedEntityPrefixes": [
+        {
+          "label": "aliexpress",
+          "prefix": "ali"
+        },
+        {
+          "label": "amazon",
+          "prefix": "ama"
+        },
+        {
+          "label": "audible",
+          "prefix": "aud"
+        },
+        {
+          "label": "google",
+          "prefix": "goo"
+        },
+        {
+          "label": "uploadnow",
+          "prefix": "upl"
+        }
+      ],
+      "prefixGroupFallbacks": 0,
+      "explicitlyDisabledNames": [],
+      "nativeEffectiveNames": 1674,
+      "reasons": {
+        "unrepresented-named-exception": 1,
+        "exception-outside-main-frame": 6,
+        "nonliteral-name": 64,
+        "url-pattern-unsupported": 481,
+        "remove-all-unsupported": 26,
+        "remover-outside-main-frame": 40,
+        "initiator-scope-unsupported": 39
+      }
+    },
+    "parameter_coverage": {
+      "available": true,
+      "reduced": true,
+      "disabled": false,
+      "quarantined": [
+        "analytics_trace_id"
+      ],
+      "supportedSyntax": "literal-query-names-v1",
+      "mainFrameGetOnly": true,
+      "unsafe": [],
+      "nativeDeferredNames": [
+        "__cft__[0]",
+        "__xts__[0]"
+      ],
+      "compilation": {
+        "sourceRows": 2749,
+        "removeparamRows": 2747,
+        "importedRules": 1977,
+        "exceptionRows": 80,
+        "effectiveNames": 1676,
+        "rules": 801,
+        "unsupported": 610,
+        "ignoredNonRemoval": 2,
+        "inactiveRows": 4,
+        "badfiltered": 0,
+        "keptRows": 25,
+        "coarsenedExceptions": 44,
+        "compatibilityExclusions": 3,
+        "quarantined": 1,
+        "coarsenedEntityPrefixes": [
+          {
+            "label": "aliexpress",
+            "prefix": "ali"
+          },
+          {
+            "label": "amazon",
+            "prefix": "ama"
+          },
+          {
+            "label": "audible",
+            "prefix": "aud"
+          },
+          {
+            "label": "google",
+            "prefix": "goo"
+          },
+          {
+            "label": "uploadnow",
+            "prefix": "upl"
+          }
+        ],
+        "prefixGroupFallbacks": 0,
+        "explicitlyDisabledNames": [],
+        "nativeEffectiveNames": 1674,
+        "reasons": {
+          "unrepresented-named-exception": 1,
+          "exception-outside-main-frame": 6,
+          "nonliteral-name": 64,
+          "url-pattern-unsupported": 481,
+          "remove-all-unsupported": 26,
+          "remover-outside-main-frame": 40,
+          "initiator-scope-unsupported": 39
+        }
+      },
+      "reviewedQuarantined": [
+        "analytics_trace_id"
+      ]
+    },
+    "parameter_policy_sha256": "237b694940bfecc06bd3fae687e817115d1301b9d1c23c46cfadcab1e30d8ab7",
+    "rulesets": [
+      {
+        "id": "threats",
+        "enabled": true,
+        "rules": 65,
+        "regexes": 32,
+        "bytes": 33194211,
+        "sha256": "16264312ba1c6754ac968a40ec1e3340af9d28c91a22949162874ab7b9aec503"
+      },
+      {
+        "id": "threats-2",
+        "enabled": true,
+        "rules": 67,
+        "regexes": 34,
+        "bytes": 33492877,
+        "sha256": "2965e341aa88a6c17c3e73d46cebd333afd95a120fee67f06653afcf301d7e29"
+      },
+      {
+        "id": "trackers",
+        "enabled": true,
+        "rules": 11,
+        "regexes": 0,
+        "bytes": 5584642,
+        "sha256": "f6884a8b50896a8a97735ac10e52528da58e116a4747c7ae90a8b4581b2ec3ab"
+      },
+      {
+        "id": "cname",
+        "enabled": true,
+        "rules": 8,
+        "regexes": 0,
+        "bytes": 4947510,
+        "sha256": "8037690817575f40d624954e7b987e9225a29179bdd0e09497333a88bcfde1ad"
+      },
+      {
+        "id": "params",
+        "enabled": true,
+        "rules": 801,
+        "regexes": 801,
+        "bytes": 747517,
+        "sha256": "233cfde3b8cf54c253220ff116e3a42e11912bc314bcc765479ab7d77dbdb0b1"
+      },
+      {
+        "id": "links",
+        "enabled": true,
+        "rules": 26,
+        "regexes": 26,
+        "bytes": 9667,
+        "sha256": "2ff0e57f058e7486d142c9078048f1a05e620b036fc20ef2ee2f21e012c87cc8"
+      },
+      {
+        "id": "gpc",
+        "enabled": true,
+        "rules": 1,
+        "regexes": 0,
+        "bytes": 323,
+        "sha256": "6a51534b0f48c008e44a791c3c5a814fe2758988c806e8efd6c1bab6c34bbacd"
+      },
+      {
+        "id": "referrer",
+        "enabled": true,
+        "rules": 1,
+        "regexes": 0,
+        "bytes": 414,
+        "sha256": "97d6010aed52bff4004480cf2d476c93a66a15194b5bcdb0bdbd4b5af5d2143d"
+      },
+      {
+        "id": "beacons",
+        "enabled": true,
+        "rules": 1,
+        "regexes": 0,
+        "bytes": 114,
+        "sha256": "92e7b055a03631960ba6455186c571839cb6bdc05d4ef98efa6d178a175b8a1e"
+      },
+      {
+        "id": "cookies",
+        "enabled": true,
+        "rules": 4,
+        "regexes": 0,
+        "bytes": 2075952,
+        "sha256": "ba2c4cf7ade97e1eabf47db78674ef27d3c87f95dbddb0468d1274022f080a8c"
+      },
+      {
+        "id": "bounce",
+        "enabled": true,
+        "rules": 2,
+        "regexes": 0,
+        "bytes": 848338,
+        "sha256": "74980fc4f5c27e7ac84465acfad4056fc00c24956c8ea3d46641fff8263ce4a2"
+      },
+      {
+        "id": "surrogates",
+        "enabled": true,
+        "rules": 11,
+        "regexes": 0,
+        "bytes": 2276,
+        "sha256": "3b0ea1c87e5dcf1b4c6dfb3c544638411828cb1dbf67f53504123c47704f68e3"
+      },
+      {
+        "id": "fp-trackers",
+        "enabled": true,
+        "rules": 3513,
+        "regexes": 1,
+        "bytes": 468291,
+        "sha256": "bb4ac4f0616550880ae7c4de6686243f6841deb996a2923694e2bf1867615245"
+      },
+      {
+        "id": "easyprivacy",
+        "enabled": true,
+        "rules": 4919,
+        "regexes": 6,
+        "bytes": 1811947,
+        "sha256": "b44958877b5122bdcac6c842595359292f1fd47e31ab3f4c5d4516ef2857352d"
+      },
+      {
+        "id": "easylist",
+        "enabled": true,
+        "rules": 3314,
+        "regexes": 80,
+        "bytes": 1514249,
+        "sha256": "7afe8ae457ac04e34e8683adef49aa5f8dfc5ec4f90bb6e67fc60741343b902d"
+      },
+      {
+        "id": "filter-allow",
+        "enabled": true,
+        "rules": 1350,
+        "regexes": 0,
+        "bytes": 287814,
+        "sha256": "51acd8824426a988999302bbdb20d456de50a9842200bc2ee04f4ac7dd329e16"
+      },
+      {
+        "id": "replay",
+        "enabled": true,
+        "rules": 19,
+        "regexes": 1,
+        "bytes": 2984,
+        "sha256": "56d8dc0f50ac9ca32f7a5993236505665925b181de121a8f18d74688897274b0"
+      }
+    ],
+    "counts_are_efficacy_measurement": false,
+    "native_chrome_indexing_qualified": false
+  },
+  "regex_audit": {
+    "complete": true,
+    "encoding": "Latin1",
+    "engine": "google-re2",
+    "error_count": 0,
+    "error_counts_by_ruleset": {},
+    "errors": [],
+    "errors_omitted": 0,
+    "failed": 0,
+    "max_mem": 2048,
+    "native_chrome": false,
+    "package_version": "1.1.20251105",
+    "passed": 981,
+    "regexes": 981,
+    "rules": 14113,
+    "rulesets": 17,
+    "rulesets_read": 17,
+    "schema": 1,
+    "scope": "all-manifest-static-regexes-including-disabled",
+    "status": "passed"
+  },
+  "package_checks": {
+    "version": "0.9.0",
+    "fresh_wheel_target": true,
+    "private_initialization": true,
+    "default_history": "none",
+    "default_transport": {
+      "address_guard": false,
+      "connect_ports": [
+        443
+      ],
+      "profile": "compatible"
+    },
+    "empty_cache_start_refused": true,
+    "empty_cache_lookup_indeterminate": true,
+    "no_network_or_process_attempt_during_empty_cache_refusal": true,
+    "new_modules_and_dashboard_assets_packaged": true,
+    "wheel": {
+      "bytes": 121990,
+      "filename": "egress_guard-0.9.0-py3-none-any.whl",
+      "packaged_files": [
+        "__init__.py",
+        "__main__.py",
+        "addon.py",
+        "address_guard.py",
+        "bounded_json.py",
+        "canaries.py",
+        "cli.py",
+        "cname.py",
+        "config.py",
+        "dashboard_app.py",
+        "dashboard_http.py",
+        "default.toml",
+        "dnssd.py",
+        "feeds.py",
+        "health.py",
+        "heuristics.py",
+        "http_deadline.py",
+        "insights.py",
+        "ledger.py",
+        "lockfile.py",
+        "macos.py",
+        "native_host.py",
+        "paths.py",
+        "policy.py",
+        "services.py",
+        "sponsors.py",
+        "transport_policy.py",
+        "web/app.css",
+        "web/app.js",
+        "web/index.html"
+      ],
+      "requires_dist": [
+        "mitmproxy==12.3.1"
+      ],
+      "sha256": "f3bc383a2473cdf699e67a327ef754d9192c1c46dbade6597699d84406ead61c",
+      "source_files_verified": 30
+    },
+    "pip_check": "passed",
+    "source_archive_required_assets_present": true,
+    "source_archive_matches_checkout": true,
+    "runtime_state_and_downloaded_feed_caches_excluded": true,
+    "source_archive_hash": "Recorded separately to avoid embedding an archive's own hash in its contents."
+  },
+  "dependency_review": {
+    "status": "Runtime and build pins unchanged; prior review retained.",
+    "fresh_online_scan": false,
+    "reference": "../requirements/README.md",
+    "optional_regex_auditor_dependency": "google-re2==1.1.20251105",
+    "optional_dependency_in_runtime": false,
+    "open_prior_matches": [
+      {
+        "name": "tornado",
+        "version": "6.5.10",
+        "advisories": [
+          "GHSA-5cjw-f85j-cv6r",
+          "GHSA-pcg2-g6cj-q92c",
+          "GHSA-pw9p-v7r6-gx4p",
+          "GHSA-r4j5-9xpp-3985"
+        ]
+      }
+    ]
+  },
+  "target_qualification": {
+    "chromium": "Not run; prior startup denied by process-singleton socket policy; restriction not bypassed.",
+    "chrome_fixture_static_check": "tests/browser/chrome-0.8.mjs --check passed; no browser or listener",
+    "actual_browser_headers_redirects_and_settings": false,
+    "actual_model_inference": false,
+    "installed_browser_native_host": false,
+    "macos_service_lifecycle": "mocked only",
+    "system_proxy_activation": false,
+    "user_browser_firewall_or_trust_store_changed": false
+  },
+  "material_limits": [
+    "Proxy controls apply to clients that actually use it; no device-wide routing or DNS guarantee.",
+    "The experimental address hook covers the qualified CPython TCP connector; DNS can precede refusal and audit hooks are not a sandbox against same-process code.",
+    "An enabled unavailable guard refuses traffic; selection changes require restart and saved intent is not an applied receipt.",
+    "Isolation governs new associated-site subresource requests and selected HTTP headers; it does not revoke existing connections, erase storage, contain every navigation or mask IP addresses.",
+    "Parameter coverage is deliberately reduced for one quarantined name; unsupported syntax, entity-prefix coarsening and native-deferred names remain visible.",
+    "Standalone RE2 success does not establish complete native Chrome acceptance or real navigation/header behavior.",
+    "Counts of domains, converted filters and parameter names are not measured ad-blocking or privacy efficacy."
+  ]
+}

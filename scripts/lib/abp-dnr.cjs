@@ -2,7 +2,7 @@
 /* Build-time compiler: Adblock Plus network filters (EasyPrivacy, EasyList) -> Chrome declarativeNetRequest rules.
  * Pure: no I/O. Never shipped in the extension; the build writes its output as static rulesets.
  *
- * What converts: URL patterns (`||`, `|`, `^`, `*`), regular-expression filters that RE2 accepts, `$third-party`
+ * What converts: URL patterns (`||`, `|`, `^`, `*`), bounded regular-expression filters, `$third-party`
  * and first-party, resource types (positive and negated), `domain=`/`from=` (initiator), `to=`/`denyallow=`
  * (request domain), `method=`, `match-case`, `important`, exceptions (`@@`) and `badfilter`. Everything else is
  * dropped and counted by reason. Cosmetic filters are not network filters and are not counted. Pure `||host^` filters
@@ -37,6 +37,12 @@ const UNSUPPORTED = new Set(["csp", "removeparam", "queryprune", "header", "perm
 
 const ASCII = /^[\x20-\x7e]*$/;
 const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+// Counted repetitions can exceed Chrome's 2 KiB RE2 budget in a 30-character
+// source. This conservative supported-subset bound counts expanded byte-range
+// atoms, not source bytes. It is not a substitute for the artifact's real RE2
+// audit: other constructs and the actual engine version still affect memory.
+const MAX_COUNTED_REPEAT_COST = 64;
+const MAX_ALTERNATIVE_BRANCHES = 32;
 
 /** Is `line` a cosmetic, scriptlet or HTML filter (not a network filter)? */
 function isCosmetic(line) {
@@ -87,6 +93,91 @@ function re2Compatible(source) {
   return source.length <= 300;
 }
 
+/** Conservative expansion cost of counted atoms/groups; no regex is rewritten here. */
+function countedRepeatCost(source, caseSensitive = false) {
+  let offset = 0;
+  const capped = (n) => Math.min(n, 1000000);
+  function byteRanges(atom) {
+    const re = new RegExp("^(?:" + atom + ")$", caseSensitive ? "" : "i");
+    const present = Array.from({length: 256}, (_, n) => re.test(String.fromCharCode(n)));
+    // RE2 can encode the matching ASCII case pair in one folded range.
+    if (!caseSensitive) for (let n = 65; n <= 90; n++) if (present[n] && present[n + 32]) present[n] = false;
+    let ranges = 0;
+    for (let n = 0; n < present.length; n++) if (present[n] && !present[n - 1]) ranges++;
+    return Math.max(1, ranges);
+  }
+  function sequence() {
+    let weight = 0, counted = 0;
+    while (offset < source.length && source[offset] !== ")") {
+      let atom = 0, childCounted = 0;
+      const ch = source[offset++];
+      if (ch === "(") {
+        if (source.slice(offset, offset + 2) === "?:") offset += 2;
+        const child = sequence(); atom = child.weight; childCounted = child.counted;
+        if (source[offset] === ")") offset++;
+      } else if (ch === "[") {
+        const start = offset - 1;
+        while (offset < source.length) {
+          const next = source[offset++];
+          if (next === "\\") offset++;
+          else if (next === "]") break;
+        }
+        atom = byteRanges(source.slice(start, offset));
+      } else if (ch === "\\") {
+        const next = source[offset++];
+        if (/[dDsSwW]/.test(next || "")) atom = byteRanges("\\" + next);
+        else if (next === "b" || next === "B") atom = 0;
+        else {
+          atom = 1;
+          if (next === "x" && /^[0-9a-f]{2}/i.test(source.slice(offset))) offset += 2;
+          else if (next === "u" && /^[0-9a-f]{4}/i.test(source.slice(offset))) offset += 4;
+        }
+      } else atom = ch === "^" || ch === "$" ? 0 : ch === "." ? 2 : 1;
+      counted = capped(counted + childCounted);
+      const repeat = /^\{(\d+)(?:,(\d*))?\}/.exec(source.slice(offset));
+      if (repeat) {
+        const copies = repeat[2] === undefined ? Number(repeat[1]) : repeat[2] === "" ? Number(repeat[1]) + 1 : Number(repeat[2]);
+        atom = capped(atom * copies); counted = capped(counted + atom); offset += repeat[0].length;
+        if (source[offset] === "?") offset++;
+      } else if (/[?*+]/.test(source[offset] || "")) {
+        atom++; offset++;
+        if (source[offset] === "?") offset++;
+      }
+      weight = capped(weight + atom);
+    }
+    return {weight, counted};
+  }
+  return sequence().counted;
+}
+
+/** Exact disjunction of a flat, top-level, unquantified literal-alternative group.
+ * A quantified group is never split: (a|b)+ includes mixed strings that a+|b+
+ * would lose. The bodies have no backreferences and carry no substitution.
+ */
+function splitRegexAlternatives(source) {
+  const stack = [];
+  let best = null;
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === "\\") { i++; continue; }
+    if (source[i] === "[") {
+      while (++i < source.length) { if (source[i] === "\\") i++; else if (source[i] === "]") break; }
+      continue;
+    }
+    if (source[i] === "(") {
+      if (stack.length) stack[stack.length - 1].nested = true;
+      stack.push({start: i, nested: false});
+    } else if (source[i] === ")") {
+      const group = stack.pop();
+      if (!group || stack.length || group.nested || /[?*+{]/.test(source[i + 1] || "")) continue;
+      const body = source.slice(group.start + 1, i).replace(/^\?:/, "");
+      const branches = [...new Set(body.split("|"))];
+      if (branches.length < 8 || branches.length > MAX_ALTERNATIVE_BRANCHES || !branches.every((b) => /^[A-Za-z0-9_-]+\$?$/.test(b))) continue;
+      if (!best || branches.length > best.branches.length) best = {start: group.start, end: i + 1, branches};
+    }
+  }
+  return best ? best.branches.map((branch) => source.slice(0, best.start) + "(?:" + branch + ")" + source.slice(best.end)) : [source];
+}
+
 /** Normalise an ABP URL pattern for DNR urlFilter. Returns {urlFilter} | {domain} | {error}. */
 function convertPattern(pattern) {
   if (!ASCII.test(pattern)) return {error: "non-ASCII pattern"};
@@ -97,7 +188,9 @@ function convertPattern(pattern) {
   if (p === "" || p === "|" || p === "||") return {urlFilter: null};
   if (p.startsWith("||*")) p = p.slice(2);
   const host = /^\|\|([a-z0-9.-]+)\^?\|?$/i.exec(p);
-  if (host && DOMAIN.test(host[1].toLowerCase()) && host[1].includes(".") && (p.endsWith("^") || p.endsWith("^|"))) return {domain: host[1].toLowerCase()};
+  // The trailing | is an end-of-URL constraint, not part of a whole-host rule.
+  // Folding ||host^| into requestDomains would broaden both blocks and allows.
+  if (host && DOMAIN.test(host[1].toLowerCase()) && host[1].includes(".") && p.endsWith("^")) return {domain: host[1].toLowerCase()};
   return {urlFilter: p};
 }
 
@@ -218,7 +311,8 @@ function parseLine(raw) {
     // Never allowAllRequests. "Allow on pages of this host" becomes a plain allow for the host's own requests;
     // $all becomes a plain allow for requests to the host.
     const host = domain || anchoredHost(condition.urlFilter);
-    if (!host || !hosts.siteOf(host) || condition.regexFilter || (condition.urlFilter && condition.urlFilter.replace(/[\^|]+$/, "") !== `||${host}`)) {
+    if (!host || !hosts.siteOf(host) || condition.regexFilter || (condition.urlFilter &&
+      (condition.urlFilter.endsWith("|") || condition.urlFilter.replace(/\^$/, "") !== `||${host}`))) {
       return {drop: "$document exception that is not a whole host", suspicious: true};
     }
     delete condition.resourceTypes;
@@ -254,7 +348,8 @@ function badKey(line) {
  */
 function compileFilters(text, {maxRegex = Infinity} = {}) {
   const lines = String(text).split(/\r?\n/);
-  const stats = {lines: lines.length, network: 0, converted: 0, rules: 0, regex: 0, folded: 0, dropped: {}, suspicious: 0, suspiciousLines: [], exceptions: 0};
+  const stats = {lines: lines.length, network: 0, converted: 0, rules: 0, regex: 0, regexSplitFilters: 0, regexSplitRules: 0,
+    countedRepeatBudget: MAX_COUNTED_REPEAT_COST, folded: 0, dropped: {}, suspicious: 0, suspiciousLines: [], exceptions: 0};
   const drop = (reason) => { stats.dropped[reason] = (stats.dropped[reason] || 0) + 1; };
   const parsed = [];
   const bad = new Set();
@@ -271,8 +366,23 @@ function compileFilters(text, {maxRegex = Infinity} = {}) {
   let regexUsed = 0;
   for (const p of parsed) {
     if (bad.has(badKey(p.line))) { drop("disabled by $badfilter"); continue; }
-    if (p.regex && regexUsed >= maxRegex) { drop("over the regular-expression rule budget"); continue; }
-    if (p.regex) regexUsed++;
+    let conditions = [p.condition];
+    if (p.regex) {
+      const cost = countedRepeatCost(p.condition.regexFilter, p.condition.isUrlFilterCaseSensitive);
+      if (cost > MAX_COUNTED_REPEAT_COST) {
+        const reason = "regular expression exceeds supported counted-repetition expansion budget";
+        if (p.exception) throw new Error("Cannot omit a protecting regex exception: " + reason + ": " + p.line);
+        drop(reason); continue;
+      }
+      const patterns = splitRegexAlternatives(p.condition.regexFilter);
+      if (regexUsed + patterns.length > maxRegex) {
+        if (p.exception) throw new Error("Cannot omit a protecting regex exception: over the regular-expression rule budget: " + p.line);
+        drop("over the regular-expression rule budget"); continue;
+      }
+      regexUsed += patterns.length;
+      if (patterns.length > 1) { stats.regexSplitFilters++; stats.regexSplitRules += patterns.length - 1; }
+      conditions = patterns.map((regexFilter) => ({...p.condition, regexFilter}));
+    }
     stats.converted++;
     const bucket = p.exception ? "allow" : p.important ? "important" : "block";
     if (p.exception) stats.exceptions++;
@@ -285,9 +395,11 @@ function compileFilters(text, {maxRegex = Infinity} = {}) {
       stats.folded++;
       continue;
     }
-    const condition = {...p.condition};
-    if (p.domain) condition.urlFilter = `||${p.domain}^`;
-    out[bucket].push({action, condition});
+    for (const original of conditions) {
+      const condition = {...original};
+      if (p.domain) condition.urlFilter = `||${p.domain}^`;
+      out[bucket].push({action, condition});
+    }
   }
   for (const rule of groups.values()) rule.condition.requestDomains = [...new Set(rule.condition.requestDomains)].sort();
   stats.regex = regexUsed;
@@ -305,4 +417,5 @@ function header(text) {
   return out;
 }
 
-module.exports = Object.freeze({TYPES, ALL_SUB, parseLine, compileFilters, convertPattern, splitOptions, re2Compatible, header, badKey, isCosmetic});
+module.exports = Object.freeze({TYPES, ALL_SUB, parseLine, compileFilters, convertPattern, splitOptions, re2Compatible,
+  countedRepeatCost, splitRegexAlternatives, MAX_COUNTED_REPEAT_COST, header, badKey, isCosmetic});

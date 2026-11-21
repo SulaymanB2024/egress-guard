@@ -33,6 +33,8 @@ function matches(rule, req) {
   const host = url.hostname;
   const types = c.resourceTypes || dnr.SUBRESOURCE_TYPES.filter((t) => !(c.excludedResourceTypes || []).includes(t));
   if (!types.includes(req.type)) return false;
+  if (c.requestMethods && !c.requestMethods.includes(req.method || "get")) return false;
+  if (c.excludedRequestMethods && c.excludedRequestMethods.includes(req.method || "get")) return false;
   if (c.requestDomains && !covers(c.requestDomains, host)) return false;
   if (c.excludedRequestDomains && covers(c.excludedRequestDomains, host)) return false;
   const top = req.top || req.initiator;
@@ -134,6 +136,17 @@ test("filter conversion: host-only filters fold into requestDomains, exceptions 
   assert.equal(c.important.length, 1);
   assert.equal(c.stats.network, 9);
   assert.equal(c.stats.suspicious, 0);
+  const narrow = compileText("||collector.example^|");
+  const exceptRoot = compileText("||collector.example^\n@@||collector.example^|");
+  for (const host of ["collector.example", "sub.collector.example"]) {
+    assert.equal(outcome(narrow, {url: `https://${host}/`, type: "image"}), "block");
+    assert.equal(outcome(exceptRoot, {url: `https://${host}/`, type: "image"}), "allow");
+    for (const tail of ["/asset.js", "/?v=1", ":8443/"]) {
+      const req = {url: `https://${host}${tail}`, type: "image"};
+      assert.equal(outcome(narrow, req), "none", "the native end anchor restricts a block");
+      assert.equal(outcome(exceptRoot, req), "block", "an end-anchored exception cannot release arbitrary host traffic");
+    }
+  }
 });
 
 test("hostile list lines: unanchored exceptions and $important filters are dropped and counted, never allow-everything", () => {
@@ -404,7 +417,7 @@ test("link cleaner: global names everywhere, ambiguous names only on their sites
   assert.equal(c("https://x.com/u/status/1?s=20&t=abc"), "https://x.com/u/status/1");
   assert.equal(c("https://shop.example/p?s=20&t=abc&tag=red"), "https://shop.example/p?s=20&t=abc&tag=red", "generic names elsewhere are content");
   assert.equal(c("https://www.google.com/search?q=kettle&ei=abc&ved=0ah&oq=ket&sxsrf=x&start=10"), "https://www.google.com/search?q=kettle&start=10");
-  assert.equal(c("https://app.example/cb?code=abc&state=xyz&utm_source=mail"), "https://app.example/cb?code=abc&state=xyz", "OAuth parameters stay");
+  assert.equal(c("https://app.example/cb?code=abc&state=xyz&utm_source=mail"), "https://app.example/cb?code=abc&state=xyz&utm_source=mail", "auth exchanges preserve the complete URL, including potentially signed tracking names");
   assert.equal(c("https://mail.example/landing?mkt_tok=abc&_hsenc=1&_hsmi=2&utm_source=x"), "https://mail.example/landing?mkt_tok=abc&_hsenc=1&_hsmi=2");
   assert.equal(c("https://bücher.example/?gclid=1&a=1"), "https://xn--bcher-kva.example/?a=1");
   assert.equal(c("https://news.example/a?UTM_SOURCE=x"), "https://news.example/a?UTM_SOURCE=x", "names are exact (DNR is case-sensitive here too)");
@@ -482,6 +495,86 @@ test("compileParams honours KEPT on the navigation path too, whatever the name l
   for (const scope of params.SCOPED) {
     const url = `https://www.${scope.domains[0]}/p?${params.KEPT.map((k) => `${k}=1`).join("&")}`;
     assert.equal(params.clean(url).url, url, scope.domains[0]);
+  }
+});
+
+test("parameter preservation cannot release cross-site frames or suppress navigation cookie sanitation", () => {
+  const params = dnr.compileParams();
+  for (const sitePolicy of [{sites: {"publisher.example": "strict"}}, {defaultMode: "strict"}]) {
+    const modes = dnr.compileModes(sitePolicy).rules;
+    for (const path of ["/unsubscribe", "/preferences", "/manage-subscriptions", "/notification-settings"]) {
+      const req = {url: `https://unlisted-collector.example${path}?visitor=sample&utm_source=mail`, type: "sub_frame", top: "publisher.example", initiator: "unlisted-collector.example"};
+      assert.equal(outcome([...modes, ...params], req), "block", path);
+      assert.equal(outcome(params, req), "none", "GET frame URLs are no longer transformed by this generic navigation cleaner");
+      assert.equal(strips([...modes, ...params], req), true, "no preservation allow can suppress Strict sanitation");
+    }
+  }
+  const privacy = dnr.compilePrivacy();
+  const main = {url: "https://t.co/unsubscribe?utm_source=mail&token=keep", type: "main_frame", method: "get"};
+  assert.equal(outcome([...params, ...privacy.bounce], main), "allow", "functional tokens are preserved on GET navigation");
+  assert.equal(strips([...params, ...privacy.bounce], main), true, "preserving the URL never restores a redirector's cookies");
+  for (const method of ["post", "put", "patch", "delete"]) {
+    assert.equal(outcome(params, {...main, method}), "none", "no preserve allow on a body-carrying method");
+    assert.equal(outcome(params, {...main, method, url: "https://news.example/article?utm_source=mail"}), "none", "no redirect can replay a submission");
+    assert.equal(outcome(params, {...main, method, url: "https://www.amazon.com/dp/B000/ref=sr_1_1?tag=referrer"}), "none");
+  }
+  const filtered = compileText("||collector.example^$subdocument");
+  assert.equal(outcome([...filtered, ...params], {...main, url: "https://collector.example/unsubscribe?utm_source=x", type: "sub_frame"}), "block", "preserving tokens cannot suppress a network list frame block");
+});
+
+test("split fixed parameter guards retain unsubscribe, auth and signed-flow coverage", () => {
+  const params = require("../../browser/core/params.js");
+  const rules = dnr.compileParams({global: ["utm_source"], scoped: []});
+  const request = (url) => ({url, type: "main_frame", method: "get"});
+  const paths = ["unsub", "unsubscribe", "unsubscribed", "optout", "opt-out", "optdown", "opt-down", "preference", "preferences",
+    "preferencecenter", "preference-centre", "emailsettings", "email-preferences", "email-prefs", "managesubscriptions",
+    "manage-preferences", "manage-email", "subscription", "subscriptions", "subscriptioncenter", "subscription-centre",
+    "notification-settings", "communicationpreferences", "auth", "authentication", "authorize", "authorization", "oauth", "oauth2",
+    "sso", "login", "log-in", "signin", "sign-in", "callback", "checkout", "payment"];
+  for (const word of paths) for (const pathname of [`/${word}`, `/nested/${word.toUpperCase()}.html`]) {
+    const url = `https://site.example${pathname}?utm_source=keep`;
+    assert.equal(params.preservedUrl(new URL(url)), true, pathname);
+    assert.equal(outcome(rules, request(url)), "allow", pathname);
+  }
+  for (const key of params.SENSITIVE_KEYS) for (const query of [`${key}=secret&utm_source=keep`, `x=1&${key.toUpperCase()}=secret&utm_source=keep`]) {
+    const url = `https://site.example/article?${query}`;
+    assert.equal(outcome(rules, request(url)), "allow", key);
+    assert.equal(params.clean(url).url, url, key);
+  }
+  for (const url of ["https://user:password@site.example/article?utm_source=keep", "https://site.example/article?%73ig=secret&utm_source=keep"]) {
+    assert.equal(outcome(rules, request(url)), "allow", url);
+  }
+  for (const suffix of ["/authors?utm_source=drop", "/recheckout?utm_source=drop", "/oauth3?utm_source=drop",
+    "/unsubmarine?utm_source=drop", "/article?not_token=1&utm_source=drop", "/article?token_more=1&utm_source=drop",
+    "/article?next=https://other.example/?sig=inside-value&utm_source=drop"]) {
+    assert.equal(outcome(rules, request(`https://site.example${suffix}`)), "redirect", suffix);
+  }
+  const emitted = rules.filter((rule) => rule.action.type === "allow").map((rule) => rule.condition.regexFilter);
+  for (const union of [params.PRESERVE_REGEX, params.AUTH_REGEX, params.SENSITIVE_QUERY_REGEX]) {
+    assert.ok(!emitted.includes(union), "known oversized unions are reference predicates, never emitted guards");
+  }
+});
+
+test("DNR preserves bare and empty query parts while the raw JS cleaner can remove unrelated tags", () => {
+  const params = require("../../browser/core/params.js");
+  const rules = dnr.compileParams({global: ["utm_source"], scoped: []});
+  const request = (url) => ({url, type: "main_frame", method: "get"});
+  const cases = [
+    ["?flag&utm_source=drop", "?flag"],
+    ["?utm_source=drop&flag#part", "?flag#part"],
+    ["?a=1&&utm_source=drop", "?a=1&"],
+    ["?&utm_source=drop&a=1", "?&a=1"],
+    ["?a=1&utm_source=drop&", "?a=1&"],
+  ];
+  for (const [query, cleaned] of cases) {
+    const url = `https://site.example/article${query}`;
+    assert.equal(outcome(rules, request(url)), "allow", "Chrome queryTransform would reconstruct bare parts with an equals sign");
+    assert.equal(params.clean(url).url, `https://site.example/article${cleaned}`, "JS retains every other raw query part");
+    assert.equal(outcome(rules, {...request(url), method: "post"}), "none");
+    assert.equal(outcome(rules, {...request(url), type: "sub_frame"}), "none");
+  }
+  for (const query of ["?a=&utm_source=drop", "?a=x%26y&utm_source=drop", "?a=x%3Dy&utm_source=drop", "?a=1&utm_source=drop#flag"]) {
+    assert.equal(outcome(rules, request(`https://site.example/article${query}`)), "redirect", "normal key=value parts remain eligible");
   }
 });
 

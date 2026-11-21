@@ -17,6 +17,7 @@ function matches(rule, req) {
   const host = url.hostname;
   const covers = (list, name) => list.some((d) => name === d || name.endsWith(`.${d}`));
   if (c.resourceTypes && !c.resourceTypes.includes(req.type)) return false;
+  if (c.requestMethods && !c.requestMethods.includes(req.method || "get")) return false;
   if (c.requestDomains && !covers(c.requestDomains, host)) return false;
   if (c.excludedRequestDomains && covers(c.excludedRequestDomains, host)) return false;
   const top = req.top || req.initiator; // Chrome fallback when no associated top frame exists.
@@ -56,6 +57,9 @@ test("priority ladder preserves threat/manual denies and independent credential 
   assert.ok(p.relax > p.embedCookies && p.embedCookies > p.scannerPass && p.scannerPass > p.scanner && p.scanner > p.clean && p.modeHeaders > p.userBlock,
     "Relaxed lifts cleaning; a scanner pass lifts only the scanner redirect and cleaning");
   assert.ok(p.clean > p.embed && p.embed > p.mode && p.mode > p.hand, "a loaded embed lifts Strict's blocks, not its cookie stripping");
+  assert.ok(p.threat > p.isolation && p.isolation > p.grantHeaders && p.isolationHeaders > p.continueHeaders && p.gpc > p.isolationHeaders,
+    "Isolation cannot be repaired below threats; navigation consent never restores credentials");
+  assert.ok(p.clean > p.params && p.params > p.mode, "parameter preservation stays below sanitation and has no frame scope");
   assert.ok(p.hand > p.filterImportant && p.filterImportant > p.easyprivacyAllow && p.easyprivacyAllow > p.easyprivacy && p.easyprivacy > p.easylistAllow && p.easylistAllow > p.easylist,
     "each list's exceptions sit directly above its own blocks; hand-written filters and every cleaning rule sit above all list exceptions");
   assert.deepEqual(dnr.FILTER_PRIORITY.easylist, {block: p.easylist, allow: p.easylistAllow});
@@ -205,21 +209,28 @@ test("an exception shown as \"other\" does not also allow WebSocket, WebTranspor
 
 test("tracking parameter stripping: exact names, navigations only, only when one is present", () => {
   const all = dnr.compileParams();
+  const params = require("../../browser/core/params.js");
+  const preserveCount = (params.PRESERVE_URL_REGEXES || [params.PRESERVE_REGEX]).length;
   const scopedCount = dnr.SCOPED_PARAMS.reduce((n, s) => n + s.params.length * 2, 0);
-  assert.equal(all.length, dnr.TRACKING_PARAMS.length * 2 + scopedCount + 2, "one path rule (Amazon /ref=) and one unsubscribe-page allow");
+  assert.equal(all.length, dnr.TRACKING_PARAMS.length * 2 + scopedCount + params.PATH_RULES.length + preserveCount, "parameter, path and fixed preservation rules are distinct");
   assert.equal(new Set(all.map((r) => r.id)).size, all.length);
   assert.equal(new Set(dnr.TRACKING_PARAMS).size, dnr.TRACKING_PARAMS.length, "no duplicate names");
   const preserve = all.filter((r) => r.action.type === "allow");
-  assert.equal(preserve.length, 1);
-  assert.equal(preserve[0].priority, dnr.PRIORITY.clean, "an allow at the redirect's own priority beats it");
+  assert.equal(preserve.length, preserveCount);
+  for (const rule of preserve) {
+    assert.equal(rule.priority, dnr.PRIORITY.params, "an allow at the redirect's own priority beats it");
+    assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]);
+    assert.deepEqual(rule.condition.requestMethods, ["get"]);
+  }
   const redirects = all.filter((r) => r.action.type === "redirect");
   const out = redirects.filter((r) => !r.condition.requestDomains && !r.condition.regexFilter);
   const removed = out[0].action.redirect.transform.queryTransform.removeParams;
   for (const rule of redirects) {
-    assert.equal(rule.priority, dnr.PRIORITY.clean);
+    assert.equal(rule.priority, dnr.PRIORITY.params);
+    assert.deepEqual(rule.condition.requestMethods, ["get"], "POST bodies are never replayed through parameter redirects");
     assert.ok(rule.condition.excludedRequestDomains.includes("accounts.google.com") && rule.condition.excludedRequestDomains.includes("ads.google.com"), "sign-in and consoles excluded");
     if (rule.action.redirect.regexSubstitution) { assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]); continue; }
-    assert.deepEqual(rule.condition.resourceTypes, ["main_frame", "sub_frame"]);
+    assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]);
     assert.equal(rule.condition.regexFilter, undefined, "no regex: Chrome caps compiled regex size");
     for (const kept of dnr.KEPT_PARAMS) assert.ok(!rule.action.redirect.transform.queryTransform.removeParams.includes(kept));
   }
@@ -242,6 +253,81 @@ test("tracking parameter stripping: exact names, navigations only, only when one
   const url = new URL("https://news.example/a?utm_source=x&id=7&fbclid=b&gclid=c");
   for (const name of removed) url.searchParams.delete(name);
   assert.equal(url.href, "https://news.example/a?id=7");
+});
+
+test("manual other denies match WebSocket handshakes without expanding old allows", () => {
+  const entry = userRule({host: "collector.example", path: "/stream*", types: ["other"]});
+  const deny = dnr.compileUserState([entry], [], NOW).rules;
+  const allow = dnr.compileUserState([{...entry, action: "allow"}], [], NOW).rules;
+  const repair = dnr.compileUserState([], [exception({host: "collector.example", path: "/stream", type: "other", tabId: 1})], NOW).rules;
+  for (const url of ["ws://collector.example/stream", "wss://collector.example:8443/stream/events?user=sample"]) {
+    const req = {url, type: "websocket", top: "publisher.example", initiator: "foreign-frame.example", tabId: 1};
+    assert.equal(outcome(deny, req), "block", url);
+    assert.equal(outcome(allow, req), "none", "HTTP-only saved allows gain no socket capability");
+    assert.equal(outcome(repair, req), "none", "ordinary other repairs remain exact-type");
+    assert.equal(outcome(deny, {...req, top: "other.example"}), "none");
+    assert.equal(outcome(deny, {...req, url: url.replace("collector.example", "sub.collector.example")}), "none", "exact destination only");
+  }
+  assert.ok(new RegExp(deny[0].condition.regexFilter).test("wss://collector.example./stream"), "regex retains the existing optional trailing dot; browser domain normalization is separately qualified");
+  assert.equal(deny[0].condition.requestMethods, undefined, "positive HTTP method filters do not match Chrome WebSocket handshakes");
+  assert.equal(outcome(deny, {url: "https://collector.example/stream", type: "webtransport", top: "publisher.example"}), "block");
+  assert.equal(outcome(deny, {url: "https://collector.example/other", type: "other", top: "publisher.example"}), "none");
+});
+
+test("Isolation blocks every cross-top-site subresource despite ordinary repair and compatibility allowances", () => {
+  const isolated = dnr.compileModes({sites: {"publisher.example": "isolated"}, allowHosts: {"publisher.example": ["cdn.vendor.example"]}, cleanOff: ["publisher.example"]});
+  const allow = dnr.compileUserState([userRule({host: "cdn.vendor.example", path: "/resource", types: [...rules.RESOURCE_TYPES], action: "allow"})], [], NOW).rules;
+  const repair = dnr.compileUserState([], [exception({host: "cdn.vendor.example", path: "/resource", type: "image", tabId: 1})], NOW).rules;
+  const dynamic = [...isolated.rules, ...allow, ...repair, dnr.embedRule(300000, "youtube", 1, {topSite: "publisher.example", withCookies: true})];
+  for (const type of dnr.SUBRESOURCE_TYPES) {
+    const req = {url: `${type === "websocket" ? "wss" : "https"}://cdn.vendor.example/resource`, type, top: "publisher.example", initiator: "cdn.vendor.example", tabId: 1};
+    assert.equal(outcome(dynamic, req), "block", type);
+    assert.equal(best(dynamic, req).priority, dnr.PRIORITY.isolation, type);
+    assert.equal(outcome(isolated.rules, {...req, url: "https://publisher.example/resource"}), "none", "own resources remain enabled");
+    assert.equal(outcome(isolated.rules, {...req, top: "elsewhere.example"}), "none", "unrelated top sites retain their own policy");
+  }
+  for (const host of [...dnr.FUNCTIONAL_HOSTS, "www.youtube.com"]) assert.equal(outcome(dynamic, {
+    url: `https://${host}/resource`, type: "sub_frame", top: "publisher.example", initiator: host, tabId: 1}), "block", host);
+  assert.equal(outcome(dynamic, {url: "https://outside.example/", type: "main_frame", top: "publisher.example"}), "none", "this is not an outbound navigation firewall");
+  assert.ok(isolated.rules.filter((r) => r.action.type === "block").every((r) => !r.condition.requestMethods && !r.condition.domainType));
+});
+
+test("Isolation uses PSL site ownership for top scopes, destinations and cold initial navigation sanitation", () => {
+  const all = dnr.compileModes({defaultMode: "strict", sites: {"amazonaws.com": "isolated"}}).rules;
+  const req = {url: "https://alice.s3.amazonaws.com/resource", type: "image", top: "amazonaws.com", initiator: "alice.s3.amazonaws.com"};
+  assert.equal(outcome(all, req), "block", "nested private tenant is not part of its hosting company's first party");
+  assert.equal(best(all, req).priority, dnr.PRIORITY.isolation);
+  assert.equal(outcome(all, {...req, url: "https://www.amazonaws.com/resource"}), "none");
+  assert.equal(outcome(all, {...req, url: "https://amazonaws.com/app.js", type: "script", top: "amazonaws.com"}), "none", "default Strict's cold hold does not hold an explicit isolated site's own scripts");
+  const isolationRules = all.filter((r) => [dnr.PRIORITY.isolation, dnr.PRIORITY.isolationHeaders].includes(r.priority));
+  assert.equal(outcome(isolationRules, {...req, top: "alice.s3.amazonaws.com"}), "none", "parent's mode does not apply inside independent tenant pages");
+  const headers = (request) => isolationRules.filter((r) => r.action.type === "modifyHeaders" && matches(r, request));
+  assert.equal(headers({url: "https://www.amazonaws.com/", type: "main_frame"}).length, 1, "first omnibox visit is sanitized before worker navigation events");
+  assert.equal(headers({url: "https://alice.s3.amazonaws.com/", type: "main_frame"}).length, 0, "parent destination sanitation does not strip a tenant's sign-in");
+  assert.equal(headers({url: "https://af-south-1.airflow.amazonaws.com/", type: "main_frame"}).length, 0, "unrepresentable wildcard bases are explicitly unsupported");
+  assert.equal(headers({...req, top: undefined, initiator: "amazonaws.com"}).length, 1, "Chrome's no-top fallback is initiator-scoped, not attributed to some tab");
+  assert.equal(headers({...req, top: undefined, initiator: "alice.s3.amazonaws.com"}).length, 0);
+  const ownRepair = dnr.compileUserState([], [exception({site: "amazonaws.com", host: "amazonaws.com", path: "/resource", type: "image", tabId: 1})], NOW).rules;
+  const own = {url: "https://amazonaws.com/resource", type: "image", top: "amazonaws.com", tabId: 1};
+  const sanitizer = headers(own).find((r) => r.priority > best(ownRepair, own).priority);
+  assert.deepEqual(sanitizer.action.requestHeaders.map((h) => h.header).sort(), ["authorization", "cookie", "referer"]);
+  assert.deepEqual(sanitizer.action.responseHeaders, [{header: "set-cookie", operation: "remove"}]);
+  assert.ok(sanitizer.action.requestHeaders.every((h) => h.operation === "remove"));
+});
+
+test("Isolation preserves threat/manual precedence and strips credentials after explicit threat navigation consent", () => {
+  const isolated = dnr.compileModes({sites: {"bad.example": "isolated"}}).rules;
+  const threat = dnr.compileList("threats", ["bad.example", "other-bad.example"], {warningUrl: WARN}).rules;
+  const continued = dnr.continueRules(100000, "bad.example", 1);
+  const all = [...isolated, ...threat, ...continued];
+  const nav = {url: "https://bad.example/", type: "main_frame", tabId: 1};
+  assert.equal(outcome(all, nav), "allow", "the warning page can still give explicit navigation consent");
+  assert.ok(isolated.some((r) => r.action.type === "modifyHeaders" && r.priority > best(all, nav).priority && matches(r, nav) && r.action.requestHeaders.some((h) => h.header === "authorization")));
+  const cross = {url: "https://other-bad.example/resource", type: "image", top: "bad.example", tabId: 1};
+  assert.equal(best(all, cross).priority, dnr.PRIORITY.threat);
+  const manual = dnr.compileUserState([userRule({site: "bad.example", host: "other-bad.example", path: "/resource", types: ["image"]})], [], NOW).rules;
+  assert.equal(best([...all, ...manual], cross).priority, dnr.PRIORITY.userBlock);
+  assert.equal(outcome(all, {...cross, url: "https://bad.example/resource"}), "block", "Continue never releases threat subresources");
 });
 
 test("extension id derivation matches Chrome's documented a-p mapping", () => {

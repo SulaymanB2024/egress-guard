@@ -22,6 +22,7 @@ const SRC = path.join(ROOT, "browser");
 const dnr = require(path.join(SRC, "core/dnr.js"));
 const abp = require(path.join(ROOT, "scripts/lib/abp-dnr.cjs"));
 const cosmetics = require(path.join(ROOT, "scripts/lib/cosmetic-compiler.cjs"));
+const parameters = require(path.join(ROOT, "scripts/lib/removeparam-compiler.cjs"));
 
 // Mirrors src/egress_guard/feeds.py (tests/browser/build.test.cjs checks they stay in sync).
 const HAGEZI = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/";
@@ -75,6 +76,7 @@ export function feedSpecs(tier, threatTier = "full") {
 // or older than FILTER_MAX_AGE; --offline never does.
 // The extension itself never fetches anything.
 const EASYLIST_LICENSE = {name: "GPL-3.0 or CC BY-SA 3.0 (dual licensed)", url: "https://easylist.to/pages/licence.html"};
+const UASSETS_LICENSE = {name: "GPL-3.0", url: "https://github.com/uBlockOrigin/uAssets/blob/master/LICENSE"};
 export const FILTER_LISTS = Object.freeze([
   {id: "easyprivacy", name: "EasyPrivacy", url: "https://easylist.to/easylist/easyprivacy.txt", minimum: 20000, license: EASYLIST_LICENSE},
   {id: "easylist", name: "EasyList", url: "https://easylist.to/easylist/easylist.txt", minimum: 20000, license: EASYLIST_LICENSE},
@@ -83,6 +85,9 @@ export const FILTER_LISTS = Object.freeze([
   {id: "adguard-clickthroughs", kind: "domains", name: "AdGuard disguised click-throughs", minimum: 5000,
     url: "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_clickthroughs_justdomains.txt",
     license: {name: "MIT", url: "https://github.com/AdguardTeam/cname-trackers/blob/master/LICENSE"}},
+  {id: "url-tracking", kind: "parameters", name: "AdGuard/uBO – URL Tracking Protection", minimum: 1000,
+    url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy-removeparam.txt",
+    license: UASSETS_LICENSE},
 ]);
 const FILTER_MAX_AGE = 24 * 3600;
 const MAX_FILTER_BYTES = 16 * 1024 * 1024;
@@ -131,6 +136,33 @@ export function checkFilterBody(spec, body) {
     if (bad.length > names.length / 100) throw new Error(`${spec.name} has ${bad.length} invalid hostnames, e.g. ${JSON.stringify(bad[0].slice(0, 80))}`);
     if (names.length < spec.minimum) throw new Error(`${spec.name} has ${names.length} names, fewer than the minimum of ${spec.minimum}`);
     return {filters: names.length, names};
+  }
+  if (spec.kind === "parameters") {
+    if (!text.endsWith("\n")) throw new Error(`${spec.name}: source ends partway through a record`);
+    // The canonical uAssets source has no ABP header and its unbuilt timestamp
+    // is a template, not a publication date. Check its own exact identity.
+    const header = (key) => {
+      const matches = [...text.matchAll(new RegExp("^! " + key + ": (.+)$", "gm"))];
+      if (matches.length !== 1) throw new Error(`${spec.name}: missing or duplicate ${key} header`);
+      return matches[0][1].trim();
+    };
+    if (header("Title") !== spec.name || header("License") !== spec.license.url ||
+        header("Homepage") !== "https://github.com/uBlockOrigin/uAssets") {
+      throw new Error(`${spec.name}: source identity or license changed; review it before building`);
+    }
+    const counts = listCounts(spec, body);
+    if (counts.entries < spec.minimum) throw new Error(`${spec.name} has ${counts.entries} filters, fewer than the minimum of ${spec.minimum}`);
+    const lines = text.split("\n").map(line => line.trim()).filter(line => line && !line.startsWith("!"));
+    const parameterLines = lines.filter(line => /\$(?:[^\n]*,)?removeparam(?:=|,|$)/.test(line)).length;
+    // Upstream includes a few unrelated cosmetic/header rules. They are never
+    // repurposed as removers; the dedicated compiler reports unsupported rows.
+    if (parameterLines < spec.minimum || parameterLines < lines.length * 0.95) {
+      throw new Error(`${spec.name}: unexpected parameter-rule coverage`);
+    }
+    const modified = /^! Last modified: (.+)$/m.exec(text);
+    const lastModified = modified && modified[1].trim();
+    return {title: spec.name, licence: spec.license.url, filters: counts.entries, version: null,
+      last_modified: lastModified && lastModified !== "%timestamp%" && Number.isFinite(Date.parse(lastModified)) ? lastModified : null};
   }
   if (!/^\[Adblock Plus[^\]]*\]\r?\n/.test(text)) throw new Error(`${spec.name} has no "[Adblock Plus …]" header`);
   const head = abp.header(text);
@@ -301,7 +333,7 @@ export function compileFilterRulesets(filters, {maxSuspicious = MAX_SUSPICIOUS} 
   const generic = (r) => r.condition.urlFilter && !r.condition.urlFilter.startsWith("||") && !r.condition.urlFilter.startsWith("|") && !r.condition.requestDomains;
   for (const spec of FILTER_LISTS) {
     const data = filters && filters[spec.id];
-    if (!data || spec.kind === "domains") continue;
+    if (!data || spec.kind) continue;
     const compiled = abp.compileFilters(data.text);
     stats[spec.id] = {...compiled.stats, blockingRules: compiled.block.length + compiled.important.length};
     if (compiled.stats.suspicious > maxSuspicious) {
@@ -428,11 +460,11 @@ function chromeExtensionId(manifest) {
   return dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 }
 
-const SHARED = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/params.js", "core/dnr.js", "core/cosmetic-data.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/semantic.js",
+const SHARED = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/dnr.js", "core/cosmetic-data.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/semantic.js",
   "vendor/PSL-NOTICE.md", "vendor/public_suffix_list.dat", "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const SURROGATE_FILES = [...new Set(dnr.SURROGATES.map((s) => `surrogates/${s.file}`))];
 const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", "semantic.html", "semantic.css", "semantic.js", "core/local-model.js", "privacy.html", "privacy.css", "privacy.js", "core/browser-privacy.js", ...SURROGATE_FILES];
-const CHROME_WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/browser-privacy.js"];
+const CHROME_WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/browser-privacy.js"];
 export const GUARANTEED_STATIC_RULES = 30000;   // Chrome's GUARANTEED_MINIMUM_STATIC_RULES
 export const MAX_STATIC_REGEX_RULES = 1000;     // Chrome's MAX_NUMBER_OF_REGEX_RULES
 
@@ -525,7 +557,7 @@ export function publishBuild(stage, out, rename = fs.renameSync) {
 }
 
 /** Build both browsers. Returns a summary. `lists` null means "no built-in lists". */
-export function buildCoverage(lists, filters, compilation = null, cosmeticData = null) {
+export function buildCoverage(lists, filters, compilation = null, cosmeticData = null, parameterData = null) {
   const missing = [], stale = [];
   for (const [kind, specs] of Object.entries(feedSpecs("pro.plus"))) {
     const sources = lists && lists[kind] && lists[kind].sources || [];
@@ -540,8 +572,9 @@ export function buildCoverage(lists, filters, compilation = null, cosmeticData =
     if (!filters || !filters[spec.id]) missing.push(spec.id);
     else if (filters[spec.id].source.stale) stale.push(spec.id);
   }
-  const ineffective = compilation ? FILTER_LISTS.filter(spec => spec.kind !== "domains" && filters && filters[spec.id] &&
+  const ineffective = compilation ? FILTER_LISTS.filter(spec => !spec.kind && filters && filters[spec.id] &&
     (!compilation[spec.id] || !compilation[spec.id].blockingRules)).map(spec => spec.id) : [];
+  if (parameterData && filters && filters["url-tracking"] && !parameterData.stats.importedRules) ineffective.push("url-tracking");
   const development = Object.values(lists || {}).some(data => data.development === true);
   const cosmeticCoverage = cosmeticData ? {
     scopedRules: cosmeticData.rules.length, genericRules: cosmeticData.genericRules.length,
@@ -552,20 +585,47 @@ export function buildCoverage(lists, filters, compilation = null, cosmeticData =
     fallbackCounts: {...cosmeticData.stats.fallbacks},
   } : null;
   if (cosmeticCoverage) cosmeticCoverage.reduced = cosmeticCoverage.disabledFamilies.length > 0 || cosmeticCoverage.quarantinedSelectors > 0;
-  return {schema: 1, complete: !missing.length && !ineffective.length && !development && !(cosmeticCoverage && cosmeticCoverage.reduced), missing, stale: [...new Set(stale)],
+  const parameterCoverage = parameterData ? {...parameterData.coverage, compilation: parameterData.stats} : null;
+  return {schema: 1, complete: !missing.length && !ineffective.length && !development && !(cosmeticCoverage && cosmeticCoverage.reduced) && !(parameterCoverage && parameterCoverage.reduced), missing, stale: [...new Set(stale)],
     ineffective, development, filterSyntax: "supported-subset", compilation: compilation || {},
     cosmetics: cosmeticCoverage,
-    capabilities: ["domain-blocking", "url-filtering", "site-cosmetics", "indexed-generic-cosmetics", "bounded-relational-cosmetics", "local-ad-review", "optional-browser-privacy"],
-    compiler: "egress-guard-0.8"};
+    parameters: parameterCoverage,
+    capabilities: ["domain-blocking", "url-filtering", "maintained-parameter-cleaning", "named-site-isolation", "site-cosmetics", "indexed-generic-cosmetics", "bounded-relational-cosmetics", "local-ad-review", "optional-browser-privacy"],
+    compiler: "egress-guard-0.9"};
 }
 
-export function build({out = path.join(ROOT, "dist-browser"), lists = null, filters = null, requireComplete = false, chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
+export function build({out = path.join(ROOT, "dist-browser"), lists = null, filters = null, requireComplete = false,
+  allowParameterQuarantine = [], chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
+  if (!Array.isArray(allowParameterQuarantine) || allowParameterQuarantine.length > 128 ||
+      allowParameterQuarantine.some(name => typeof name !== "string" || !/^[A-Za-z0-9_.~!$'()*+\[\]:@-]{1,128}$/.test(name))) {
+    throw new Error("Parameter-quarantine acknowledgments must be bounded literal parameter names");
+  }
   const compiledFilters = compileFilterRulesets(filters);
-  const cosmeticData = cosmetics.compileCosmetics(FILTER_LISTS.filter(f => f.kind !== "domains" && filters && filters[f.id]).map(f => filters[f.id].text));
-  const coverage = buildCoverage(lists, filters, compiledFilters.stats, cosmeticData);
-  if (requireComplete && !coverage.complete) throw new Error("Incomplete browser coverage: " +
-    [...coverage.missing, ...coverage.ineffective.map(id => id + " produced no blocking rules"), ...(coverage.development ? ["development feed-size override"] : []),
-      ...(coverage.cosmetics.reduced ? ["imported cosmetic coverage was reduced by an unsupported source exemption"] : [])].join(", "));
+  const cosmeticData = cosmetics.compileCosmetics(FILTER_LISTS.filter(f => !f.kind && filters && filters[f.id]).map(f => filters[f.id].text));
+  let compiledParams;
+  try {
+    compiledParams = parameters.compileRemoveParams(filters && filters["url-tracking"] ? filters["url-tracking"].text : "",
+      {priority: dnr.PRIORITY.params, allowReduced: !requireComplete || allowParameterQuarantine.length > 0});
+  } catch (error) {
+    if (error.coverage && error.coverage.quarantined.length && !error.coverage.disabled && !error.coverage.unsafe.length) {
+      error.message += ". Review each preserved name, then use --allow-parameter-quarantine NAME to acknowledge only that fallback; required source checks remain enforced.";
+    }
+    throw error;
+  }
+  const coverage = buildCoverage(lists, filters, compiledFilters.stats, cosmeticData, compiledParams);
+  const approvedNames = new Set(allowParameterQuarantine);
+  coverage.parameters.reviewedQuarantined = coverage.parameters.quarantined.filter(name => approvedNames.has(name));
+  // A reviewed one-name compatibility loss is not permission to omit a threat
+  // source, disable the query policy, or accept another unknown source exception.
+  const reviewedParameterReduction = coverage.parameters.reduced && !coverage.parameters.disabled &&
+    !(coverage.parameters.unsafe || []).length && coverage.parameters.quarantined.length > 0 &&
+    coverage.parameters.quarantined.every(name => approvedNames.has(name));
+  const acceptedReduced = reviewedParameterReduction && !coverage.missing.length && !coverage.ineffective.length &&
+    !coverage.development && !coverage.cosmetics.reduced;
+  if (requireComplete && !coverage.complete && !acceptedReduced) throw new Error("Incomplete browser coverage: " +
+    [...coverage.missing, ...coverage.ineffective.map(id => id + " produced no effective rules"), ...(coverage.development ? ["development feed-size override"] : []),
+      ...(coverage.cosmetics.reduced ? ["imported cosmetic coverage was reduced by an unsupported source exemption"] : []),
+      ...(coverage.parameters.reduced ? ["parameter policy was reduced to preserve source exceptions"] : [])].join(", "));
   const chromeManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.chrome.json"), "utf8"));
   const firefoxManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8"));
   const id = chromeExtensionId(chromeManifest);
@@ -580,7 +640,10 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     copy([...SHARED, ...CHROME_ONLY], chrome);
     const cosmeticBody = "/* Generated from verified filter data; see NOTICE.txt. */\nglobalThis.EGCosmeticData = Object.freeze(" + JSON.stringify(cosmeticData) + ");\n";
     fs.writeFileSync(path.join(chrome, "core/cosmetic-data.js"), cosmeticBody);
+    const parameterBody = "/* Generated from verified filter data; see NOTICE.txt. */\nglobalThis.EGParamData = Object.freeze(" + JSON.stringify(compiledParams.data) + ");\n";
+    fs.writeFileSync(path.join(chrome, "core/param-data.js"), parameterBody);
     summary.cosmetics = cosmeticData.stats;
+    summary.parameters = compiledParams.stats;
     fs.mkdirSync(path.join(chrome, "rules"));
     const meta = {};
     const resources = [];
@@ -612,7 +675,7 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     // Everything that is not a host list: small rulesets, one per popup category, each one file.
     const unwrapUrl = `chrome-extension://${id}/unwrap.html`;
     const privacy = dnr.compilePrivacy({trackerDomains: compiledFilters.trackerDomains, bounceDomains: filterDomains(filters, "adguard-clickthroughs")});
-    const extra = {params: dnr.compileParams(), links: dnr.compileLinks(unwrapUrl), gpc: privacy.gpc, referrer: privacy.referrer,
+    const extra = {params: compiledParams.rules, links: dnr.compileLinks(unwrapUrl), gpc: privacy.gpc, referrer: privacy.referrer,
       beacons: privacy.beacons, cookies: privacy.cookies, bounce: privacy.bounce, surrogates: dnr.compileSurrogates(), ...compiledFilters.rulesets};
     summary.filters = compiledFilters.stats;
     summary.rulesets = {};
@@ -636,7 +699,7 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     summary.regexRules = regexRules;
     const sourceOf = (fid) => filters && filters[fid] ? filters[fid].source : null;
     meta.filters = {label: "URL filters", name: joinNames(FILTER_LISTS.filter((f) => sourceOf(f.id) && f.kind !== "domains").map((f) => f.name)),
-      rules: Object.entries(compiledFilters.rulesets).reduce((n, [, r]) => n + r.length, 0), domains: 0,
+      rules: Object.entries(compiledFilters.rulesets).reduce((n, [, r]) => n + r.length, compiledParams.rules.length), domains: 0,
       sources: FILTER_LISTS.filter((f) => sourceOf(f.id)).map((f) => ({name: f.name, url: f.url, license: f.license.name, version: sourceOf(f.id).version,
         sha256: sourceOf(f.id).sha256 || null, last_modified: sourceOf(f.id).last_modified || null})),
       published_at: null, updated_at: Math.min(...FILTER_LISTS.map((f) => (sourceOf(f.id) || {}).fetched_at || Infinity)) || null};
@@ -648,12 +711,15 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     hash.update(JSON.stringify(meta));
     hash.update(JSON.stringify(coverage));
     hash.update(cosmeticBody);
+    hash.update(parameterBody);
     for (const f of [...SHARED, ...CHROME_ONLY, "background-chrome.js", "manifest.chrome.json"]) hash.update(fs.readFileSync(path.join(SRC, f)));
     const buildId = hash.digest("hex").slice(0, 32);
     fs.writeFileSync(path.join(chrome, "rules", "build.json"), JSON.stringify({build: buildId, built_at: Math.floor(Date.now() / 1000), coverage,
-      cosmetics: cosmeticData.stats, psl_sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(SRC, "core/psl-data.js"))).digest("hex")}));
+      cosmetics: cosmeticData.stats, parameters: compiledParams.stats,
+      parameter_policy_sha256: crypto.createHash("sha256").update(parameterBody).digest("hex"),
+      psl_sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(SRC, "core/psl-data.js"))).digest("hex")}));
     summary.build = buildId;
-    const worker = [...CHROME_WORKER.map((f) => `// ---- ${f}\n${fs.readFileSync(path.join(SRC, f), "utf8")}`),
+    const worker = [...CHROME_WORKER.map((f) => `// ---- ${f}\n${f === "core/param-data.js" ? parameterBody : fs.readFileSync(path.join(SRC, f), "utf8")}`),
       `// ---- lists (generated)\nglobalThis.EGLists = Object.freeze(${JSON.stringify({extensionId: id, build: buildId, lists: meta, coverage})});\n`,
       `// ---- background-chrome.js\n${fs.readFileSync(path.join(SRC, "background-chrome.js"), "utf8")}`].join("\n");
     fs.writeFileSync(path.join(chrome, "background.js"), worker);
@@ -688,11 +754,12 @@ function parseArgs(argv) {
     else if (a === "--no-lists") args.lists = false;
     else if (a === "--allow-small") args.allowSmall = true;
     else if (a === "--allow-missing") args.allowMissing = true;
+    else if (a === "--allow-parameter-quarantine") (args.allowParameterQuarantine ||= []).push(next());
     else if (a === "--filters") args.filtersDir = path.resolve(next());
     else if (a === "--offline") args.offline = true;
     else if (a === "--no-filters") args.noFilters = true;
     else if (a === "--accept-list-change") (args.acceptChange = args.acceptChange || []).push(next());
-    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing] [--filters DIR] [--offline] [--no-filters] [--accept-list-change ID]"); process.exit(0); }
+    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing] [--allow-parameter-quarantine NAME] [--filters DIR] [--offline] [--no-filters] [--accept-list-change ID]"); process.exit(0); }
     else throw new Error(`unknown argument ${a}`);
   }
   return args;
@@ -719,8 +786,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       filters = await loadFilters(args.filtersDir || (args.feeds ? path.join(args.feeds, "browser-filters") : defaultFiltersDir()),
         {offline: Boolean(args.offline), allowMissing: Boolean(args.allowMissing), acceptChange: args.acceptChange || [], log: (m) => console.warn(`warning: ${m}`)});
     }
-    const summary = build({out: args.out, lists, filters, chunk: args.chunk, requireComplete: args.lists && !args.noFilters && !args.allowMissing});
-    console.log(`Coverage: ${summary.coverage.complete ? "complete" : "reduced: " + summary.coverage.missing.join(", ")}`);
+    const summary = build({out: args.out, lists, filters, chunk: args.chunk, allowParameterQuarantine: args.allowParameterQuarantine || [],
+      requireComplete: args.lists && !args.noFilters && !args.allowMissing});
+    const reductions = [...summary.coverage.missing.map(id => "missing " + id), ...summary.coverage.ineffective.map(id => "ineffective " + id),
+      ...(summary.coverage.development ? ["development feed-size override"] : []),
+      ...(summary.coverage.cosmetics.reduced ? ["cosmetic exception fallback"] : []),
+      ...(summary.coverage.parameters.disabled ? ["parameter policy disabled"] : []),
+      ...summary.coverage.parameters.quarantined.map(name => "preserved parameter " + name)];
+    console.log(`Coverage: ${summary.coverage.complete ? "complete" : "reduced: " + (reductions.join(", ") || "inspect rules/build.json")}`);
+    console.log(`Parameters: ${summary.parameters.importedRules} effective imported rows; ${summary.parameters.effectiveNames} names in the shared policy`);
     console.log(`Cosmetics: ${summary.cosmetics.accepted} scoped rules, ${summary.cosmetics.exceptions} exceptions`);
     console.log(`Chrome:  ${path.join(summary.out, "chrome")}  (extension id ${summary.extensionId})`);
     for (const [kind, s] of Object.entries(summary.lists)) console.log(`  ${kind.padEnd(8)} ${String(s.domains).padStart(7)} domains in ${s.rules} rules, ${(s.bytes / 1048576).toFixed(1)} MB`);
