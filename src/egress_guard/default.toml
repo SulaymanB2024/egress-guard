@@ -4,7 +4,13 @@ dashboard_port = 18081
 
 [block]
 list_tier = "pro.plus"
+# HaGeZi Threat Intelligence: "full" (default, about 1.2 million names) or "medium".
+# URLhaus malware hosts and Phishing Army phishing domains are always on.
+threat_tier = "full"
 cname_protection = true
+# Block known DNS-over-HTTPS servers, so applications fall back to the system resolver
+# instead of resolving privately and connecting by IP address. Browsers fall back on failure.
+block_encrypted_dns = true
 hosts = []
 allow = []
 # Exact hosts that skip tracker and CNAME decisions. Strict default: none.

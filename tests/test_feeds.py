@@ -9,7 +9,10 @@ from unittest.mock import patch
 import urllib.error
 
 from egress_guard import feeds
+from egress_guard.config import load_config
 from egress_guard.policy import Policy
+
+_real_selected_feeds = feeds.selected_feeds
 
 
 def fixture_feeds():
@@ -34,7 +37,8 @@ https://invalid.test/path
 UPPERCASE.TEST.
 valid.test
 """
-        names, published = feeds._parse_feed(records, self.sources[2])
+        exact = next(feed for feed in self.sources if feed.exact)
+        names, published = feeds._parse_feed(records, exact)
         self.assertEqual(names, {"uppercase.test", "valid.test"})
         self.assertIsNone(published)
         for body in (b"<html>service unavailable</html>\n", b"one.test\ntwo.test", b"\xffbad.test\n"):
@@ -116,6 +120,55 @@ valid.test
             download.assert_not_called()
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "feed refresh lock unavailable")
+
+    def test_selection_tiers_and_toggles(self):
+        select = _real_selected_feeds  # setUp patches feeds.selected_feeds
+        self.assertEqual([feed.id for feed in select({})], [
+            "hagezi-pro.plus", "urlhaus-filter", "phishing-army", "hagezi-threat-intel-full", "hagezi-doh",
+            "adguard-cname-ads", "adguard-cname-trackers"])
+        lean = select({"block": {"threat_tier": "medium", "block_encrypted_dns": False, "cname_protection": False}})
+        self.assertEqual([feed.id for feed in lean],
+                         ["hagezi-pro.plus", "urlhaus-filter", "phishing-army", "hagezi-threat-intel"])
+        with self.assertRaisesRegex(ValueError, "threat tier"):
+            select({"block": {"threat_tier": "huge"}})
+        for feed in feeds.ALL_FEEDS:
+            self.assertTrue(feed.url.startswith("https://") and feed.source and feed.kind)
+        config = self.state / "config.toml"
+        config.write_text('[block]\nthreat_tier = "mini"\n')
+        with self.assertRaisesRegex(ValueError, "threat_tier"):
+            load_config(config)
+        config.write_text('[block]\nblock_encrypted_dns = "yes"\n')
+        with self.assertRaisesRegex(ValueError, "block_encrypted_dns"):
+            load_config(config)
+
+    def test_ip_entries_only_in_ip_feeds_and_new_date_headers(self):
+        body = (b"# Title: Malicious Domains Blocklist\n# Updated: 2026-11-20T12:10:15Z\n"
+                b"bad.example\n198.51.100.7\n2001:DB8::7\n198.51.100.7.example\n")
+        names, published = feeds._parse_feed(body, replace(feeds.MALWARE, minimum=2))
+        self.assertEqual(names, {"bad.example", "198.51.100.7", "2001:db8::7", "198.51.100.7.example"})
+        self.assertEqual(published, dt.datetime(2026, 11, 20, 12, 10, 15, tzinfo=dt.timezone.utc).timestamp())
+        names, _ = feeds._parse_feed(b"one.example\ntwo.example\n198.51.100.7\n", replace(feeds.PHISHING, minimum=2))
+        self.assertEqual(names, {"one.example", "two.example"})
+        generated = b"# Generated: 2026-11-20T23:00:25Z\none.example\ntwo.example\n"
+        self.assertIsNotNone(feeds._parse_feed(generated, replace(feeds.PHISHING, minimum=2))[1])
+
+    def test_host_set_is_compact_membership_only(self):
+        names = {f"host{number}.example" for number in range(1000)}
+        compact = feeds.HostSet(names)
+        self.assertEqual(len(compact), 1000)
+        self.assertTrue(all(name in compact for name in names))
+        self.assertFalse(any(f"other{number}.example" in compact for number in range(1000)))
+        self.assertNotIn(None, compact)
+        self.assertLess(compact._hashes.itemsize * len(compact), 8 * 1001)
+        compact.clear()
+        self.assertFalse(compact)
+        # A loaded snapshot uses the compact set; the text view stays available for measurement.
+        with patch("egress_guard.feeds._download", return_value=b"one.test\ntwo.test\n"):
+            feeds.update_feeds(self.state, {})
+        snapshot = feeds.load_cached_feed(self.state, self.sources[0])
+        self.assertIsInstance(snapshot.names, feeds.HostSet)
+        self.assertIn("one.test", snapshot.names)
+        self.assertEqual(feeds.read_cached_feed(self.state, self.sources[0]), {"one.test", "two.test"})
 
     def test_no_following_redirects_from_feed_hosts(self):
         redirect = urllib.error.HTTPError(self.sources[0].url, 302, "redirect", {}, None)
