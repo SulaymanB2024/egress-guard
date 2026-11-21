@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1180">
+<title>Mockup: Mac app Overview</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="mac.css">
+<style>
+  body { margin: 0; }
+  .content { display: flex; flex-direction: column; }
+  .status { font-size: var(--t-headline); line-height: var(--lh-headline); gap: var(--s3); }
+  .status .dot { width: 12px; height: 12px; }
+  .fact-line { margin-top: var(--s1); color: var(--muted); padding-left: var(--s5); }
+  /* The Path: This Mac, four walls in the order traffic crosses them, the internet. A wall that is down has a hole. */
+  .path { margin-top: var(--s6); display: grid; grid-template-columns: 64px repeat(4, minmax(0, 1fr)) 64px; position: relative; }
+  .path::before { content: ""; position: absolute; left: 20px; right: 20px; top: 67px; height: 2px; background: var(--line); }
+  .end, .wall { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .end:first-child { align-items: flex-start; text-align: left; }
+  .end:last-child { align-items: flex-end; text-align: right; }
+  .end .ic { width: 40px; height: 40px; margin-top: 48px; background: var(--paper); display: grid; place-items: center; }
+  .wall .dt .host { display: block; white-space: nowrap; }
+  .end .ic svg { width: 28px; height: 28px; stroke: var(--ink); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .end .nm { margin-top: var(--s3); font-size: var(--t-body); color: var(--muted); }
+  .wall .bar { position: relative; width: 8px; height: 136px; border-radius: 4px; background: var(--state); }
+  .wall[data-state="reduced"] .bar { background: repeating-linear-gradient(to bottom, var(--state) 0 12px, transparent 12px 18px); }
+  .wall[data-state="unprotected"] .bar { background: linear-gradient(to bottom, var(--state) 0 38%, transparent 38% 62%, var(--state) 62% 100%); }
+  .wall .nm { margin-top: var(--s3); font-weight: var(--w-strong); }
+  .wall .st { color: var(--state); }
+  .wall .dt { color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); margin-top: 2px; max-width: 26ch; }
+  .numbers { margin-top: var(--s7); --cols: 3; padding-top: var(--s5); border-top: 1px solid var(--line); }
+  .numbers .value { font-size: var(--t-headline); line-height: var(--lh-headline); }
+  .numbers .label { font-size: var(--t-body); line-height: var(--lh-body); }
+  .day { margin-top: var(--s6); }
+  .day .head { display: flex; justify-content: space-between; color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); margin-bottom: var(--s2); }
+  .day .bars { --bars-h: 80px; gap: 4px; position: relative; }
+  .day .bars i { background: var(--faint); position: relative; }
+  .day .bars i.now { background: var(--ink); }
+  .day .bars i.t { background: var(--threat); }
+</style>
+</head>
+<body class="mac">
+<div class="window">
+  <aside class="sidebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <nav class="nav">
+      <a href="#" aria-current="page"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>Overview</a>
+      <a href="#"><svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>Scorecard</a>
+      <a href="#"><svg viewBox="0 0 16 16"><path d="M2 8h3l2-4 2 8 2-4h3"/></svg>Activity</a>
+      <a href="#"><svg viewBox="0 0 16 16"><path d="M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4z"/></svg>Threats</a>
+      <a href="#"><svg viewBox="0 0 16 16"><path d="M8 2l6 3-6 3-6-3z M2 8l6 3 6-3 M2 11l6 3 6-3"/></svg>Layers</a>
+    </nav>
+  </aside>
+  <header class="toolbar">
+    <div class="ttl"><b>Overview</b><span>Updated just now</span></div>
+    <span class="sp"></span>
+    <span class="tb-btn" title="Refresh (⌘R)"><svg viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg></span>
+  </header>
+  <main class="content">
+    <p class="status" id="status" data-state="protected"><span class="dot"></span><span class="word" id="word">Protected</span></p>
+    <p class="fact-line" id="fact">All four walls are up between this Mac and the internet.</p>
+
+    <figure class="path" aria-label="Protection path from this Mac to the internet">
+      <div class="end"><span class="ic"><svg viewBox="0 0 28 28"><rect x="5" y="7" width="18" height="12" rx="1.5"/><path d="M2 22h24"/></svg></span><span class="nm">This Mac</span></div>
+      <div class="wall" data-state="protected" id="w1"><span class="bar"></span><span class="nm">Chrome companion</span><span class="st" id="w1s">On</span><span class="dt" id="w1d">In 13 of 13 profiles</span></div>
+      <div class="wall" data-state="protected"><span class="bar"></span><span class="nm">Filtering proxy</span><span class="st">On</span><span class="dt">Filtering every app</span></div>
+      <div class="wall" data-state="protected"><span class="bar"></span><span class="nm">DNS filter</span><span class="st">On</span><span class="dt">1.87M block rules · 2 h old</span></div>
+      <div class="wall" data-state="protected" id="w4"><span class="bar"></span><span class="nm">Mullvad tunnel</span><span class="st" id="w4s">On</span><span class="dt" id="w4d">Chicago, USA · lockdown on <span class="host">us-chi-wg-307</span></span></div>
+      <div class="end"><span class="ic"><svg viewBox="0 0 28 28"><circle cx="14" cy="14" r="10"/><path d="M4 14h20M14 4c3 3 4 6.5 4 10s-1 7-4 10c-3-3-4-6.5-4-10s1-7 4-10z"/></svg></span><span class="nm">Internet</span></div>
+    </figure>
+
+    <div class="metric-row numbers">
+      <div class="metric"><span class="value num">2,752</span><span class="label">blocked today</span></div>
+      <div class="metric"><span class="value num">1</span><span class="label">threat stopped</span></div>
+      <div class="metric"><span class="value num">0</span><span class="label">trackers saw you</span></div>
+    </div>
+
+    <figure class="day" aria-label="Connections blocked per hour today">
+      <div class="head"><span>Blocked per hour, today</span><span class="num" style="color:var(--threat)">Threat stopped at 10:00</span></div>
+      <div class="bars" id="bars"></div>
+      <div class="bars-axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>Now</span></div>
+    </figure>
+  </main>
+</div>
+<script>
+  const v = [40,22,14,9,6,4,3,5,18,62,140,188,210,176,190,230,260,240,198,170,150,120,96,40];
+  const threat = new Set([10]);
+  document.getElementById("bars").innerHTML = v.map((n, i) => `<i class="${threat.has(i) ? "t" : ""}${i === v.length - 1 ? " now" : ""}"${threat.has(i) ? ` data-label="Threat stopped ${String(i).padStart(2, "0")}:00"` : ""} style="--h:${n / 260 * 100}%"></i>`).join("");
+  if (location.hash === "#reduced") {
+    document.getElementById("status").dataset.state = "reduced";
+    document.getElementById("word").textContent = "Reduced";
+    document.getElementById("fact").textContent = "Chrome companion is missing in 2 of 13 Chrome profiles.";
+    const w1 = document.getElementById("w1"); w1.dataset.state = "reduced";
+    document.getElementById("w1s").textContent = "Partial";
+    document.getElementById("w1d").textContent = "In 11 of 13 profiles";
+  }
+  if (location.hash === "#down") {
+    document.getElementById("status").dataset.state = "unprotected";
+    document.getElementById("word").textContent = "Unprotected";
+    document.getElementById("fact").textContent = "Mullvad tunnel is down: sites can see this Mac's address.";
+    document.getElementById("w4").dataset.state = "unprotected";
+    document.getElementById("w4s").textContent = "Off";
+    document.getElementById("w4d").textContent = "Disconnected 4 min ago · lockdown off";
+  }
+</script>
+</body>
+</html>

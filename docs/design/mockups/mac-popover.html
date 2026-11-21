@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: Mac menu-bar popover</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="sheet.css">
+<link rel="stylesheet" href="mac.css">
+<style>
+  /* Popover: 340pt wide, 16pt insets, content column 308. Height follows content. */
+  .pop { padding: var(--s4) 0 var(--s2); }
+  .pop .head { padding: 0 var(--s4); }
+  .pop .head .status { font-size: var(--t-title); line-height: var(--lh-title); }
+  .pop .head .why { margin-top: 2px; color: var(--ink); }
+  .pop .head .when { color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); margin-top: 2px; }
+  .pop .metric-row { padding: 0 var(--s4); margin-top: var(--s4); column-gap: var(--s3); }
+  .pop .metric-row .value { font-size: var(--t-headline); line-height: var(--lh-headline); }
+  .pop .layers { margin: var(--s4) var(--s4) 0; }
+  .pop .layers li { display: grid; grid-template-columns: 8px minmax(0, 1fr); column-gap: var(--s2); align-items: baseline; padding: var(--s1) 0; }
+  .pop .layers .dot { transform: translateY(-1px); }
+  .pop .layers .nm { font-weight: var(--w-strong); }
+  .pop .layers .st { color: var(--state); font-weight: var(--w-regular); }
+  .pop .layers .dt { grid-column: 2; color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); }
+  .sep { height: 1px; background: var(--line); margin: var(--s2) var(--s4); }
+  .menu a { display: flex; justify-content: space-between; align-items: center; height: 28px; margin: 0 var(--s1); padding: 0 var(--s3); border-radius: 5px; color: var(--ink); text-decoration: none; }
+  .menu a .k { color: var(--muted); }
+  .menu a.hl { background: rgba(0,0,0,.07); }
+  @media (prefers-color-scheme: dark) { .menu a.hl { background: rgba(255,255,255,.08); } }
+  .confirm { margin: 0 var(--s4); padding: var(--s3) 0 var(--s2); display: flex; flex-direction: column; gap: var(--s2); }
+  .confirm .acts { display: flex; gap: var(--s2); justify-content: flex-end; }
+  .sk { display: inline-block; height: 12px; border-radius: 3px; background: var(--sunken); }
+</style>
+</head>
+<body class="mac">
+<div class="sheet">
+
+<figure><figcaption>Reduced · longest real strings</figcaption>
+<section class="frame desk" data-name="popover-reduced"><div class="popover pop">
+  <div class="head">
+    <p class="status" data-state="reduced"><span class="dot"></span><span class="word">Reduced</span></p>
+    <p class="why">Chrome companion is in 11 of 13 Chrome profiles</p>
+  </div>
+  <div class="metric-row">
+    <div class="metric"><span class="value">56,417</span><span class="label">Blocked today</span></div>
+    <div class="metric"><span class="value">12</span><span class="label">Threats stopped</span></div>
+    <div class="metric"><span class="value">3</span><span class="label">Trackers saw you</span></div>
+  </div>
+  <ul class="layers">
+    <li data-state="reduced"><span class="dot"></span><span><span class="nm">Chrome companion</span> <span class="st">· Partial</span></span><span class="dt">Missing in Work 2 and Guest</span></li>
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">Filtering proxy</span> <span class="st">· On</span></span><span class="dt">Filtering every app</span></li>
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">DNS filter</span> <span class="st">· On</span></span><span class="dt">1.94M block rules · lists 13 h old</span></li>
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">Mullvad tunnel</span> <span class="st">· On</span></span><span class="dt">Chicago, USA · lockdown on · <span class="host">us-chi-wg-307</span></span></li>
+  </ul>
+  <div class="sep"></div>
+  <nav class="menu">
+    <a href="#">Open Egress Guard <span class="k">⌘O</span></a>
+    <a href="#">Refresh <span class="k">⌘R</span></a>
+  </nav>
+  <div class="sep"></div>
+  <nav class="menu"><a href="#">Restore internet…</a><a href="#">Quit Egress Guard <span class="k">⌘Q</span></a></nav>
+</div></section></figure>
+
+<figure><figcaption>Protected · status line is short, numbers lead</figcaption>
+<section class="frame desk" data-name="popover-protected"><div class="popover pop">
+  <div class="head">
+    <p class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></p>
+    <p class="why">All four walls are up</p>
+  </div>
+  <div class="metric-row">
+    <div class="metric"><span class="value">2,752</span><span class="label">Blocked today</span></div>
+    <div class="metric"><span class="value">0</span><span class="label">Threats stopped</span></div>
+    <div class="metric"><span class="value">0</span><span class="label">Trackers saw you</span></div>
+  </div>
+  <ul class="layers">
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">Chrome companion</span> <span class="st">· On</span></span><span class="dt">In 13 of 13 profiles</span></li>
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">Filtering proxy</span> <span class="st">· On</span></span><span class="dt">Filtering every app</span></li>
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">DNS filter</span> <span class="st">· On</span></span><span class="dt">1.87M block rules · lists 2 h old</span></li>
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">Mullvad tunnel</span> <span class="st">· On</span></span><span class="dt">Frankfurt, Germany · lockdown on · <span class="host">de-fra-wg-sto-004</span></span></li>
+  </ul>
+  <div class="sep"></div>
+  <nav class="menu"><a href="#" class="hl">Open Egress Guard <span class="k">⌘O</span></a><a href="#">Refresh <span class="k">⌘R</span></a></nav>
+  <div class="sep"></div>
+  <nav class="menu"><a href="#">Restore internet…</a><a href="#">Quit Egress Guard <span class="k">⌘Q</span></a></nav>
+</div></section></figure>
+
+<figure><figcaption>Unprotected · tunnel down</figcaption>
+<section class="frame desk" data-name="popover-unprotected"><div class="popover pop">
+  <div class="head">
+    <p class="status" data-state="unprotected"><span class="dot"></span><span class="word">Unprotected</span></p>
+    <p class="why">Mullvad tunnel is disconnected and lockdown is off</p>
+  </div>
+  <div class="metric-row">
+    <div class="metric"><span class="value">2,752</span><span class="label">Blocked today</span></div>
+    <div class="metric"><span class="value">1</span><span class="label">Threats stopped</span></div>
+    <div class="metric"><span class="value">17</span><span class="label">Trackers saw you</span></div>
+  </div>
+  <ul class="layers">
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">Chrome companion</span> <span class="st">· On</span></span><span class="dt">In 13 of 13 profiles</span></li>
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">Filtering proxy</span> <span class="st">· On</span></span><span class="dt">Filtering every app</span></li>
+    <li data-state="protected"><span class="dot"></span><span><span class="nm">DNS filter</span> <span class="st">· On</span></span><span class="dt">1.87M block rules · lists 2 h old</span></li>
+    <li data-state="unprotected"><span class="dot"></span><span><span class="nm">Mullvad tunnel</span> <span class="st">· Off</span></span><span class="dt">Disconnected 4 min ago · this Mac's address is visible</span></li>
+  </ul>
+  <div class="sep"></div>
+  <nav class="menu"><a href="#">Open Egress Guard <span class="k">⌘O</span></a><a href="#">Refresh <span class="k">⌘R</span></a></nav>
+  <div class="sep"></div>
+  <nav class="menu"><a href="#">Restore internet…</a><a href="#">Quit Egress Guard <span class="k">⌘Q</span></a></nav>
+</div></section></figure>
+
+<figure><figcaption>Restore internet · inline confirmation, Cancel is the default</figcaption>
+<section class="frame desk" data-name="popover-restore"><div class="popover pop">
+  <div class="head">
+    <p class="status" data-state="reduced"><span class="dot"></span><span class="word">Reduced</span></p>
+    <p class="why">Chrome companion is in 11 of 13 Chrome profiles</p>
+  </div>
+  <div class="metric-row">
+    <div class="metric"><span class="value">56,417</span><span class="label">Blocked today</span></div>
+    <div class="metric"><span class="value">12</span><span class="label">Threats stopped</span></div>
+    <div class="metric"><span class="value">3</span><span class="label">Trackers saw you</span></div>
+  </div>
+  <div class="sep" style="margin-top:var(--s4)"></div>
+  <div class="confirm">
+    <p class="strong">Restore internet?</p>
+    <p>Turns walls off one at a time until sites load, then turns them back on when the connection is steady.</p>
+    <div class="acts"><button class="btn primary">Cancel</button><button class="btn">Restore</button></div>
+  </div>
+</div></section></figure>
+
+<figure><figcaption>Loading · first read, layout does not move when data arrives</figcaption>
+<section class="frame desk" data-name="popover-loading"><div class="popover pop">
+  <div class="head">
+    <p class="status" data-state="neutral"><span class="dot hollow"></span><span class="word">Checking…</span></p>
+    <p class="why"><span class="sk" style="width:220px"></span></p>
+  </div>
+  <div class="metric-row">
+    <div class="metric"><span class="value"><span class="sk" style="width:64px;height:22px"></span></span><span class="label">Blocked today</span></div>
+    <div class="metric"><span class="value"><span class="sk" style="width:24px;height:22px"></span></span><span class="label">Threats stopped</span></div>
+    <div class="metric"><span class="value"><span class="sk" style="width:24px;height:22px"></span></span><span class="label">Trackers saw you</span></div>
+  </div>
+  <ul class="layers">
+    <li data-state="neutral"><span class="dot hollow"></span><span class="nm">Chrome companion</span><span class="dt"><span class="sk" style="width:120px;height:10px"></span></span></li>
+    <li data-state="neutral"><span class="dot hollow"></span><span class="nm">Filtering proxy</span><span class="dt"><span class="sk" style="width:110px;height:10px"></span></span></li>
+    <li data-state="neutral"><span class="dot hollow"></span><span class="nm">DNS filter</span><span class="dt"><span class="sk" style="width:150px;height:10px"></span></span></li>
+    <li data-state="neutral"><span class="dot hollow"></span><span class="nm">Mullvad tunnel</span><span class="dt"><span class="sk" style="width:180px;height:10px"></span></span></li>
+  </ul>
+  <div class="sep"></div>
+  <nav class="menu"><a href="#">Open Egress Guard <span class="k">⌘O</span></a><a href="#">Refresh <span class="k">⌘R</span></a></nav>
+  <div class="sep"></div>
+  <nav class="menu"><a href="#">Restore internet…</a><a href="#">Quit Egress Guard <span class="k">⌘Q</span></a></nav>
+</div></section></figure>
+
+</div>
+</body>
+</html>

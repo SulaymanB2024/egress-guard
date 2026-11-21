@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: web dashboard</title>
+<link rel="stylesheet" href="../tokens.css">
+<style>
+  /* 12-column grid, 1152 max, 24 gutter, 32 side margin; at <= 720 one column with 16 margins. */
+  .wrap { max-width: 1216px; margin: 0 auto; padding: 0 var(--s6); }
+  .bar { height: 56px; display: flex; align-items: center; gap: var(--s2); }
+  .bar .name { font-weight: var(--w-strong); }
+  .bar .scope { color: var(--muted); margin-left: var(--s2); }
+  .bar .sp { flex: 1; }
+  .bar .updated { color: var(--muted); margin-right: var(--s3); }
+  .status-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); padding-top: var(--s5); flex-wrap: wrap; }
+  .status { font-size: var(--t-title); line-height: var(--lh-title); }
+  .status .fact { font-size: var(--t-body); }
+  .status-row .acts { display: flex; gap: var(--s2); flex-wrap: wrap; }
+  .hero { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--s5); margin-top: var(--s6); align-items: end; }
+  .hero .focal { grid-column: span 4; }
+  .hero .focal .label { font-size: var(--t-body); line-height: var(--lh-body); color: var(--ink); }
+  .hero .focal .sub { color: var(--muted); margin-top: var(--s2); }
+  .hero .chart { grid-column: span 8; }
+  .chart-head { display: flex; justify-content: space-between; color: var(--muted); margin-bottom: var(--s2); }
+  .legend { display: flex; gap: var(--s4); }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 1px; margin-right: var(--s1); background: var(--faint); vertical-align: 0; }
+  .legend i.b { background: var(--ink); }
+  .bars.day { --bars-h: 120px; gap: 4px; }
+  .bars.day i.b { background: var(--faint); }
+  .bars.day i.now { background: var(--ink); }
+  .reasons { margin-top: var(--s6); --cols: 4; padding-top: var(--s5); border-top: 1px solid var(--line); }
+  .reasons .value { font-size: var(--t-headline); line-height: var(--lh-headline); }
+  .reasons .label { font-size: var(--t-body); line-height: var(--lh-body); }
+  .drill { margin-top: var(--s7); }
+  .tools { display: flex; gap: var(--s3); align-items: center; margin: var(--s4) 0 var(--s2); flex-wrap: wrap; }
+  .tools .field { width: 320px; }
+  .tools .sp { flex: 1; }
+  .table .row { grid-template-columns: 88px minmax(0, 1fr) 240px 88px; min-height: 40px; padding: 0 var(--s2); }
+  .table .dec.blocked { font-weight: var(--w-strong); }
+  .table .dec.allowed { color: var(--muted); }
+  .table .why { color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .table .when { text-align: right; color: var(--muted); }
+  .more { display: flex; justify-content: center; margin: var(--s4) 0 var(--s7); }
+  .empty-hero { margin-top: var(--s6); }
+  @media (max-width: 720px) {
+    .wrap { padding: 0 var(--s4); }
+    .bar .scope, .bar .updated { display: none; }
+    .status-row .status { flex-wrap: wrap; row-gap: 0; }
+    .status-row .status .fact { flex-basis: 100%; padding-left: calc(8px + var(--s2)); }
+    .hero { grid-template-columns: 1fr; row-gap: var(--s5); }
+    .hero .focal, .hero .chart { grid-column: auto; }
+    .bars.day { --bars-h: 96px; gap: 2px; }
+    .reasons { --cols: 2; row-gap: var(--s4); }
+    .tools .field { width: 100%; }
+    .tools .seg { width: 100%; }
+    .table .row { grid-template-columns: minmax(0, 1fr) auto; min-height: 56px; padding: var(--s2); row-gap: 2px; }
+    .table .dec { grid-row: 2; font-size: var(--t-caption); line-height: var(--lh-caption); }
+    .table .host-c { grid-column: 1 / -1; }
+    .table .why { grid-row: 2; grid-column: 1; padding-left: 64px; font-size: var(--t-caption); line-height: var(--lh-caption); }
+    .table .dec { grid-column: 1; }
+    .table .when { grid-row: 2; grid-column: 2; font-size: var(--t-caption); line-height: var(--lh-caption); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar">
+    <span class="mark" aria-hidden="true"></span><span class="name">Egress Guard</span><span class="scope">This Mac</span>
+    <span class="sp"></span><span class="updated t-caption num" id="upd">Updated 20 s ago</span><button class="btn">Refresh</button>
+  </header>
+
+  <div class="status-row">
+    <p class="status" id="status" data-state="protected"><span class="dot"></span><span class="word" id="word">Protected</span><span class="fact" id="fact">Filtering every app · lists updated 2 h ago</span></p>
+    <span class="acts"><button class="btn" id="update" hidden>Update lists</button><button class="btn" id="pause">Pause ad filtering</button></span>
+  </div>
+
+  <section id="full">
+    <div class="hero">
+      <div class="metric focal">
+        <span class="value t-display">94</span>
+        <span class="label">blocked today</span>
+        <span class="sub num">15% of 619 connections · up 19% on yesterday</span>
+      </div>
+      <figure class="chart" aria-label="Connections per hour, last 24 hours: blocked and allowed">
+        <div class="chart-head t-caption"><span>Blocked per hour, last 24 hours</span><span class="num">Peak 15 at 10:00</span></div>
+        <div class="bars day" id="bars"></div>
+        <div class="bars-axis"><span>16:00</span><span>22:00</span><span>04:00</span><span>10:00</span><span>Now</span></div>
+      </figure>
+    </div>
+
+    <div class="metric-row reasons">
+      <div class="metric"><span class="value">1</span><span class="label">threat stopped</span></div>
+      <div class="metric"><span class="value">82</span><span class="label">ads and trackers</span></div>
+      <div class="metric"><span class="value">10</span><span class="label">cloaked trackers</span></div>
+      <div class="metric"><span class="value">1</span><span class="label">by your rules</span></div>
+    </div>
+
+    <section class="drill">
+      <nav class="tabs" aria-label="Details">
+        <a href="#" aria-current="page">Activity</a>
+        <a href="#">Top blocked</a>
+        <a href="#">Threats <span class="count">1</span></a>
+      </nav>
+      <div class="tools">
+        <input class="field" type="search" placeholder="Domain" aria-label="Search or check a domain">
+        <span class="sp"></span>
+        <div class="seg" role="group" aria-label="Show"><button aria-pressed="true">All</button><button aria-pressed="false">Blocked</button><button aria-pressed="false">Allowed</button></div>
+      </div>
+      <ul class="list table" id="rows"></ul>
+      <div class="more"><button class="btn">Show 50 more</button></div>
+    </section>
+  </section>
+
+  <section id="empty" hidden>
+    <div class="empty empty-hero">
+      <p class="t-headline">No connections yet</p>
+      <p class="muted">Counts start when an app on this Mac goes online through the proxy.</p>
+    </div>
+  </section>
+</div>
+<script>
+  // Fixture: 24 hourly totals and blocked counts (oldest first; the last is the current hour so far).
+  const total = [56,44,33,25,9,4,3,1,2,4,4,7,22,44,40,63,76,84,86,83,78,72,62,14];
+  const blocked = [6,2,5,4,1,0,0,0,0,1,1,1,3,4,4,3,8,11,15,10,8,7,6,4];
+  const max = 100;
+  const peak = Math.max(...blocked);
+  document.getElementById("bars").innerHTML = blocked.map((b, i) =>
+    `<i class="${b ? "b" : "zero"}${i === 23 ? " now" : ""}" style="--h:${b / peak * 100}%" title="${b} blocked of ${total[i]}"></i>`).join("");
+  const rows = [
+    ["blocked","stats.g.doubleclick.net","Ad or tracker list","1 min ago"],
+    ["allowed","app.example-maps.test","No rule matched","2 min ago"],
+    ["blocked","browser-intake-datadoghq.com","Ad or tracker list","2 min ago"],
+    ["blocked","metrics.example-shop.test","Cloaked tracker (CNAME)","2 min ago"],
+    ["allowed","api.example-notes.test","No rule matched","3 min ago"],
+    ["blocked","securepubads.g.doubleclick.net","Ad or tracker list","3 min ago"],
+    ["blocked","login-verify.example-phish.test","Phishing list","2 h ago"],
+    ["allowed","eu-west-2.cdn.internal-billing-portal.example-enterprise.co.uk","No rule matched","4 min ago", "eu-west-2.…​.example-enterprise.co.uk"],
+    ["blocked","ib.adnxs.com","Ad or tracker list","5 min ago"],
+    ["allowed","push.example-mail.test","No rule matched","9 min ago"],
+  ];
+  document.getElementById("rows").innerHTML = rows.map(([d,h,w,t,short]) =>
+    `<li class="row"><span class="dec ${d}">${d === "blocked" ? "Blocked" : "Allowed"}</span><span class="host host-c line1" title="${h}">${short && innerWidth < 720 ? short : h}</span><span class="why">${w}</span><span class="when num">${t}</span></li>`).join("");
+  const h = location.hash;
+  if (h === "#reduced") {
+    const s = document.getElementById("status"); s.dataset.state = "reduced";
+    document.getElementById("word").textContent = "Reduced";
+    document.getElementById("fact").textContent = "2 block lists are 3 days old";
+    document.getElementById("update").hidden = false;
+  }
+  if (h === "#empty") {
+    document.getElementById("full").hidden = true; document.getElementById("empty").hidden = false;
+    document.getElementById("fact").textContent = "Filtering every app · lists updated 2 h ago";
+    document.getElementById("upd").textContent = "Updated just now";
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1180">
+<title>Mockup: Mac app Activity</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="mac.css">
+<style>
+  body { margin: 0; }
+  .toolbar .seg { width: 216px; }
+  .toolbar .seg button { min-height: 24px; font-size: var(--t-body); }
+  .toolbar .field { width: 220px; min-height: 28px; }
+  .content { padding: 0; }
+  /* Table: time | decision | host | reason. Left edges at 32, 112, 216, -320 (from the right). */
+  .thead, .tr { display: grid; grid-template-columns: 64px 88px minmax(0, 1fr) 280px; column-gap: var(--s4); align-items: center; padding: 0 var(--s6); }
+  .thead { height: 32px; color: var(--muted); font-size: var(--t-caption); border-bottom: 1px solid var(--line); }
+  .tr { height: 28px; }
+  .tr:nth-child(even) { background: transparent; }
+  .tr.sel { background: var(--select); }
+  .tr .tm { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tr .blocked { font-weight: var(--w-strong); }
+  .tr .allowed { color: var(--muted); }
+  .tr .h { white-space: nowrap; overflow: hidden; }
+  .tr .r { color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .tr[data-state="threat"] .blocked, .tr[data-state="threat"] .r { color: var(--threat); }
+  .inspector { position: absolute; }
+</style>
+</head>
+<body class="mac">
+<div class="window">
+  <aside class="sidebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <nav class="nav">
+      <a href="#"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>Overview</a>
+      <a href="#"><svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>Scorecard</a>
+      <a href="#" aria-current="page"><svg viewBox="0 0 16 16"><path d="M2 8h3l2-4 2 8 2-4h3"/></svg>Activity</a>
+      <a href="#"><svg viewBox="0 0 16 16"><path d="M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4z"/></svg>Threats</a>
+      <a href="#"><svg viewBox="0 0 16 16"><path d="M8 2l6 3-6 3-6-3z M2 8l6 3 6-3 M2 11l6 3 6-3"/></svg>Layers</a>
+    </nav>
+  </aside>
+  <header class="toolbar">
+    <div class="ttl"><b>Activity</b><span>Latest 500 decisions</span></div>
+    <span class="sp"></span>
+    <div class="seg" role="group" aria-label="Show"><button aria-pressed="true">All</button><button aria-pressed="false">Blocked</button><button aria-pressed="false">Allowed</button></div>
+    <input class="field" type="search" placeholder="Search" aria-label="Search hostnames">
+  </header>
+  <main class="content">
+    <div class="thead"><span>Time</span><span>Decision</span><span>Host</span><span>Reason</span></div>
+    <div id="rows"></div>
+  </main>
+</div>
+<script>
+  const rows = [
+    ["14:32:08","blocked","stats.g.doubleclick.net","Ad or tracker list"],
+    ["14:32:05","allowed","app.example-maps.test","No rule matched"],
+    ["14:31:59","blocked","browser-intake-datadoghq.com","Ad or tracker list"],
+    ["14:31:52","blocked","metrics.example-shop.test","Cloaked tracker (CNAME to omtrdc.net)"],
+    ["14:31:40","allowed","api.example-notes.test","No rule matched"],
+    ["14:31:33","blocked","login-verify.example-phish.test","Phishing list (HaGeZi Threat Intelligence)","threat"],
+    ["14:31:30","blocked","securepubads.g.doubleclick.net","Ad or tracker list"],
+    ["14:31:18","allowed","eu-west-2.cdn.internal-billing-portal.example-enterprise.co.uk","No rule matched"],
+    ["14:31:02","allowed","cdn.example-shop.test","No rule matched"],
+    ["14:30:57","blocked","ib.adnxs.com","Ad or tracker list"],
+    ["14:30:41","allowed","auth.example-maps.test","No rule matched"],
+    ["14:30:22","blocked","api.mixpanel.com","Ad or tracker list"],
+    ["14:30:20","allowed","img.example-news.test","No rule matched"],
+    ["14:30:11","blocked","connect.facebook.net","Ad or tracker list"],
+    ["14:29:58","blocked","cdn.segment.com","Your rule: always block"],
+    ["14:29:47","allowed","push.example-mail.test","No rule matched"],
+    ["14:29:31","allowed","xn--80ak6aa92e.com","Allowed for 15 min (you)"],
+    ["14:29:12","blocked","www.google-analytics.com","Ad or tracker list"],
+    ["14:28:55","allowed","api.example-shop.test","No rule matched"],
+    ["14:28:40","blocked","ads.yieldmo.com","Ad or tracker list"],
+    ["14:28:21","allowed","fonts.example-cdn.test","No rule matched"],
+    ["14:28:02","blocked","bat.bing.com","Ad or tracker list"],
+  ];
+  // Reference implementation of the hostname truncation rule in DESIGN.md: drop whole middle labels, never cut a label
+  // unless the registrable domain alone is too long.
+  function fitHost(host, max) {
+    if (host.length <= max) return host;
+    const L = host.split(".");
+    const k = L.length > 2 && L[L.length - 1].length === 2 && /^(co|com|org|net|ac|gov|edu)$/.test(L[L.length - 2]) ? 3 : 2;
+    const tail = L.slice(-k).join(".");
+    let head = [];
+    for (const label of L.slice(0, -k)) {
+      const next = [...head, label].join(".") + ".…." + tail;
+      if (next.length > max) break;
+      head.push(label);
+    }
+    if (head.length) return head.join(".") + ".…." + tail;
+    if (("…." + tail).length <= max) return "…." + tail;
+    const keep = max - 1, a = Math.ceil(keep / 2);
+    return tail.slice(0, a) + "…" + tail.slice(tail.length - (keep - a));
+  }
+  document.getElementById("rows").innerHTML = rows.map(([t, d, h, r, s], i) =>
+    `<div class="tr${i === 5 ? " sel" : ""}"${s ? ` data-state="${s}"` : ""}><span class="tm">${t}</span><span class="${d}">${d === "blocked" ? "Blocked" : "Allowed"}</span><span class="h host" title="${h}">${fitHost(h, 56)}</span><span class="r">${r}</span></div>`).join("");
+</script>
+</body>
+</html>

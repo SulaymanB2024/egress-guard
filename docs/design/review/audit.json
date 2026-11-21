@@ -1,0 +1,658 @@
+[
+ {
+  "tag": "popup",
+  "result": [
+   {
+    "name": "popup-main",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13px mono",
+     "14px",
+     "16px",
+     "48px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-zero-longhost",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13px mono",
+     "14px",
+     "16px",
+     "48px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-reduced",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13px mono",
+     "14px",
+     "16px",
+     "48px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-paused",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px",
+     "13px mono",
+     "14px",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-unsupported",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13px mono",
+     "14px",
+     "16px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-blocked",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13.02px mono",
+     "13px mono",
+     "14px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-blocked-empty",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13px mono",
+     "14px",
+     "16px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-rules",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13.02px mono",
+     "13px mono",
+     "14px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-rules-empty",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13px mono",
+     "14px",
+     "16px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popup-settings",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13px mono",
+     "14px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "placeholder",
+  "result": [
+   {
+    "name": "placeholder-video",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px",
+     "14px",
+     "16px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "placeholder-narrow",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px",
+     "14px",
+     "16px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "placeholder-refused",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px",
+     "14px",
+     "16px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "mac-popover",
+  "result": [
+   {
+    "name": "popover-reduced",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "10.23px mono",
+     "11px",
+     "13px",
+     "15px",
+     "22px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popover-protected",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "10.23px mono",
+     "11px",
+     "13px",
+     "15px",
+     "22px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popover-unprotected",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "11px",
+     "13px",
+     "15px",
+     "22px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popover-restore",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "11px",
+     "13px",
+     "15px",
+     "22px"
+    ],
+    "off": [],
+    "hscroll": false
+   },
+   {
+    "name": "popover-loading",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "11px",
+     "13px",
+     "15px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "warning-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px mono",
+     "14px",
+     "16px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "warning-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px mono",
+     "14px",
+     "16px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "warning-confirm-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px mono",
+     "14px",
+     "16px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "warning-confirm-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px mono",
+     "14px",
+     "16px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "interstitial-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px mono",
+     "14px",
+     "16px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "interstitial-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px mono",
+     "14px",
+     "16px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "interstitial-idn-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px mono",
+     "14px",
+     "16px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "interstitial-idn-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "12px mono",
+     "14px",
+     "16px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "interstitial-unread-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "14px",
+     "14px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "interstitial-unread-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 1,
+    "sizes": [
+     "14px",
+     "14px mono",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "dashboard-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13.02px mono",
+     "14px",
+     "16px",
+     "24px",
+     "48px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "dashboard-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13.02px mono",
+     "14px",
+     "16px",
+     "24px",
+     "48px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "dashboard-reduced-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13.02px mono",
+     "14px",
+     "16px",
+     "24px",
+     "48px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "dashboard-reduced-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13.02px mono",
+     "14px",
+     "16px",
+     "24px",
+     "48px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "dashboard-empty-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "14px",
+     "16px",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "dashboard-empty-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "14px",
+     "16px",
+     "24px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "scorecard-1440",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13.02px mono",
+     "14px",
+     "16px",
+     "48px"
+    ],
+    "off": [
+     "paddingLeft:152 ev"
+    ],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "scorecard-390",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "12px",
+     "13.02px mono",
+     "14px",
+     "16px",
+     "48px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "mac-overview",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "10.23px mono",
+     "11px",
+     "13px",
+     "15px",
+     "22px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "mac-overview-reduced",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "10.23px mono",
+     "11px",
+     "13px",
+     "15px",
+     "22px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "mac-overview-down",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "11px",
+     "13px",
+     "15px",
+     "22px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ },
+ {
+  "tag": "mac-activity",
+  "result": [
+   {
+    "name": "page",
+    "clipped": [],
+    "primaries": 0,
+    "sizes": [
+     "11px",
+     "12.09px mono",
+     "13px",
+     "15px"
+    ],
+    "off": [],
+    "hscroll": false
+   }
+  ]
+ }
+]

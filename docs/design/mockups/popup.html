@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: browser popup</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="sheet.css">
+<style>
+  /* Popup layout: 360 wide, 16px side gutter, content column 328. Height follows content, budget 520. */
+  .popup { width: 360px; display: flex; flex-direction: column; }
+  .popup > header { display: flex; align-items: center; gap: var(--s2); height: 48px; padding: 0 var(--s4); }
+  .popup > header .site { font-family: var(--font-mono); font-weight: var(--w-strong); font-size: 13px; min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; }
+  .popup > header .status { flex: none; font-size: var(--t-caption); }
+  .popup .tabs { padding: 0 var(--s4); }
+  .popup main { padding: var(--s5) var(--s4) var(--s4); display: flex; flex-direction: column; }
+  .focal .label { color: var(--muted); margin-top: var(--s1); }
+  .facts { margin-top: var(--s5); }
+  .facts .value { font-size: var(--t-title); line-height: var(--lh-title); }
+  .control { margin-top: var(--s6); display: flex; flex-direction: column; gap: var(--s2); }
+  .control .head { display: flex; align-items: center; justify-content: space-between; min-height: var(--hit); }
+  .control .head h2 { font-size: var(--t-body); font-weight: var(--w-strong); }
+  .foot { margin-top: var(--s4); display: flex; justify-content: space-between; align-items: center; min-height: var(--hit); }
+  .foot .t-caption { color: var(--muted); }
+  /* Second level */
+  .group + .group { margin-top: var(--s5); }
+  .group > h2 { display: flex; justify-content: space-between; align-items: center; min-height: var(--hit); font-size: var(--t-body); font-weight: var(--w-strong); padding-bottom: var(--s1); }
+  .group > h2 .num { font-weight: var(--w-regular); color: var(--muted); }
+  .popup .row { grid-template-columns: minmax(0, 1fr) auto; min-height: 48px; }
+  .url .path { color: var(--muted); }
+  .scroll { max-height: 436px; overflow: hidden; }
+  .tools { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .provenance .row { min-height: 40px; }
+  .callout { margin-top: var(--s4); display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+  .callout p { color: var(--ink); }
+  .callout strong { color: var(--state); }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<!-- 1. Main view, common case -->
+<figure><figcaption>Main · protected · 360 wide</figcaption>
+<section class="frame popup" data-name="popup-main">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site" title="publisher.example">publisher.example</span>
+    <span class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#" aria-current="page">This page</a>
+    <a href="#">Blocked <span class="count">5</span></a>
+    <a href="#">Rules <span class="count">1</span></a>
+    <a href="#">Settings</a>
+  </nav>
+  <main>
+    <div class="metric focal">
+      <span class="value t-display">5</span>
+      <span class="label t-body" style="font-size:var(--t-body);line-height:var(--lh-body)">requests blocked on this page</span>
+    </div>
+    <div class="metric-row facts">
+      <div class="metric"><span class="value">11</span><span class="label">links cleaned</span></div>
+      <div class="metric"><span class="value">0</span><span class="label">cookies removed</span></div>
+      <div class="metric"><span class="value">2</span><span class="label">elements hidden</span></div>
+    </div>
+    <div class="control">
+      <div class="head"><h2 id="lvl">Protection on this site</h2><button class="btn quiet">Pause</button></div>
+      <div class="seg" role="group" aria-labelledby="lvl">
+        <button aria-pressed="false" title="Host lists only">Relaxed</button>
+        <button aria-pressed="true" title="Host lists plus URL filters (default)">Standard</button>
+        <button aria-pressed="false" title="Also holds embeds and third-party frames">Strict</button>
+        <button aria-pressed="false" title="Also blocks all scripts on this site">No scripts</button>
+      </div>
+    </div>
+  </main>
+</section></figure>
+
+<!-- 2. Main view, nothing blocked and a long hostname -->
+<figure><figcaption>Main · zero blocked · long host truncates in the middle, by label</figcaption>
+<section class="frame popup" data-name="popup-zero-longhost">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site" title="accounts.internal-billing-portal.eu-west-2.example-enterprise.co.uk">….example-enterprise.co.uk</span>
+    <span class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#" aria-current="page">This page</a>
+    <a href="#">Blocked <span class="count">0</span></a>
+    <a href="#">Rules</a>
+    <a href="#">Settings</a>
+  </nav>
+  <main>
+    <div class="metric focal">
+      <span class="value t-display">0</span>
+      <span class="label" style="font-size:var(--t-body);line-height:var(--lh-body)">requests blocked on this page</span>
+    </div>
+    <div class="metric-row facts">
+      <div class="metric"><span class="value">0</span><span class="label">links cleaned</span></div>
+      <div class="metric"><span class="value">0</span><span class="label">cookies removed</span></div>
+      <div class="metric"><span class="value">0</span><span class="label">elements hidden</span></div>
+    </div>
+    <div class="control">
+      <div class="head"><h2 id="lvl2">Protection on this site</h2><button class="btn quiet">Pause</button></div>
+      <div class="seg" role="group" aria-labelledby="lvl2">
+        <button aria-pressed="false">Relaxed</button><button aria-pressed="false">Standard</button><button aria-pressed="true">Strict</button><button aria-pressed="false">No scripts</button>
+      </div>
+    </div>
+  </main>
+</section></figure>
+
+<!-- 3. Reduced: lists stale -->
+<figure><figcaption>Main · reduced (lists stale): one callout, one action</figcaption>
+<section class="frame popup" data-name="popup-reduced">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site">news.example-paper.com</span>
+    <span class="status" data-state="reduced"><span class="dot"></span><span class="word">Reduced</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#" aria-current="page">This page</a>
+    <a href="#">Blocked <span class="count">38</span></a>
+    <a href="#">Rules</a>
+    <a href="#">Settings</a>
+  </nav>
+  <main>
+    <div class="metric focal">
+      <span class="value t-display">38</span>
+      <span class="label" style="font-size:var(--t-body);line-height:var(--lh-body)">requests blocked on this page</span>
+    </div>
+    <div class="metric-row facts">
+      <div class="metric"><span class="value">126</span><span class="label">links cleaned</span></div>
+      <div class="metric"><span class="value">14</span><span class="label">cookies removed</span></div>
+      <div class="metric"><span class="value">1,204</span><span class="label">elements hidden</span></div>
+    </div>
+    <div class="callout" data-state="reduced">
+      <p><strong>Block lists are 9 days old</strong></p>
+      <button class="btn">Update</button>
+    </div>
+    <div class="control" style="margin-top:var(--s5)">
+      <div class="head"><h2 id="lvl3">Protection on this site</h2><button class="btn quiet">Pause</button></div>
+      <div class="seg" role="group" aria-labelledby="lvl3">
+        <button aria-pressed="false">Relaxed</button><button aria-pressed="true">Standard</button><button aria-pressed="false">Strict</button><button aria-pressed="false">No scripts</button>
+      </div>
+    </div>
+  </main>
+</section></figure>
+
+<!-- 4. Paused -->
+<figure><figcaption>Main · paused on this site (unprotected): the one primary button resumes</figcaption>
+<section class="frame popup" data-name="popup-paused">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site">publisher.example</span>
+    <span class="status" data-state="unprotected"><span class="dot"></span><span class="word">Paused</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#" aria-current="page">This page</a>
+    <a href="#">Blocked <span class="count">0</span></a>
+    <a href="#">Rules <span class="count">1</span></a>
+    <a href="#">Settings</a>
+  </nav>
+  <main>
+    <div class="metric focal">
+      <span class="value t-headline">Paused until 15:42</span>
+      <span class="label" style="font-size:var(--t-body);line-height:var(--lh-body)">Nothing is blocked or cleaned on this site.</span>
+    </div>
+    <div style="margin-top:var(--s5)"><button class="btn primary lg">Resume protection</button></div>
+  </main>
+</section></figure>
+
+<!-- 5. Unsupported page -->
+<figure><figcaption>Main · browser page (empty state)</figcaption>
+<section class="frame popup" data-name="popup-unsupported">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site">chrome://newtab</span>
+    <span class="status" data-state="neutral"><span class="dot hollow"></span><span class="word">Not filtered</span></span>
+  </header>
+  <main>
+    <div class="empty" style="padding-top:var(--s4)">
+      <p class="t-title">Chrome pages can't be filtered</p>
+      <p class="muted">Open a website to see what Egress Guard blocks on it.</p>
+    </div>
+    <div class="foot" style="margin-top:0"><a class="btn quiet" href="#">Open the dashboard</a><a class="btn quiet" href="#">Settings</a></div>
+  </main>
+</section></figure>
+
+<!-- 6. Blocked tab -->
+<figure><figcaption>Blocked · grouped by reason · one row selected shows its action</figcaption>
+<section class="frame popup" data-name="popup-blocked">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site">publisher.example</span>
+    <span class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#">This page</a>
+    <a href="#" aria-current="page">Blocked <span class="count">5</span></a>
+    <a href="#">Rules <span class="count">1</span></a>
+    <a href="#">Settings</a>
+  </nav>
+  <main class="scroll" style="padding-top:var(--s4)">
+    <section class="group">
+      <h2>First-party tracker scripts <span class="num">2</span></h2>
+      <ul class="list">
+        <li class="row" aria-selected="true" tabindex="0"><div class="main"><div class="line1 url host" title="https://publisher.example/sgtm/gtm.js?id=GTM-K8Q2ZX&amp;l=dataLayer">publisher.example<span class="path">/…/gtm.js</span></div><div class="line2">Script</div></div><button class="btn act">Allow 15 min</button></li>
+        <li class="row" tabindex="0"><div class="main"><div class="line1 url host">publisher.example<span class="path">/g/collect</span></div><div class="line2">Image</div></div><button class="btn act">Allow 15 min</button></li>
+      </ul>
+    </section>
+    <section class="group">
+      <h2>Ads and trackers <span class="num">2</span></h2>
+      <ul class="list">
+        <li class="row" tabindex="0"><div class="main"><div class="line1 url host" title="https://securepubads.g.doubleclick.net/pagead/managed/js/gpt/m202611180101/pubads_impl.js">securepubads.g.doubleclick.net<span class="path">/…</span></div><div class="line2">Script</div></div><button class="btn act">Allow 15 min</button></li>
+        <li class="row" tabindex="0"><div class="main"><div class="line1 url host">tracker-fixture.test<span class="path">/p.gif</span></div><div class="line2">Image</div></div><button class="btn act">Allow 15 min</button></li>
+      </ul>
+    </section>
+    <section class="group">
+      <h2>Session replay <span class="num">1</span></h2>
+      <ul class="list">
+        <li class="row" tabindex="0"><div class="main"><div class="line1 url host">publisher.example<span class="path">/hotjar-123.js</span></div><div class="line2">Script</div></div><button class="btn act">Allow 15 min</button></li>
+      </ul>
+    </section>
+  </main>
+</section></figure>
+
+<!-- 7. Blocked tab, empty -->
+<figure><figcaption>Blocked · empty</figcaption>
+<section class="frame popup" data-name="popup-blocked-empty">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site">docs.python.org</span>
+    <span class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#">This page</a>
+    <a href="#" aria-current="page">Blocked <span class="count">0</span></a>
+    <a href="#">Rules</a>
+    <a href="#">Settings</a>
+  </nav>
+  <main>
+    <div class="empty">
+      <p class="t-title">Nothing blocked on this page</p>
+      <p class="muted">Requests appear here as the page makes them.</p>
+    </div>
+  </main>
+</section></figure>
+
+<!-- 8. Rules tab -->
+<figure><figcaption>Rules · site rules, exceptions, page tools</figcaption>
+<section class="frame popup" data-name="popup-rules">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site">publisher.example</span>
+    <span class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#">This page</a>
+    <a href="#">Blocked <span class="count">5</span></a>
+    <a href="#" aria-current="page">Rules <span class="count">2</span></a>
+    <a href="#">Settings</a>
+  </nav>
+  <main style="padding-top:var(--s4)">
+    <section class="group">
+      <h2>Rules for this site <button class="btn quiet" style="font-weight:var(--w-regular)">Add…</button></h2>
+      <ul class="list">
+        <li class="row" tabindex="0"><div class="main"><div class="line1 host">cdn.segment.com</div><div class="line2">Always block</div></div><button class="btn quiet act">Remove</button></li>
+      </ul>
+    </section>
+    <section class="group">
+      <h2>Allowed for now</h2>
+      <ul class="list">
+        <li class="row" aria-selected="true" tabindex="0"><div class="main"><div class="line1 url host">tracker-fixture.test<span class="path">/p.gif</span></div><div class="line2 num">12 min left</div></div><button class="btn quiet act">End now</button></li>
+      </ul>
+    </section>
+    <section class="group">
+      <h2>On this page</h2>
+      <ul class="list">
+        <li class="row" tabindex="0"><span class="main">Block an element…</span><span class="trail" aria-hidden="true">›</span></li>
+        <li class="row" tabindex="0"><span class="main">Show hidden ad slots</span><span class="trail">2 ›</span></li>
+        <li class="row" tabindex="0"><span class="main">Restore everything hidden here</span><span class="trail" aria-hidden="true">›</span></li>
+      </ul>
+    </section>
+  </main>
+</section></figure>
+
+<!-- 9. Rules tab, empty -->
+<figure><figcaption>Rules · empty</figcaption>
+<section class="frame popup" data-name="popup-rules-empty">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site">docs.python.org</span>
+    <span class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#">This page</a>
+    <a href="#">Blocked <span class="count">0</span></a>
+    <a href="#" aria-current="page">Rules</a>
+    <a href="#">Settings</a>
+  </nav>
+  <main>
+    <div class="empty">
+      <p class="t-title">No rules for this site</p>
+      <p class="muted">Block a host here, or allow one for 15 minutes from Blocked.</p>
+      <button class="btn" style="margin-top:var(--s2)">Add a rule…</button>
+    </div>
+  </main>
+</section></figure>
+
+<!-- 10. Settings tab -->
+<figure><figcaption>Settings · defaults and list provenance</figcaption>
+<section class="frame popup" data-name="popup-settings">
+  <header>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="site">publisher.example</span>
+    <span class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></span>
+  </header>
+  <nav class="tabs" aria-label="Popup sections">
+    <a href="#">This page</a>
+    <a href="#">Blocked <span class="count">5</span></a>
+    <a href="#">Rules <span class="count">2</span></a>
+    <a href="#" aria-current="page">Settings</a>
+  </nav>
+  <main style="padding-top:var(--s4)">
+    <section class="group">
+      <h2 id="def">Default for other sites</h2>
+      <div class="seg" role="group" aria-labelledby="def" style="margin-top:var(--s2)">
+        <button aria-pressed="false">Relaxed</button><button aria-pressed="true">Standard</button><button aria-pressed="false">Strict</button><button aria-pressed="false">No scripts</button>
+      </div>
+      <label class="setting"><span>Open mail-scanner links directly</span><input class="switch" type="checkbox"></label>
+    </section>
+    <section class="group provenance" style="margin-top:var(--s4)">
+      <h2>Block lists <span class="num">Updated</span></h2>
+      <ul class="list">
+        <li class="row"><div class="main"><div class="line1">HaGeZi Threat Intelligence (Medium)</div></div><span class="trail">Nov 18</span></li>
+        <li class="row"><div class="main"><div class="line1">HaGeZi Multi PRO++</div></div><span class="trail">Nov 18</span></li>
+        <li class="row"><div class="main"><div class="line1">AdGuard CNAME-cloaked trackers</div></div><span class="trail">Nov 19</span></li>
+        <li class="row"><div class="main"><div class="line1">EasyPrivacy URL rules</div></div><span class="trail">Nov 20</span></li>
+      </ul>
+    </section>
+  </main>
+</section></figure>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: click-to-load embed placeholder</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="sheet.css">
+<style>
+  /* The frame is a slice of someone else's article; the placeholder takes the embed's own box. */
+  .host-page { padding: var(--s5); background: #ffffff; color: #222; font: 16px/1.6 Georgia, serif; }
+  @media (prefers-color-scheme: dark) { .host-page { background: #1c1c1e; color: #ddd; } }
+  .host-page p { max-width: 60ch; }
+  /* Placeholder (ships in a closed shadow root with these exact values inlined). */
+  .eg-hold { margin: var(--s4) 0; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: var(--s3);
+    padding: var(--s4); border-radius: var(--r-surface); background: var(--sunken); color: var(--ink);
+    font: var(--w-regular) var(--t-body)/var(--lh-body) var(--font-sans); }
+  .eg-hold .who { display: flex; align-items: center; gap: var(--s2); color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); }
+  .eg-hold .t-title { color: var(--ink); }
+  .eg-hold .row2 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+  .eg-hold .note { color: var(--unprotected); }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<figure><figcaption>Video, 640 × 360 slot</figcaption>
+<section class="frame host-page" data-name="placeholder-video" style="width:688px">
+  <p>The council approved the plan on Tuesday after a long session. Watch the full meeting below.</p>
+  <div class="eg-hold" style="height:360px">
+    <p class="who"><span class="mark" aria-hidden="true"></span>Held by Egress Guard</p>
+    <p class="t-title">YouTube video</p>
+    <div class="row2"><button class="btn primary">Load video</button><button class="btn quiet">Load signed in</button></div>
+  </div>
+  <p>Residents can comment until December 4.</p>
+</section></figure>
+
+<figure><figcaption>Post, 300 × 250 slot (narrow)</figcaption>
+<section class="frame host-page" data-name="placeholder-narrow" style="width:348px">
+  <div class="eg-hold" style="height:250px">
+    <p class="who"><span class="mark" aria-hidden="true"></span>Held by Egress Guard</p>
+    <p class="t-title">Instagram post</p>
+    <div class="row2"><button class="btn primary">Load post</button><button class="btn quiet">Load signed in</button></div>
+  </div>
+</section></figure>
+
+<figure><figcaption>Refused click (covered or just appeared): one line in the threat colour, nothing else moves</figcaption>
+<section class="frame host-page" data-name="placeholder-refused" style="width:348px">
+  <div class="eg-hold" style="height:250px">
+    <p class="who"><span class="mark" aria-hidden="true"></span>Held by Egress Guard</p>
+    <p class="t-title">Instagram post</p>
+    <div class="row2"><button class="btn primary">Load post</button><button class="btn quiet">Load signed in</button></div>
+    <p class="note">Not loaded: the button was covered. Click again.</p>
+  </div>
+</section></figure>
+
+</div>
+</body>
+</html>
