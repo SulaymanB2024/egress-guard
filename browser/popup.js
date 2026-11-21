@@ -12,14 +12,14 @@
   const FORM_TYPES = ["beacon", "ping", "xmlhttprequest", "image", "script", "sub_frame"];
   const EXCEPTION_MINUTES = 15;
   const LIST_LABELS = {threats: "Malware and phishing", trackers: "Ads and trackers", cname: "Disguised trackers", user: "Your rules"};
-  const LIST_ORDER = ["threats", "trackers", "cname", "fp-trackers", "easyprivacy", "replay", "beacons", "easylist", "links", "surrogates", "strict", "noscript", "embeds", "user"];
+  const LIST_ORDER = ["threats", "trackers", "cname", "fp-trackers", "easyprivacy", "replay", "beacons", "easylist", "links", "surrogates", "preparation", "strict", "noscript", "embeds", "user"];
   // Categories whose entries are a request you could let through for a while. Unwrapped links are navigations.
-  const NO_EXCEPTION = new Set(["threats", "links"]);
+  const NO_EXCEPTION = new Set(["threats", "links", "preparation"]);
   const MODES = [
     ["relaxed", "Relaxed", "Host lists, malware protection and your rules only. URL filters, beacon blocking and link unwrapping are off here."],
     ["standard", "Standard", "Host lists plus URL filters for first-party trackers, fingerprinting and session replay, beacons and link trackers."],
     ["strict", "Strict", "Standard, plus third-party scripts, frames and fonts blocked (payment, sign-in and captcha providers excepted), third-party cookies stripped and video or social embeds held until you click."],
-    ["noscript", "No scripts", "Strict, and no JavaScript runs on this site at all. For reading."],
+    ["noscript", "No scripts", "Strict, plus blocked script requests and a script-restricting policy on network responses. Existing pages and cached content may need a fresh load."],
   ];
   const TYPE_NAMES = {beacon: "Beacon", ping: "Ping", xmlhttprequest: "Fetch", image: "Image", imageset: "Image", script: "Script", stylesheet: "Stylesheet",
     font: "Font", media: "Media", sub_frame: "Frame", main_frame: "Page", object: "Plug-in", csp_report: "CSP report", websocket: "Socket",
@@ -242,14 +242,14 @@
   }
 
   function renderModes(state) {
-    const supported = typeof state.mode === "string";
+    const supported = Boolean(state.site) && typeof state.mode === "string";
+    const defaultsSupported = typeof state.defaultMode === "string";
     $("protection").hidden = !supported;
-    $("defaults-group").hidden = !supported;
-    if (!supported) return;
+    $("defaults-group").hidden = !defaultsSupported;
     // While the site is paused the control shows the level that comes back, and cannot be changed.
     const paused = typeof state.paused === "number";
     const current = (paused ? state.resumeMode : state.mode) || "standard";
-    $("modes").replaceChildren(...MODES.map(([id, label, about]) => {
+    $("modes").replaceChildren(...(supported ? MODES : []).map(([id, label, about]) => {
       const button = el("button", label);
       button.type = "button";
       button.disabled = paused;
@@ -258,8 +258,8 @@
       button.addEventListener("click", () => act({type: "set-mode", mode: id === state.defaultMode ? "default" : id}));
       return button;
     }));
-    const def = state.defaultMode === "strict" ? "strict" : "standard";
-    $("default-modes").replaceChildren(...MODES.filter(([id]) => id === "standard" || id === "strict").map(([id, label, about]) => {
+    const def = ["standard", "strict"].includes(state.defaultMode) ? state.defaultMode : null;
+    $("default-modes").replaceChildren(...(defaultsSupported ? MODES : []).filter(([id]) => id === "standard" || id === "strict").map(([id, label, about]) => {
       const button = el("button", label);
       button.type = "button";
       button.setAttribute("aria-pressed", String(id === def));
@@ -268,6 +268,22 @@
       return button;
     }));
     $("scanned-direct").checked = state.scannedDirect === true;
+  }
+
+  function renderPreparation(state) {
+    const preparation = state && state.preparation;
+    $("strict-preparation").hidden = IS_FIREFOX || !preparation || preparation.state === "not-applicable";
+    $("prepare-site").hidden = !preparation || preparation.state !== "held" || preparation.canPrepare === false;
+    if (!preparation) return preparation;
+    $("preparation-note").textContent = preparation.state === "held"
+      ? preparation.canPrepare === false
+        ? String(preparation.reason || "This address cannot be scoped safely. Strict continues to hold active resources here.") + " Change the default to Standard in Settings if you need to use this address."
+        : "Strict is holding scripts, frames, fonts and plug-ins until this site's rules are installed. Prepare the site, then use Chrome's Reload button if the page is incomplete."
+      : preparation.state === "prepared"
+      ? "Strict site rules are installed. If initial resources were held and the page is incomplete, use Chrome's Reload button."
+      : "Strict preparation could not be verified. Retry the policy update before relying on it.";
+    $("strict-preparation").setAttribute("data-state", preparation.state === "prepared" ? "neutral" : "reduced");
+    return preparation;
   }
 
   /** Link and cookie cleaning: two facts on the main view; the per-site brake is a page tool. */
@@ -409,13 +425,17 @@
       if (policy.error) $("policy-note").textContent += " " + String(policy.error).slice(0, 300);
     }
     const coverage = state && state.coverage;
-    const reduced = Boolean(coverage && (!coverage.complete || (coverage.stale || []).length));
+    const reduced = Boolean(coverage && (!coverage.complete || (coverage.stale || []).length || coverage.cosmetics && coverage.cosmetics.reduced));
     $("coverage-note").hidden = !reduced;
     if (reduced) {
       const parts = [];
       if ((coverage.missing || []).length) parts.push("Incomplete build: " + coverage.missing.join(", "));
       if ((coverage.ineffective || []).length) parts.push("No compiled blocking rules for: " + coverage.ineffective.join(", "));
       if (coverage.development) parts.push("Development build: production feed-size checks were skipped");
+      if (coverage.cosmetics && coverage.cosmetics.reduced) {
+        if (coverage.cosmetics.disabledFamilies.length) parts.push("Imported hiding disabled by unsupported source exemptions: " + coverage.cosmetics.disabledFamilies.join(", "));
+        if (coverage.cosmetics.quarantinedSelectors) parts.push(coverage.cosmetics.quarantinedSelectors + " imported selector(s) withheld because an exemption could not be represented");
+      }
       if (!coverage.complete && !parts.length) parts.push("Build completeness could not be verified");
       if ((coverage.stale || []).length) parts.push("Old list snapshots: " + coverage.stale.join(", "));
       $("coverage-note").textContent = parts.join(". ") + ". Refresh the lists and rebuild.";
@@ -466,16 +486,20 @@
     const lists = (state && state.lists) || [];
     categories = (state && state.categories) || {};
     const policyState = renderPolicy(state);
+    renderModes(state || {});
+    const preparation = renderPreparation(state);
     renderLists(lists);
     $("rebuilt").hidden = !(state && state.rebuilt === true);
     if (!state || !state.site) {
       const where = String(tab && tab.url || "").replace(/^([a-z-]+:\/\/[^/?#]*).*$/i, "$1");
       $("site").textContent = where || "Not a web page";
       $("site").removeAttribute("title");
-      setStatus("neutral", "Not filtered", true);
+      const held = preparation && preparation.state === "held";
+      setStatus(held ? "reduced" : "neutral", held ? "Held" : "Not filtered", !held);
       $("page-view").hidden = true;
       $("unsupported").hidden = false;
-      $("unsupported-title").textContent = IS_FIREFOX ? "Browser pages can't be filtered" : "Chrome pages can't be filtered";
+      $("unsupported-title").textContent = held ? "This address cannot use site-scoped rules" : IS_FIREFOX ? "Browser pages can't be filtered" : "Chrome pages can't be filtered";
+      $("unsupported-note").textContent = held ? "The default protection level is available in Settings. Browser privacy controls are also available there." : "Open a website to see what Egress Guard blocks on it.";
       for (const id of ["blocked", "rules"]) $(`tab-${id}`).hidden = true;
       for (const id of ["pick", "restore"]) $(id).disabled = true;
       $("protection").hidden = true;
@@ -489,7 +513,6 @@
     $("site").textContent = state.host;
     $("site").setAttribute("title", state.host);
     if (!$("rule-host").value) $("rule-host").value = state.host;
-    renderModes(state);
     renderCleaning(state);
     renderBlocked(state, lists);
     renderRules(state);
@@ -501,6 +524,8 @@
       const notes = [];
       if (page.protectedRules.length) notes.push(`${page.protectedRules.length} rule(s) skipped protected content`);
       if (page.overbroadRules.length) notes.push(`${page.overbroadRules.length} rule(s) matched too much and were skipped`);
+      if (page.imported && (page.imported.degradedFamilies || []).length) notes.push("Imported " + page.imported.degradedFamilies.join(" and ") + " hiding is unavailable on this page");
+      if (page.imported && (page.imported.limits || []).length) notes.push("Page-work limits were reached; some cosmetic matches may remain");
       $("hidden").textContent = `${page.hidden} element${page.hidden === 1 ? "" : "s"} hidden, ${page.shown} shown by you.${notes.length ? ` ${notes.join("; ")}.` : ""}`;
     }
     $("hidden-count").textContent = page ? fmt(page.paused ? 0 : page.hidden) : "–";
@@ -514,9 +539,12 @@
     $("rebuilt").hidden = sitePaused || policyState.issue || state.rebuilt !== true;
     $("pause").hidden = sitePaused;
     for (const id of ["clean-toggle", "generic"]) $(id).disabled = sitePaused;
-    const contentIssue = Boolean(page && page.generic && (page.generic.error || page.generic.pending));
+    const contentIssue = Boolean(page && (page.generic && (page.generic.error || page.generic.pending) ||
+      page.imported && ((page.imported.degradedFamilies || []).length || (page.imported.limits || []).length)));
     if (policyState.issue) setStatus("reduced", state.policy.state === "pending" ? "Pending" : "Degraded");
     else if (sitePaused) setStatus("reduced", "Paused");
+    else if (preparation && preparation.state === "held") setStatus("reduced", "Preparing");
+    else if (preparation && preparation.state === "unknown") setStatus("reduced", "Degraded");
     else if (IS_FIREFOX && typeof state.mode !== "string") setStatus("reduced", "Manual rules");
     else setStatus(state.rebuilt === true || policyState.reduced || contentIssue ? "reduced" : "protected", state.rebuilt === true || policyState.reduced || contentIssue ? "Reduced" : "Protected");
 
@@ -601,8 +629,14 @@
       catch (e) { showError(String(e && e.message || e)); }
     });
     $("policy-retry").addEventListener("click", () => act({type: "retry-policy"}));
+    $("prepare-site").addEventListener("click", () => act({type: "prepare-strict-site"}));
     $("native-group").hidden = IS_FIREFOX || typeof B.runtime.sendNativeMessage !== "function";
     $("native-check").addEventListener("click", checkNative);
+    $("privacy-group").hidden = IS_FIREFOX;
+    $("privacy-open").addEventListener("click", async () => {
+      try { await B.tabs.create({url: B.runtime.getURL("privacy.html")}); root.close(); }
+      catch (e) { showError(String(e && e.message || e)); }
+    });
     $("restore").addEventListener("click", restoreOrResume);
     $("pause").addEventListener("click", async () => { const r = await act({type: "pause-site"}); if (r && !r.error) $("resume").focus(); });
     $("resume").addEventListener("click", async () => { const r = await act({type: "resume-site"}); if (r && !r.error) $("pause").focus(); });

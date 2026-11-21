@@ -428,11 +428,11 @@ function chromeExtensionId(manifest) {
   return dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 }
 
-const SHARED = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/params.js", "core/dnr.js", "core/cosmetic-data.js", "core/cosmetic.js", "core/semantic.js",
+const SHARED = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/params.js", "core/dnr.js", "core/cosmetic-data.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/semantic.js",
   "vendor/PSL-NOTICE.md", "vendor/public_suffix_list.dat", "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const SURROGATE_FILES = [...new Set(dnr.SURROGATES.map((s) => `surrogates/${s.file}`))];
-const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", "semantic.html", "semantic.css", "semantic.js", "core/local-model.js", ...SURROGATE_FILES];
-const CHROME_WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/cosmetic.js"];
+const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", "semantic.html", "semantic.css", "semantic.js", "core/local-model.js", "privacy.html", "privacy.css", "privacy.js", "core/browser-privacy.js", ...SURROGATE_FILES];
+const CHROME_WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/browser-privacy.js"];
 export const GUARANTEED_STATIC_RULES = 30000;   // Chrome's GUARANTEED_MINIMUM_STATIC_RULES
 export const MAX_STATIC_REGEX_RULES = 1000;     // Chrome's MAX_NUMBER_OF_REGEX_RULES
 
@@ -525,7 +525,7 @@ export function publishBuild(stage, out, rename = fs.renameSync) {
 }
 
 /** Build both browsers. Returns a summary. `lists` null means "no built-in lists". */
-export function buildCoverage(lists, filters, compilation = null) {
+export function buildCoverage(lists, filters, compilation = null, cosmeticData = null) {
   const missing = [], stale = [];
   for (const [kind, specs] of Object.entries(feedSpecs("pro.plus"))) {
     const sources = lists && lists[kind] && lists[kind].sources || [];
@@ -543,17 +543,29 @@ export function buildCoverage(lists, filters, compilation = null) {
   const ineffective = compilation ? FILTER_LISTS.filter(spec => spec.kind !== "domains" && filters && filters[spec.id] &&
     (!compilation[spec.id] || !compilation[spec.id].blockingRules)).map(spec => spec.id) : [];
   const development = Object.values(lists || {}).some(data => data.development === true);
-  return {schema: 1, complete: !missing.length && !ineffective.length && !development, missing, stale: [...new Set(stale)],
+  const cosmeticCoverage = cosmeticData ? {
+    scopedRules: cosmeticData.rules.length, genericRules: cosmeticData.genericRules.length,
+    selectorExceptions: cosmeticData.exceptions.length, pageExceptions: cosmeticData.hideExceptions.length,
+    relationalRules: cosmeticData.stats.relational, entityScoped: cosmeticData.stats.entityScoped,
+    disabledFamilies: ["generic", "scoped"].filter(kind => cosmeticData.fallback[kind] === true),
+    quarantinedSelectors: cosmeticData.fallback.selectors.length,
+    fallbackCounts: {...cosmeticData.stats.fallbacks},
+  } : null;
+  if (cosmeticCoverage) cosmeticCoverage.reduced = cosmeticCoverage.disabledFamilies.length > 0 || cosmeticCoverage.quarantinedSelectors > 0;
+  return {schema: 1, complete: !missing.length && !ineffective.length && !development && !(cosmeticCoverage && cosmeticCoverage.reduced), missing, stale: [...new Set(stale)],
     ineffective, development, filterSyntax: "supported-subset", compilation: compilation || {},
-    capabilities: ["domain-blocking", "url-filtering", "site-cosmetics", "local-ad-review"],
-    compiler: "egress-guard-0.7"};
+    cosmetics: cosmeticCoverage,
+    capabilities: ["domain-blocking", "url-filtering", "site-cosmetics", "indexed-generic-cosmetics", "bounded-relational-cosmetics", "local-ad-review", "optional-browser-privacy"],
+    compiler: "egress-guard-0.8"};
 }
 
 export function build({out = path.join(ROOT, "dist-browser"), lists = null, filters = null, requireComplete = false, chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
   const compiledFilters = compileFilterRulesets(filters);
-  const coverage = buildCoverage(lists, filters, compiledFilters.stats);
+  const cosmeticData = cosmetics.compileCosmetics(FILTER_LISTS.filter(f => f.kind !== "domains" && filters && filters[f.id]).map(f => filters[f.id].text));
+  const coverage = buildCoverage(lists, filters, compiledFilters.stats, cosmeticData);
   if (requireComplete && !coverage.complete) throw new Error("Incomplete browser coverage: " +
-    [...coverage.missing, ...coverage.ineffective.map(id => id + " produced no blocking rules"), ...(coverage.development ? ["development feed-size override"] : [])].join(", "));
+    [...coverage.missing, ...coverage.ineffective.map(id => id + " produced no blocking rules"), ...(coverage.development ? ["development feed-size override"] : []),
+      ...(coverage.cosmetics.reduced ? ["imported cosmetic coverage was reduced by an unsupported source exemption"] : [])].join(", "));
   const chromeManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.chrome.json"), "utf8"));
   const firefoxManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8"));
   const id = chromeExtensionId(chromeManifest);
@@ -566,7 +578,6 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     // ---- Chrome ----
     const chrome = path.join(stage, "chrome");
     copy([...SHARED, ...CHROME_ONLY], chrome);
-    const cosmeticData = cosmetics.compileCosmetics(FILTER_LISTS.filter(f => f.kind !== "domains" && filters && filters[f.id]).map(f => filters[f.id].text));
     const cosmeticBody = "/* Generated from verified filter data; see NOTICE.txt. */\nglobalThis.EGCosmeticData = Object.freeze(" + JSON.stringify(cosmeticData) + ");\n";
     fs.writeFileSync(path.join(chrome, "core/cosmetic-data.js"), cosmeticBody);
     summary.cosmetics = cosmeticData.stats;

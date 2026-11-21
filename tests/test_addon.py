@@ -24,6 +24,7 @@ from egress_guard.config import load_config
 from egress_guard.feeds import _snapshot, selected_feeds
 from egress_guard.health import proxy_health
 from egress_guard.policy import MAX_CONTROL_BYTES, Policy
+from test_tunnel import client_hello
 
 MITMDUMP = Path(sys.executable).with_name("mitmdump")
 if not MITMDUMP.is_file():
@@ -79,7 +80,9 @@ def certificate(directory):
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - dt.timedelta(minutes=2))
         .not_valid_after(now + dt.timedelta(days=1))
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName("passthrough.test")]), False)
+        .add_extension(x509.SubjectAlternativeName([
+            x509.DNSName("passthrough.test"), x509.DNSName("tracker.test"),
+        ]), False)
         .sign(key, hashes.SHA256())
     )
     cert_path, key_path = directory / "origin.pem", directory / "origin-key.pem"
@@ -143,7 +146,7 @@ policy._rules = _one_time_read_error
 class LoopbackOnly:
     def server_connect(self, data):
         host, port = data.server.address
-        if host in {{"passthrough.test", "blocked.test", "tracker.test"}}:
+        if host in {{"passthrough.test", "blocked.test", "tracker.test", "front.test", "203.0.113.9"}}:
             data.server.address = ("127.0.0.1", {self.tls_origin.server_port})
         elif host in {{"plaintext.test", "127.0.0.1"}}:
             data.server.address = ("127.0.0.1", {self.plain_origin.server_port})
@@ -152,14 +155,15 @@ class LoopbackOnly:
 
 addons = [EgressGuard(), LoopbackOnly()]
 """)
-    def start_proxy(self, *, ready=True):
+    def start_proxy(self, *, ready=True, plaintext_credentials=True):
         state = self.state
         log = (state / "proxy.log").open("wb")
         self.addCleanup(log.close)
         config = state / "config.toml"
         # Transport assertions inspect deliberately opted-in fixture history;
         # fresh production configuration defaults to no traffic history.
-        config.write_text(f'[proxy]\nport = {self.proxy_port}\n[logging]\nhistory = "full"\n')
+        config.write_text(f'[proxy]\nport = {self.proxy_port}\n[logging]\nhistory = "full"\n'
+                          f'[risk]\nblock_plaintext_credentials = {str(plaintext_credentials).lower()}\n')
         process = subprocess.Popen(
             [
                 str(MITMDUMP), "--mode", "regular", "--listen-host", "127.0.0.1",
@@ -210,12 +214,12 @@ addons = [EgressGuard(), LoopbackOnly()]
         finally:
             connection.close()
 
-    def tls(self, host):
+    def tls(self, host, *, sni=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.proxy_port, timeout=4)
         connection.set_tunnel(host, self.tls_origin.server_port)
         try:
             connection.connect()
-            with self.tls_client.wrap_socket(connection.sock, server_hostname=host) as tls:
+            with self.tls_client.wrap_socket(connection.sock, server_hostname=sni or host) as tls:
                 self.assertEqual(tls.getpeercert(binary_form=True), self.expected_cert)
                 tls.sendall(b"GET /fixture-query?token=private-test-value HTTP/1.1\r\n"
                             b"Host: passthrough.test\r\nAuthorization: Bearer fixture-secret\r\n"
@@ -223,6 +227,139 @@ addons = [EgressGuard(), LoopbackOnly()]
                 response = http.client.HTTPResponse(tls)
                 response.begin()
                 return response.status, response.read()
+        finally:
+            connection.close()
+
+    def fragmented_tls(self, host):
+        """Complete a real origin-verified TLS session after splitting its first flight."""
+        connection = http.client.HTTPConnection("127.0.0.1", self.proxy_port, timeout=4)
+        connection.set_tunnel(host, 443)
+        incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+        client = self.tls_client.wrap_bio(incoming, outgoing, server_hostname="passthrough.test")
+        try:
+            connection.connect()
+            with self.assertRaises(ssl.SSLWantReadError):
+                client.do_handshake()
+            hello = outgoing.read()
+            body = hello[5:]
+            self.assertEqual(len(body), int.from_bytes(hello[3:5], "big"))
+            records = b"".join(b"\x16\x03\x01" + len(part).to_bytes(2, "big") + part
+                               for part in (body[:1], body[1:40], body[40:]))
+            for part in (records[:1], records[1:2], records[2:5], records[5:30], records[30:-1]):
+                connection.sock.sendall(part)
+                time.sleep(0.03)
+                self.assertEqual(self.tls_origin.accepts, 0)
+            connection.sock.sendall(records[-1:])
+            while True:
+                try:
+                    client.do_handshake()
+                except ssl.SSLWantReadError:
+                    if outgoing.pending:
+                        connection.sock.sendall(outgoing.read())
+                    incoming.write(connection.sock.recv(65536))
+                else:
+                    break
+            self.assertEqual(client.getpeercert(binary_form=True), self.expected_cert)
+            client.write(b"GET /fragmented HTTP/1.1\r\nHost: passthrough.test\r\nConnection: close\r\n\r\n")
+            connection.sock.sendall(outgoing.read())
+            response = b""
+            while b"origin response" not in response:
+                try:
+                    response += client.read(65536)
+                except ssl.SSLWantReadError:
+                    received = connection.sock.recv(65536)
+                    self.assertTrue(received)
+                    incoming.write(received)
+            self.assertTrue(response.startswith(b"HTTP/1.1 200"), response)
+        finally:
+            connection.close()
+
+    def test_visible_tls_name_is_checked_independently_of_the_connect_authority(self):
+        self.start_proxy()
+        for authority, sni in (("front.test", "blocked.test"), ("front.test", "tracker.test"),
+                               ("203.0.113.9", "blocked.test"), ("127.0.0.1", "blocked.test")):
+            with self.subTest(authority=authority, sni=sni), self.assertRaises(OSError):
+                self.tls(authority, sni=sni)
+        with self.assertRaisesRegex(OSError, "403"):
+            self.tls("blocked.test", sni="passthrough.test")
+        self.assertEqual((self.tls_origin.accepts, self.plain_origin.accepts), (0, 0))
+        self.assertEqual(self.tls("front.test", sni="passthrough.test"), (200, b"origin response"))
+        self.assertEqual(self.tls("203.0.113.9", sni="passthrough.test"), (200, b"origin response"))
+        self.assertEqual(self.tls_origin.accepts, 2)
+        self.assertNotIn("Traceback", (self.state / "proxy.log").read_text())
+
+    def test_visible_tls_threat_and_manual_blocks_survive_pauses_and_grants(self):
+        expiry = time.time() + 600
+        (self.state / "allow.txt").write_text("front.test\nblocked.test\nmanual.test\n")
+        self.manual.write_text("manual.test\n")
+        (self.state / "filter-controls.json").write_text(json.dumps({"tracker_pause_until": expiry}))
+        (self.state / "tracker-exceptions.json").write_text(json.dumps({
+            "front.test": expiry, "blocked.test": expiry, "manual.test": expiry,
+        }))
+        self.start_proxy()
+        for sni in ("blocked.test", "manual.test"):
+            with self.subTest(sni=sni), self.assertRaises(OSError):
+                self.tls("front.test", sni=sni)
+        self.assertEqual(self.tls_origin.accepts, 0)
+        # The ordinary policy pause still permits a tracker name, without transferring
+        # the authority's exception to either threat or manual block targets.
+        self.assertEqual(self.tls("front.test", sni="tracker.test"), (200, b"origin response"))
+        self.assertEqual(self.tls_origin.accepts, 1)
+
+    def test_exact_tls_name_grant_does_not_transfer_to_another_name(self):
+        (self.state / "tracker-exceptions.json").write_text(json.dumps({"tracker.test": time.time() + 600}))
+        self.start_proxy()
+        # CONNECT to the exact excepted host is admitted, but its subdomain has no
+        # timed grant. A different name in ClientHello must get its own decision.
+        with self.assertRaises(OSError):
+            self.tls("tracker.test", sni="sub.tracker.test")
+        self.assertEqual(self.tls_origin.accepts, 0)
+        self.assertEqual(self.tls("front.test", sni="tracker.test"), (200, b"origin response"))
+        self.assertEqual(self.tls_origin.accepts, 1)
+
+    def test_visible_tls_name_checks_remain_active_in_plaintext_compatibility_mode(self):
+        self.start_proxy(plaintext_credentials=False)
+        plaintext = (b"GET /compatibility HTTP/1.1\r\nHost: plaintext.test\r\n"
+                     b"Cookie: fixture-cookie\r\nConnection: close\r\n\r\n")
+        self.assertIn(b"origin response", self.tunnel("plaintext.test", plaintext))
+        self.assertEqual(self.plain_origin.requests[-1][1]["Cookie"], "fixture-cookie")
+        hello = client_hello("blocked.test")
+        self.assertEqual(self.tunnel("front.test", hello[:1], chunks=(hello[1:2], hello[2:])), b"")
+        self.assertEqual(self.tls_origin.accepts, 0)
+        self.assertEqual(self.tls("front.test", sni="passthrough.test"), (200, b"origin response"))
+        self.assertEqual(self.tls_origin.accepts, 1)
+
+    def test_fragmented_tls_waits_for_both_name_checks_and_preserves_the_certificate(self):
+        self.start_proxy()
+        hello = client_hello("tracker.test")
+        self.assertEqual(self.tunnel("front.test", hello[:1], chunks=(hello[1:2], hello[2:30], hello[30:])), b"")
+        self.assertEqual(self.tls_origin.accepts, 0)
+        self.fragmented_tls("front.test")
+        self.assertEqual(self.tls_origin.accepts, 1)
+        self.assertEqual(self.tls_origin.requests[-1][0], "/fragmented")
+        self.assertNotIn("Traceback", (self.state / "proxy.log").read_text())
+
+    def test_connect_authority_is_rechecked_when_a_delayed_hello_completes(self):
+        self.start_proxy()
+        connection = http.client.HTTPConnection("127.0.0.1", self.proxy_port, timeout=4)
+        connection.set_tunnel("front.test", 443)
+        try:
+            connection.connect()
+            hello = client_hello("passthrough.test")
+            connection.sock.sendall(hello[:10])
+            revision = proxy_health(self.proxy_port, self.state)["policy"]["revision"]
+            self.manual.write_text("front.test\n")
+            deadline = time.monotonic() + 10
+            current = revision
+            while time.monotonic() < deadline:
+                current = proxy_health(self.proxy_port, self.state)["policy"]["revision"]
+                if current != revision:
+                    break
+                time.sleep(0.05)
+            self.assertNotEqual(current, revision)
+            connection.sock.sendall(hello[10:])
+            self.assertEqual(connection.sock.recv(1024), b"")
+            self.assertEqual(self.tls_origin.accepts, 0)
         finally:
             connection.close()
 

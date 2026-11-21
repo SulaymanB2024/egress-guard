@@ -1,6 +1,6 @@
 // Minimal headless-Chrome driver over --remote-debugging-pipe, shared by the opt-in real-Chrome
-// scripts (real-sites.mjs, chrome-lifecycle.mjs). Always a throwaway --user-data-dir; never a visible
-// window; no dependencies.
+// scripts (real-sites.mjs, chrome-lifecycle.mjs). Always a throwaway --user-data-dir;
+// headless unless an explicit permission-qualification run requests a visible window; no dependencies.
 import fs from "node:fs";
 import {spawn} from "node:child_process";
 
@@ -11,10 +11,10 @@ const QUIET_FLAGS = ["--no-first-run", "--no-default-browser-check", "--disable-
   "--disable-sync", "--disable-domain-reliability", "--disable-client-side-phishing-detection", "--no-pings",
   "--metrics-recording-only", "--disable-breakpad", "--password-store=basic", "--use-mock-keychain"];
 
-/** Launch headless Chrome with a throwaway profile. Returns a small CDP client. */
-export function launch({bin = DEFAULT_CHROME, profile, args = [], timeout = 90000}) {
+/** Launch Chrome with a throwaway profile. Headed mode is opt-in for native permission prompts. */
+export function launch({bin = DEFAULT_CHROME, profile, args = [], timeout = 90000, headless = true}) {
   if (!profile || !fs.existsSync(profile)) throw new Error("launch needs an existing throwaway profile directory");
-  const child = spawn(bin, ["--headless", "--remote-debugging-pipe", "--enable-unsafe-extension-debugging", `--user-data-dir=${profile}`,
+  const child = spawn(bin, [...(headless ? ["--headless"] : []), "--remote-debugging-pipe", "--enable-unsafe-extension-debugging", `--user-data-dir=${profile}`,
     ...QUIET_FLAGS, ...args, "about:blank"], {stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: true});
   let stderr = "";
   child.stderr.on("data", (d) => { stderr += d; if (stderr.length > 200000) stderr = stderr.slice(-100000); });

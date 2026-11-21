@@ -4,9 +4,9 @@ Local ad, tracker and threat filtering for macOS, with a portable Python core.
 
 Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps the origin server's certificate and encrypted contents. No root daemon, browser certificate trust, or account credentials are needed for filtering.
 
-**0.7.0 is alpha software.** This revision adds scoped browser cosmetics, reversible sponsored-card detection, optional on-device model review, reconciled browser policies and a read-only proxy receipt bridge. New configurations retain no domain history by default. Read the [0.7 changes and qualification limits](docs/release-0.7.md).
+**0.8.0 is alpha software.** This revision checks visible TLS hostnames before opening proxy tunnels, holds active resources on unprepared default-Strict browser sites, expands imported cosmetic filtering, and adds optional Chrome profile privacy controls. New configurations retain no domain history by default. Read the [0.8 changes and qualification limits](docs/release-0.8.md).
 
-The transport was previously exercised on macOS ARM64 with Python 3.12. The 0.7 changes have Linux isolated-test coverage; macOS launchd, installed-browser native messaging and the local model still require target-device qualification. Windows dashboard authentication and verified health remain unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
+The transport was previously exercised on macOS ARM64 with Python 3.12. The 0.8 changes have Linux isolated-test coverage, including real loopback TLS; Chrome's actual rule/setting APIs, macOS launchd, installed-browser native messaging and the local model still require target-device qualification. Windows dashboard authentication and verified health remain unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
 
 ## What it does
 
@@ -16,8 +16,10 @@ The transport was previously exercised on macOS ARM64 with Python 3.12. The 0.7 
 - Fetches community sponsor-timing suggestions by a short video hash prefix on explicit request, checks the supplied current duration, and exports attributed local JSON for manual review.
 - Updates feeds daily when macOS background services are enabled. Invalid, truncated or failed downloads retain the last good copy; the dashboard shows publication age separately from download success.
 - Refuses external plaintext HTTP requests carrying `Cookie` or `Authorization` headers before forwarding them, and closes a CONNECT tunnel to an external host unless its first bytes are a complete TLS ClientHello, so plaintext cannot travel through a tunnel unchecked. Other protocols over CONNECT, such as SSH, need `block_plaintext_credentials = false`. This is a guard against accidental plaintext credentials, not data-loss prevention: it reads only those two headers, never inspects encrypted traffic, and cannot stop a program that deliberately sends data elsewhere.
+- Checks an initial TLS ClientHello's visible server name independently of the CONNECT destination, including IP-address tunnels. Both must pass the current policy before upstream contact; a grant for one name does not permit another. Original TLS bytes and certificates are preserved. ECH-hidden names and later encrypted requests remain opaque. [Transport behavior and tests](docs/core-0.8.md).
 - Provides an authenticated local dashboard with decision explanations, temporary exact-host exceptions, ad-filter pauses, manual rules and local activity.
-- Adds an optional Chrome 145+ companion for request-level filtering, scoped cosmetic rules, deterministic sponsored-card hiding and user-reviewed local model suggestions. Its popup distinguishes saved policy from applied policy and reports incomplete list coverage. [Build and use it](docs/browser-companion.md).
+- Adds an optional Chrome 145+ companion for request-level filtering, indexed generic and scoped cosmetic rules, deterministic sponsored-card hiding and user-reviewed local model suggestions. Default Strict holds scripts, frames, fonts and objects until a site's complete policy is installed. Its popup distinguishes saved policy from applied policy and reports incomplete coverage. [Build, recovery and compatibility costs](docs/browser-companion.md).
+- Offers optional Chrome profile controls for speculative loading, non-proxied WebRTC UDP, third-party cookies, browser advertising APIs and selected remote browser services. Each control shows its actual value and owner. Explicit release removes only Egress Guard's override. [Controls and tradeoffs](docs/browser-privacy-0.8.md).
 - Offers an explicitly registered, read-only native messaging bridge so the Chrome popup can check the local proxy's authenticated policy and logging acknowledgments. It cannot change routing, weaken rules or prove device-wide coverage.
 - Monitors canaries you explicitly register with Thinkst and sends batched macOS notifications. Registration verifies access and establishes a history baseline without exposing token values in logs or the dashboard.
 - Leaves system-wide routing unchanged. Automatic native activation is withheld until endpoint ownership can be guaranteed across logout, crashes and reboot. Inspection and ownership-preserving recovery are retained.
@@ -73,7 +75,7 @@ For recovery without the CLI, turn off the matching `127.0.0.1:18080` HTTP and H
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r requirements/runtime.lock
-python -m pip install --no-deps --no-index ./egress_guard-0.7.0-py3-none-any.whl
+python -m pip install --no-deps --no-index ./egress_guard-0.8.0-py3-none-any.whl
 python -m pip check
 egress-guard init
 egress-guard refresh
@@ -105,12 +107,12 @@ Each decision carries a `source` (stored in the activity log) and a `category` (
 | `tracker-feed` | `ads-trackers` | blocked | HaGeZi Multi ad/tracker list | Yes |
 | `cname-feed` | `cname-cloak` | blocked | Exact AdGuard CNAME-cloaked tracker alias | Yes |
 | `safety-list` | `safety` | allowed | Built-in sign-in, update or revocation host | Your own block rule |
-| `ip-literal` | `unfiltered` | allowed | Public IP address with no listed match: no hostname to filter | — |
+| `ip-literal` | `unfiltered` | allowed | Public IP address with no listed IP match; an initial visible TLS name receives a separate decision | — |
 | `nonstandard-port` | `unfiltered` | allowed | Unlisted host on a port other than 80 or 443 | — |
 
 Threat feeds are checked most specific first, so a host listed by both Phishing Army and HaGeZi is reported as `phishing-feed`. Other sources are unchanged from 0.3 (`no-match`, `local-allow`, `dashboard-exception`, `temporary-exception`, `tracker-paused`, `plaintext-credentials`, `non-tls-tunnel`, `invalid-host`).
 
-Why encrypted DNS is blocked by default: traffic sent through this proxy is filtered by name whatever resolver the client uses, but a client that resolves names privately over DoH can then connect by IP address and skip every hostname rule, and DoH is a known channel for malware command-and-control. Browsers fall back to the system resolver when their DoH server is unreachable, so breakage is rare. Set `block_encrypted_dns = false` under `[block]` to allow DoH. Raw IP addresses and unusual ports are labelled rather than blocked, because many legitimate applications use them; listed malware IPs and resolver addresses are still blocked. `threat_tier = "medium"` selects HaGeZi's smaller threat feed.
+Encrypted DNS is blocked by default because it can obscure the hostname a client subsequently uses through an IP-address tunnel. Version 0.8 checks an initial visible TLS name too, but absent or ECH-hidden names and later encrypted requests still limit visibility. Resolver fallback and compatibility depend on the client. Set `block_encrypted_dns = false` under `[block]` to allow DoH. Unlisted raw IP addresses and unusual ports are labelled rather than blanket-blocked; listed malware IPs and resolver addresses are still blocked. `threat_tier = "medium"` selects HaGeZi's smaller threat feed.
 
 ## Inspect disguised trackers and sponsor timings
 

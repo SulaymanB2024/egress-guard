@@ -43,7 +43,7 @@ test("ui.css carries docs/design/tokens.css byte for byte, so every surface shar
   for (const f of CSS_FILES.filter((x) => x !== "browser/ui.css")) {
     assert.doesNotMatch(read(f), /--(paper|raised|sunken|ink|muted|faint|line|edge|fill-primary|focus|protected|reduced|unprotected|s[1-8]|t-[a-z]+)\s*:/, `${f} redefines a design token`);
   }
-  for (const f of ["browser/popup.html", "browser/warning.html", "browser/unwrap.html"]) {
+  for (const f of ["browser/popup.html", "browser/warning.html", "browser/unwrap.html", "browser/privacy.html"]) {
     assert.match(read(f), /<link rel="stylesheet" href="ui\.css">/, `${f} loads ui.css`);
   }
 });
@@ -139,6 +139,40 @@ async function popupWith(state, page = {site: "publisher.example", paused: false
 const STATE = {host: "publisher.example", site: "publisher.example", lists: [], requestRules: [], cosmeticRules: [], exceptions: [],
   mode: "standard", defaultMode: "standard", feedback: "debug", types: ["script", "image", "beacon"], cleaning: {on: true, links: 3, cookies: 1},
   blocked: [{host: "cdn.bad.example", path: "/x.js", type: "script", list: "threats", count: 1}, {host: "t.example", path: "/p.gif", type: "image", list: "trackers", count: 2}]};
+
+test("popup explains Strict preparation without auto-reload or endpoint bypass suggestions", async () => {
+  const p = await popupWith({...STATE, mode: "strict", preparation: {state: "held", site: "publisher.example", revision: "fixture"},
+    categories: {preparation: "Strict preparation"}, blocked: [{host: "publisher.example", path: "/boot.js", type: "script", list: "preparation", count: 1}]}, undefined, {chrome: true});
+  assert.equal(p.$("strict-preparation").hidden, false); assert.equal(p.$("prepare-site").hidden, false);
+  assert.equal(p.text("status-word"), "Preparing"); assert.match(p.text("preparation-note"), /Chrome's Reload button/);
+  assert.doesNotMatch(p.text("blocked"), /Allow for 15|Allow under Strict/);
+  assert.equal(p.sent.some(message => message.type === "prepare-strict-site"), false);
+  userClick(p.$("prepare-site")); await new Promise(resolve => setImmediate(resolve));
+  const request = p.sent.find(message => message.type === "prepare-strict-site");
+  assert.equal(request.tabId, 1); assert.equal(request.tabUrl, "https://publisher.example/a");
+  const prepared = await popupWith({...STATE, mode: "strict", preparation: {state: "prepared", site: "publisher.example", revision: "fixture"}}, undefined, {chrome: true});
+  assert.equal(prepared.$("prepare-site").hidden, true); assert.match(prepared.text("preparation-note"), /site rules are installed/);
+});
+
+test("unscopable Strict-held addresses retain a truthful receipt and default-mode recovery", async () => {
+  const p = await popupWith({site: null, lists: [], defaultMode: "strict", preparation: {state: "held", canPrepare: false,
+    reason: "This address cannot be safely represented by domain conditions."}}, undefined, {chrome: true});
+  assert.equal(p.$("page-view").hidden, true); assert.equal(p.$("strict-preparation").hidden, false);
+  assert.equal(p.text("status-word"), "Held"); assert.equal(p.$("prepare-site").hidden, true);
+  assert.equal(p.$("defaults-group").hidden, false); assert.equal(p.$("default-modes").children.length, 2);
+  assert.match(p.text("preparation-note"), /default to Standard/);
+  assert.doesNotMatch(p.text("unsupported-title"), /can't be filtered/);
+});
+
+test("runtime cosmetic failures and hard work caps reduce the page receipt, source exemptions do not", async () => {
+  const page = {paused: false, hidden: 3, shown: 0, protectedRules: [], overbroadRules: [],
+    imported: {degradedFamilies: ["generic"], limits: ["subtree-nodes"], sourceExemptions: []}};
+  const reduced = await popupWith(STATE, page, {chrome: true});
+  assert.equal(reduced.text("status-word"), "Reduced"); assert.match(reduced.text("hidden"), /some cosmetic matches may remain/);
+  assert.match(reduced.text("hidden"), /generic hiding is unavailable/);
+  const intended = await popupWith(STATE, {...page, imported: {degradedFamilies: [], limits: [], sourceExemptions: ["generic"]}}, {chrome: true});
+  assert.equal(intended.text("status-word"), "Protected");
+});
 
 test("popup tabs follow the ARIA tabs pattern: one tab stop, arrows, Home and End select and focus", async () => {
   const p = await popupWith(STATE);

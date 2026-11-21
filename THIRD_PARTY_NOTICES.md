@@ -1,6 +1,6 @@
 # Third-party notices
 
-The application code is MIT licensed. Downloaded blocking feeds retain their own licenses and are not bundled in source or wheel releases. The Public Suffix List is bundled separately under MPL-2.0. A locally built Chrome browser companion (`dist-browser/chrome`, never committed) contains rulesets and scoped cosmetic data derived from the feeds below; see the browser companion section.
+The application code is MIT licensed. Downloaded blocking feeds retain their own licenses and are not bundled in source or wheel releases. The Public Suffix List is bundled separately under MPL-2.0. A locally built Chrome browser companion (`dist-browser/chrome`, never committed) contains rulesets and generic/scoped cosmetic data derived from the feeds below; see the browser companion section.
 
 | Component | Role | License/source |
 | --- | --- | --- |
@@ -17,14 +17,14 @@ The application code is MIT licensed. Downloaded blocking feeds retain their own
 
 `scripts/build-browser.mjs` compiles the proxy's verified HaGeZi (GPL-3.0), AdGuard CNAME (MIT), URLhaus via malware-filter (CC0-1.0 and MIT; host names only) and Phishing Army snapshots into Chrome `declarativeNetRequest` rulesets. HaGeZi, AdGuard and URLhaus licenses permit this. Phishing Army adds no restriction of its own, but its upstream sources' terms continue to apply; check them before passing a build on, especially commercially. The proxy's HaGeZi encrypted-DNS list is not compiled.
 
-The companion's fixed ad-slot selectors (`browser/core/cosmetic.js`) are a first-party list under the project's MIT license. Builds additionally compile a restricted subset of domain-scoped EasyList/EasyPrivacy cosmetic rules and exceptions into `core/cosmetic-data.js`; that generated data keeps the upstream source license.
+The companion's fixed ad-slot selectors (`browser/core/cosmetic.js`) are a first-party list under the project's MIT license. Builds additionally compile a restricted subset of EasyList/EasyPrivacy generic ID/class rules, scoped selectors (including bounded native `:has()` and entity scopes), exact-selector exceptions and cosmetic page exceptions into `core/cosmetic-data.js`; that generated data keeps the upstream source license. The index and selector/compiler code are first-party implementation, not a relicensing of the imported filter data.
 
 The Chrome build also downloads, at build time and into its own cache (`<data>/browser-filters/`, never the proxy's feed cache), and converts into `declarativeNetRequest` rules:
 
 | Component | Role | License/source |
 | --- | --- | --- |
-| EasyPrivacy | Network (URL) filters, supported scoped cosmetic rules and exceptions | Dual [GPL-3.0 or CC BY-SA 3.0](https://easylist.to/pages/licence.html); used under GPL-3.0 |
-| EasyList | Network (URL) filters, supported scoped cosmetic rules and exceptions | Dual [GPL-3.0 or CC BY-SA 3.0](https://easylist.to/pages/licence.html); used under GPL-3.0 |
+| EasyPrivacy | Network (URL) filters, supported generic/scoped cosmetic rules and exceptions | Dual [GPL-3.0 or CC BY-SA 3.0](https://easylist.to/pages/licence.html); used under GPL-3.0 |
+| EasyList | Network (URL) filters, supported generic/scoped cosmetic rules and exceptions | Dual [GPL-3.0 or CC BY-SA 3.0](https://easylist.to/pages/licence.html); used under GPL-3.0 |
 | AdGuard CNAME trackers, disguised click-throughs | Host names whose cookies are stripped on a redirect hop (never blocked) | [MIT](https://github.com/AdguardTeam/cname-trackers/blob/master/LICENSE) |
 
 Each download is checked (HTTPS, size, `[Adblock Plus]` header, title, the licence line, minimum filter count, host-name syntax for the AdGuard list) and recorded with its SHA-256, size, fetch time and upstream version; the build's `NOTICE.txt` lists them. The tracking-parameter, link-wrapper, cookie-name, surrogate and fingerprinting/session-replay path lists in `browser/core/` and `browser/surrogates/` are written for this project (MIT); ClearURLs, Brave, Firefox and AdGuard URL-tracking lists were used only to check coverage, and no data was copied from them. For blocking feeds, the repository holds only the compiler and a small hand-written fixture (`tests/browser/fixtures/feeds`); the separately attributed Public Suffix List is bundled. Each build writes `NOTICE.txt` next to the rulesets with every source URL, license, entry count, publication time and SHA-256. Using a build yourself needs nothing further. Anyone who passes a build on must include that notice, the GPL-3.0 text and the list sources, as GPL-3.0 requires for the HaGeZi-, EasyPrivacy- and EasyList-derived rulesets.
