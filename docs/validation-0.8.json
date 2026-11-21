@@ -1,0 +1,106 @@
+{
+  "schema": 1,
+  "date": "2026-11-21",
+  "reviewed_base": "cbed36aca18ac8461f7d40b89089178e584629f7",
+  "version": "0.8.0",
+  "tests": {
+    "python": {
+      "command": "PYTHONPATH=src python -B -m unittest discover -s tests -v",
+      "passed": 280,
+      "failed": 0,
+      "skipped": 0,
+      "includes_real_loopback_proxy": true
+    },
+    "node": {
+      "command": "node --test tests/browser/*.test.cjs",
+      "passed": 252,
+      "failed": 0,
+      "skipped": 0,
+      "environment": "isolated compiler, worker, ChromeSetting, DOM and UI models; no native Chrome execution"
+    }
+  },
+  "runtime": {
+    "python": "3.12.14",
+    "node": "24.22.3",
+    "mitmproxy": "12.3.1",
+    "platform": "Linux"
+  },
+  "psl": {
+    "rules": 10470,
+    "version": "2026-11-20_10-39-09_UTC",
+    "sha256": "f3df783daf6bdf4c4d71759bc8a4b39f2d228a567078560a00e11f70df0703f4",
+    "regeneration_matches": true
+  },
+  "current_filter_compile": {
+    "easylist_version": "202611211610",
+    "easyprivacy_version": "202611211610",
+    "source_sha256": {
+      "easyprivacy": "84e1f89c2783f1b3ada395d8a8f0bcd3fd43c07b0fd7149a2d6c5bbd4695c6c7",
+      "easylist": "08d8efac3d18fa78e5656070769926fe2bf694d057545fce7c34dbf9deddf271",
+      "adguard-clickthroughs": "8eeaa753f30270bd47c05fb34f3e34b11eb55a086896796897946ec940c873d8"
+    },
+    "scoped_hides": 9718,
+    "generic_hides": 13079,
+    "total_hides": 22797,
+    "selector_exceptions": 326,
+    "page_exceptions": 167,
+    "relational_scoped_hides": 482,
+    "entity_scoped_entries": 278,
+    "conservative_exception_fallbacks": {},
+    "static_rules": 13825,
+    "regex_rules": 56,
+    "domain_feeds_included": false,
+    "complete_coverage": false,
+    "chrome_indexing_qualified": false,
+    "comparison": "same verified source snapshot as 0.7; accepted rule counts, not ad-removal efficacy"
+  },
+  "package_checks": {
+    "fresh_wheel_target": true,
+    "private_initialization": true,
+    "default_history": "none",
+    "empty_cache_start_refused": true,
+    "empty_cache_lookup_indeterminate": true,
+    "native_host_packaged": true,
+    "tunnel_guard_packaged": true,
+    "dashboard_assets_packaged": true,
+    "source_browser_and_test_assets_packaged": true,
+    "runtime_state_excluded": true,
+    "pip_check": "passed"
+  },
+  "dependency_review": {
+    "status": "unchanged locked dependencies; prior same-day review reused",
+    "fresh_online_scan": false,
+    "reference": "release-0.7.md",
+    "matches": [
+      {
+        "name": "tornado",
+        "version": "6.5.10",
+        "advisories": [
+          "GHSA-5cjw-f85j-cv6r",
+          "GHSA-pcg2-g6cj-q92c",
+          "GHSA-pw9p-v7r6-gx4p",
+          "GHSA-r4j5-9xpp-3985"
+        ]
+      }
+    ]
+  },
+  "target_qualification": {
+    "chromium": "not run; prior startup denied by process-singleton socket policy",
+    "new_disposable_profile_runner": "tests/browser/chrome-0.8.mjs --check passed; native commands not executed",
+    "actual_browser_settings": false,
+    "actual_model_inference": false,
+    "installed_browser_native_host": false,
+    "macos_service_lifecycle": "mocked only",
+    "system_proxy_activation": false
+  },
+  "material_limits": [
+    "The initial TLS check cannot see ECH inner names, later encrypted requests or traffic outside the proxy.",
+    "The default-Strict hold begins only after its policy is installed; it can hold legitimate first-party resources.",
+    "Unscopable IP, localhost, single-label, public-suffix and certain wildcard registry-base addresses remain held under default Strict.",
+    "Inline scripts and cached/service-worker-generated responses are outside the preparation hold.",
+    "Grant and transient-context expiry use scheduled reconciliation, not a hard browser-enforced timer.",
+    "Cosmetic source-rule counts do not establish ad-removal efficacy; bounded discovery may leave unmatched content.",
+    "ChromeSetting readback does not prove routing, public-IP masking or complete third-party cookie suppression.",
+    "Native receipt status does not prove browser-profile identity, routing or device-wide coverage."
+  ]
+}

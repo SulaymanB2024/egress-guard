@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Egress Guard Companion",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Locally built ad, tracker and threat blocking, with reversible page hiding and optional on-device ad review.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkwoFe6kgodZ7HIcbFvIhyTZGEDBAYjFOcbhWzwKiwih+g7r2nlVsJ0liOeJNZh3W+ezChEhGnlbecHJYgjh+JdkiMAVEfUzOh/K0/j0wl4vyrKoG2oKFsivq1aZDJj5NDvon1wuI1ls5D5Oxt4GYEBhIK/3I1A75g7jCkGNEGeiYOdA304B8AQjslXiPmFnBPogCFjWxrqkSxob0ZuDEuZY9b0ZhBjSsU9o++tT4NBmR/qCIAv4n2Q2r+5qRqfwRL7xTb1uKZP9HLZfNma5ZCv0W5gpKvLId2+WhKMlR0NeZuPWkd5W0XWkeXRuG52jDM1nMMwSJmd9TRGv24vOKxQIDAQAB",
   "minimum_chrome_version": "145",
@@ -15,6 +15,7 @@
     "offscreen",
     "clipboardWrite",
     "scripting",
+    "webNavigation",
     "browsingData"
   ],
   "host_permissions": [
@@ -47,9 +48,12 @@
         "https://*/*"
       ],
       "js": [
+        "core/psl-data.js",
+        "core/hosts.js",
         "core/selectors.js",
         "core/picker.js",
         "core/cosmetic-data.js",
+        "core/cosmetic-selectors.js",
         "core/cosmetic.js",
         "core/semantic.js",
         "content.js",
@@ -82,6 +86,7 @@
     "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self'; frame-ancestors 'none'"
   },
   "optional_permissions": [
-    "nativeMessaging"
+    "nativeMessaging",
+    "privacy"
   ]
 }

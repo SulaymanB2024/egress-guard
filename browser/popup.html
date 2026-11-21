@@ -23,6 +23,10 @@
 <p id="error" class="inline-error" role="alert" hidden></p>
 
 <section id="panel-page" class="panel" role="tabpanel" aria-labelledby="tab-page">
+  <div id="strict-preparation" class="callout" data-state="reduced" role="status" hidden>
+    <p id="preparation-note"></p>
+    <button type="button" class="btn" id="prepare-site" hidden>Prepare this site</button>
+  </div>
   <div id="page-view">
     <p class="metric focal" id="focal">
       <span class="value t-display" id="blocked-count">0</span>
@@ -58,7 +62,7 @@
   </div>
   <div id="unsupported" class="empty" hidden>
     <p class="t-title" id="unsupported-title">Browser pages can't be filtered</p>
-    <p class="muted">Open a website to see what Egress Guard blocks on it.</p>
+    <p id="unsupported-note" class="muted">Open a website to see what Egress Guard blocks on it.</p>
   </div>
 </section>
 
@@ -128,6 +132,11 @@
       <summary>List files and hashes</summary>
       <ul id="hashes" class="hashes"></ul>
     </details>
+  </section>
+  <section class="group" id="privacy-group" hidden>
+    <h2>Browser privacy</h2>
+    <p class="note t-caption muted">Manage speculative loading, WebRTC UDP, third-party cookies and browser tracking settings for this profile.</p>
+    <button type="button" class="btn" id="privacy-open">Review browser privacy</button>
   </section>
   <section class="group" id="native-group" hidden>
     <h2>Local proxy</h2>

@@ -287,8 +287,89 @@ test("Strict uses top-site party boundaries, including separately hosted tenants
   assert.ok(parent.some((r) => r.action.type === "modifyHeaders" && matches(r, tenant) && r.action.requestHeaders.some((h) => h.header === "cookie")));
 });
 
-test("default Strict closes nested-frame gaps for observed top sites and exposes its unobserved-site backstop limit", () => {
+test("default Strict holds unseen top sites before preparation, including same-origin requests from foreign frames", () => {
   const req = {url: "https://frame.vendor.example/app.js", type: "script", top: "new.example", initiator: "frame.vendor.example"};
-  assert.equal(outcome(dnr.compileModes({defaultMode: "strict"}, {topSites: ["new.example"]}).rules, req), "block");
-  assert.equal(outcome(dnr.compileModes({defaultMode: "strict"}).rules, req), "none", "the generic backstop cannot compare arbitrary top/target sites before reconciliation");
+  const pending = dnr.compileModes({defaultMode: "strict"});
+  const ready = dnr.compileModes({defaultMode: "strict"}, {topSites: ["new.example"]});
+  assert.equal(outcome(pending.rules, req), "block");
+  assert.equal(outcome(ready.rules, req), "block");
+  assert.equal(outcome(pending.rules, {...req, url: "https://new.example/app.js", initiator: "new.example"}), "block", "own scripts can be held too; preparation is not claimed to be transparent");
+  assert.equal(outcome(ready.rules, {...req, url: "https://new.example/app.js", initiator: "new.example"}), "none");
+  assert.equal(pending.kinds[best(pending.rules, req).id], "preparation", "a preparation block is not labelled a third-party tracker");
+  assert.ok(pending.rules.every((r) => !r.condition.domainType));
+  assert.ok(ready.rules.every((r) => !["allow", "allowAllRequests"].includes(r.action.type)), "release never uses a permissive override");
+  assert.equal(outcome(pending.rules, {...req, type: "main_frame"}), "none", "navigation and POST replay are outside the hold");
+  for (const type of ["image", "xmlhttprequest", "websocket", "ping"]) {
+    const headers = pending.rules.filter((r) => r.action.type === "modifyHeaders" && matches(r, {...req, type}));
+    assert.ok(headers.some((r) => r.action.requestHeaders.some((h) => h.header === "cookie" && h.operation === "remove")), type);
+    assert.ok(headers.some((r) => r.action.requestHeaders.some((h) => h.header === "referer" && h.operation === "remove")), type);
+    assert.ok(headers.some((r) => r.action.responseHeaders.some((h) => h.header === "set-cookie" && h.operation === "remove")), type);
+  }
+  assert.equal(outcome(pending.rules, {...req, top: undefined}), "block", "no associated top frame falls back to initiator; unknown worker contexts remain held");
+  assert.equal(outcome(ready.rules, {...req, url: "https://new.example/worker.js", top: undefined, initiator: "new.example"}), "none");
+});
+
+test("preparation exclusions preserve private tenants under prepared or non-Strict parent sites", () => {
+  const topSites = ["amazonaws.com", "bob.s3.amazonaws.com", "publisher.example"];
+  const compiled = dnr.compileModes({defaultMode: "strict"}, {topSites});
+  const own = (host) => ({url: `https://${host}/app.js`, type: "script", top: host, initiator: host});
+  for (const host of ["publisher.example", "www.amazonaws.com", "bob.s3.amazonaws.com", "cdn.bob.s3.amazonaws.com"]) assert.equal(outcome(compiled.rules, own(host)), "none", host);
+  for (const host of ["alice.s3.amazonaws.com", "widget.alice.s3.amazonaws.com", "never-seen.example"]) assert.equal(outcome(compiled.rules, own(host)), "block", host);
+  const holds = compiled.rules.filter((r) => compiled.kinds[r.id] === "preparation");
+  assert.equal(holds.length, 3, "583 nested PSL boundaries share two recovery conditions plus the global unknown scope");
+  assert.deepEqual(compiled.rules, dnr.compileModes({defaultMode: "strict"}, {topSites: [...topSites].reverse()}).rules, "rule identity/order is deterministic");
+  for (const mode of ["standard", "relaxed", "noscript"]) {
+    const ruleset = dnr.compileModes({defaultMode: "strict", sites: {"amazonaws.com": mode}}).rules;
+    const tenant = own("alice.s3.amazonaws.com");
+    assert.equal(outcome(ruleset, tenant), "block", `${mode} on the hosting company does not exempt an independent tenant`);
+    if (mode !== "noscript") assert.equal(outcome(ruleset, {...own("amazonaws.com"), frame: {url: "https://amazonaws.com/", type: "main_frame"}}), mode === "relaxed" ? "allow" : "none");
+  }
+});
+
+test("grouped preparation scopes agree with PSL ownership across nested boundary samples", () => {
+  const prepared = ["amazonaws.com", "fastly.net", "bob.s3.amazonaws.com", "city.kawasaki.jp", "xn--bcher-kva.example"];
+  const compiled = dnr.compileModes({defaultMode: "strict"}, {topSites: prepared});
+  const holds = compiled.rules.filter((r) => compiled.kinds[r.id] === "preparation");
+  const samples = new Set(["unlisted.example", ...prepared, ...prepared.map((s) => `cdn.${s}`),
+    ...prepared.flatMap((site) => hosts.scopeExclusions(site).flatMap((boundary) => [boundary, `tenant.${boundary}`, `cdn.tenant.${boundary}`]))]);
+  assert.ok(samples.size > 1500, "exercise the packaged private suffix hierarchy, not just one synthetic domain");
+  for (const top of samples) {
+    const owned = prepared.some((site) => hosts.inSiteScope(top, site));
+    const held = holds.some((r) => matches(r, {url: "https://unknown-vendor.example/a.js", type: "script", top, initiator: top}));
+    if (!owned) assert.equal(held, true, `${top}: an independent tenant must never escape the hold`);
+    else if (held) assert.ok(prepared.some((site) => hosts.inSiteScope(top, site) && hosts.scopeExclusions(site).includes(top)),
+      `${top}: only a conservative wildcard base may remain held within an otherwise prepared site`);
+  }
+  const base = "af-south-1.airflow.amazonaws.com";
+  assert.equal(hosts.siteOf(base), "amazonaws.com");
+  assert.ok(holds.some((r) => matches(r, {url: `https://${base}/a.js`, type: "script", top: base, initiator: base})), "a wildcard base stays held because topDomains also matches its independent descendants");
+  assert.throws(() => dnr.compileModes({defaultMode: "strict"}, {topSites: Array.from({length: 4097}, (_, i) => `s${i}.example`)}), /Too many sites to prepare/);
+});
+
+test("preparation preserves tab-grant sanitation and threat/manual precedence", () => {
+  const held = dnr.compileModes({defaultMode: "strict"}).rules;
+  const exc = exception({tabId: 1, type: "script"});
+  const pair = dnr.compileUserState([], [exc], NOW).rules;
+  const req = {url: `https://${exc.host}${exc.path}`, type: "script", top: exc.site, initiator: exc.host, tabId: 1};
+  assert.equal(outcome([...held, ...pair], req), "allow");
+  assert.equal(outcome([...held, ...pair], {...req, tabId: 2}), "block");
+  const allow = best(pair, req);
+  const sanitation = pair.find((r) => r.action.type === "modifyHeaders" && r.priority > allow.priority && matches(r, req));
+  assert.ok(sanitation.action.requestHeaders.some((h) => h.header === "cookie" && h.operation === "remove"));
+  const threat = dnr.compileList("threats", [exc.host], {warningUrl: WARN}).rules;
+  assert.equal(outcome([...held, ...pair, ...threat], req), "block");
+  const manual = dnr.compileUserState([userRule({host: exc.host, path: exc.path, types: ["script"]})], [], NOW).rules;
+  assert.equal(outcome([...held, ...pair, ...manual], req), "block");
+});
+
+test("an embed permission cannot follow its tab into an independent private tenant before revocation", () => {
+  const held = dnr.compileModes({defaultMode: "strict"}, {topSites: ["amazonaws.com"]}).rules;
+  for (const withCookies of [false, true]) {
+    const grant = dnr.embedRule(300000, "youtube", 1, {topSite: "amazonaws.com", withCookies});
+    const req = {url: "https://www.youtube.com/embed/demo", type: "sub_frame", top: "amazonaws.com", initiator: "amazonaws.com", tabId: 1};
+    assert.equal(outcome([...held, grant], req), "allow");
+    assert.equal(outcome([...held, grant], {...req, top: "alice.s3.amazonaws.com", initiator: "alice.s3.amazonaws.com"}), "block");
+    assert.equal(matches(grant, {...req, tabId: 2}), false);
+  }
+  assert.throws(() => dnr.embedRule(300000, "youtube", 1, {topSite: "kawasaki.jp"}), /safely scoped/);
 });

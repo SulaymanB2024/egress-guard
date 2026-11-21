@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser privacy · Egress Guard</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="privacy.css">
+</head>
+<body>
+<main class="privacy">
+  <header>
+    <p class="t-caption muted">Egress Guard</p>
+    <h1 class="t-headline">Browser privacy</h1>
+    <p>Choose which Chrome settings Egress Guard should manage for this profile. Review the tradeoffs, then apply your choices.</p>
+  </header>
+  <p class="t-caption muted">These controls affect the browser profile across sites. Incognito can have separate overrides. They do not install a VPN, hide your public IP address or verify proxy routing.</p>
+  <p id="status" role="status" aria-live="polite">Reading browser privacy status…</p>
+  <p id="error" class="inline-error" role="alert" hidden></p>
+  <form id="choices" aria-label="Browser privacy choices">
+    <div id="settings"></div>
+    <div class="actions">
+      <button type="submit" class="btn primary" id="apply" disabled>Apply selected protections</button>
+      <button type="button" class="btn" id="retry" disabled>Retry saved choices</button>
+      <button type="button" class="btn quiet" id="refresh">Refresh status</button>
+    </div>
+  </form>
+  <section aria-labelledby="release-heading">
+    <h2 id="release-heading" class="t-title">Return control to Chrome</h2>
+    <p>Release removes only Egress Guard’s setting overrides. Chrome then uses your current preferences, other extensions and organization policies. It does not write a saved copy of your old settings.</p>
+    <button type="button" class="btn quiet" id="release" disabled>Release all controls</button>
+  </section>
+  <p class="t-caption muted">Read-back values are shown per control. A selected checkbox is a request, not proof that Chrome accepted it. Safe Browsing and password-manager settings are outside this feature.</p>
+</main>
+<script src="core/browser-privacy.js"></script>
+<script src="privacy.js"></script>
+</body>
+</html>

@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Callable
 
 from mitmproxy import connection, ctx, http
 from mitmproxy.net.tls import starts_like_tls_record
-from mitmproxy.proxy import commands, layer
+from mitmproxy.proxy import commands, events, layer
+from mitmproxy.proxy.layers.tcp import TCPLayer
 from mitmproxy.proxy.layers.tls import parse_client_hello
 
 from egress_guard import __version__
@@ -26,15 +28,86 @@ MAX_CLIENT_HELLO_BYTES = 32 * 1024
 MAX_CLIENT_HELLO_READS = 32
 
 
-class RefusedTunnel(layer.Layer):
-    """Close the client side of a tunnel. The lazy upstream connection is never opened."""
+class TunnelGuard(layer.Layer):
+    """Inspect a bounded initial ClientHello before starting an opaque TCP relay.
 
-    closed = False
+    Own the protocol decision even when the first write has only one or two bytes:
+    mitmproxy's default classifier treats such short writes as non-TLS. Returning
+    from ``next_layer`` alone would let that classifier relay a fragmented hello.
+    No TLS keys, decrypted contents or new TCP-flow history are created here.
+    """
+
+    def __init__(self, context, *, require_tls: bool, admit: Callable[[str | None], bool],
+                 invalid: Callable[[], None]) -> None:
+        super().__init__(context)
+        self._require_tls = require_tls
+        self._admit = admit
+        self._invalid = invalid
+        self._buffer = bytearray()
+        self._reads = 0
+        self._closed = False
+
+    def _refuse(self, *, invalid: bool = False):
+        self._buffer.clear()
+        self._closed = True
+        if invalid:
+            self._invalid()
+        yield commands.CloseConnection(self.context.client)
+
+    def _relay(self, remainder: bytes):
+        data = bytes(self._buffer) + remainder
+        self._buffer.clear()
+        child = TCPLayer(self.context, ignore=True)
+        self._handle_event = child.handle_event
+        yield from child.handle_event(events.Start())
+        yield from child.handle_event(events.DataReceived(self.context.client, data))
 
     def _handle_event(self, event):
-        if not self.closed:
-            self.closed = True
-            yield commands.CloseConnection(self.context.client)
+        if self._closed or isinstance(event, events.Start):
+            return
+        if isinstance(event, events.ConnectionClosed):
+            yield from self._refuse()
+            return
+        if not isinstance(event, events.DataReceived) or event.connection != self.context.client:
+            return
+        self._reads += 1
+        room = MAX_CLIENT_HELLO_BYTES - len(self._buffer)
+        self._buffer.extend(event.data[:room])
+        remainder = event.data[room:]
+        data = bytes(self._buffer)
+        # A prefix that could become TLS must stay here, including a one-byte write.
+        possible_tls = (not data or (data[0] == 0x16 and (
+            len(data) < 2 or (data[1] == 0x03 and (len(data) < 3 or data[2] <= 0x03)))))
+        if not possible_tls:
+            if self._require_tls:
+                yield from self._refuse(invalid=True)
+            elif self._admit(None):
+                yield from self._relay(remainder)
+            else:
+                yield from self._refuse()
+            return
+        try:
+            hello = parse_client_hello(data) if starts_like_tls_record(data) else None
+            # The parser strips the handshake type. Do not mistake a differently
+            # typed message with a ClientHello-shaped body for a ClientHello.
+            if len(data) >= 6 and data[5] != 1:
+                raise ValueError("Expected ClientHello")
+            sni = hello.sni if hello is not None else None
+            if hello is not None:
+                sni_extensions = sum(kind == 0 for kind, _body in hello.extensions)
+                if sni_extensions > 1 or (sni_extensions and sni is None):
+                    raise ValueError("Invalid or ambiguous server name")
+        except ValueError:
+            yield from self._refuse(invalid=True)
+            return
+        if hello is None:
+            if remainder or len(data) >= MAX_CLIENT_HELLO_BYTES or self._reads >= MAX_CLIENT_HELLO_READS:
+                yield from self._refuse(invalid=True)
+            return
+        if self._admit(sni):
+            yield from self._relay(remainder)
+        else:
+            yield from self._refuse()
 
 
 class EgressGuard:
@@ -42,8 +115,8 @@ class EgressGuard:
         self.runtime: PolicyRuntime | None = None
         self.ledger: Ledger | None = None
         self._refresh_task: asyncio.Task | None = None
-        # Admitted CONNECT tunnels awaiting their first client bytes: client id -> [host, reads].
-        self._tunnels: dict[str, list] = {}
+        # Admitted CONNECT tunnels awaiting their first client bytes: client id -> authority.
+        self._tunnels: dict[str, tuple[str, int]] = {}
 
     @property
     def policy(self) -> Policy | None:
@@ -155,29 +228,39 @@ class EgressGuard:
 
     def http_connected(self, flow: http.HTTPFlow) -> None:
         host = normalize_host(flow.request.host)
-        if self._block_plaintext_credentials and host is not None and not is_loopback(host):
-            self._tunnels[flow.client_conn.id] = [host, 0]
+        if host is not None:
+            self._tunnels[flow.client_conn.id] = (host, flow.request.port)
+
+    def _admit_tunnel(self, host: str, port: int, sni: str | None) -> bool:
+        # Recheck the original authority at the handshake boundary as well: a grant
+        # may have expired, or the live policy may have changed since CONNECT.
+        policy = self.policy
+        if policy is None or not policy.enforceable():
+            self._event(host, "blocked", "not-ready", "connect")
+            return False
+        for candidate in dict.fromkeys((host, sni)):
+            if candidate is None:
+                continue
+            decision = policy.decision(candidate, port)
+            if decision["decision"] == "blocked":
+                self._event(candidate, "blocked", decision["source"], "connect")
+                return False
+        return True
 
     def next_layer(self, nextlayer: layer.NextLayer) -> None:
-        # Script addons run before mitmproxy's own next-layer decision, which would otherwise
-        # relay an ignored tunnel unseen. Only a complete TLS ClientHello is admitted; plaintext
-        # HTTP inside CONNECT would bypass the credential check, so it is closed before any byte
-        # or connection reaches the origin. TLS is neither terminated nor re-signed.
-        tunnel = self._tunnels.get(nextlayer.context.client.id)
-        if tunnel is None or nextlayer.layer is not None:
+        # Scripts run before mitmproxy's default next-layer classifier. Keep the entire
+        # admission decision in our own bounded layer, then relay original TLS bytes.
+        if nextlayer.layer is not None:
             return
-        tunnel[1] += 1
-        data = nextlayer.data_client()
-        try:
-            hello = parse_client_hello(data) if starts_like_tls_record(data) else False
-        except ValueError:
-            hello = False
-        if hello is None and len(data) <= MAX_CLIENT_HELLO_BYTES and tunnel[1] < MAX_CLIENT_HELLO_READS:
-            return  # Incomplete ClientHello; mitmproxy keeps waiting for the rest of it.
-        del self._tunnels[nextlayer.context.client.id]
-        if hello is None or hello is False:
-            self._event(tunnel[0], "blocked", "non-tls-tunnel", "connect")
-            nextlayer.layer = RefusedTunnel(nextlayer.context)
+        authority = self._tunnels.pop(nextlayer.context.client.id, None)
+        if authority is not None:
+            host, port = authority
+            nextlayer.layer = TunnelGuard(
+                nextlayer.context,
+                require_tls=self._block_plaintext_credentials and not is_loopback(host),
+                admit=lambda sni: self._admit_tunnel(host, port, sni),
+                invalid=lambda: self._event(host, "blocked", "non-tls-tunnel", "connect"),
+            )
 
     def client_disconnected(self, client: connection.Client) -> None:
         self._tunnels.pop(client.id, None)

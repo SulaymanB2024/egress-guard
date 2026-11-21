@@ -16,7 +16,7 @@ const fixture = JSON.parse(read("tests/browser/fixtures/publisher/rules.json"));
 const ID = dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 const EXT = `chrome-extension://${ID}/`;
 const START = Date.UTC(2026, 10, 20, 12, 0, 0);
-const WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js", "background-chrome.js"];
+const WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/browser-privacy.js", "background-chrome.js"];
 const event = () => { const fns = []; return {addListener: (fn) => fns.push(fn), fns, fire: (...a) => Promise.all(fns.map((f) => f(...a)))}; };
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setImmediate); };
 
@@ -43,6 +43,7 @@ async function worker({stored = fixture, packed = false, extraLocal = {}, extraS
     remove: async (key) => { for (const k of [].concat(key)) delete obj[k]; },
   });
   let dynamicRules = JSON.parse(JSON.stringify(initialDynamic)), sessionRules = JSON.parse(JSON.stringify(initialSession));
+  const dynamicUpdates = [];
   const alarms = new Map();
   const tabMessages = [];
   const chrome = {
@@ -52,12 +53,13 @@ async function worker({stored = fixture, packed = false, extraLocal = {}, extraS
     storage: {local: area(local, "local"), session: area(session, "session")},
     alarms: {create: (name, info) => alarms.set(name, info), clear: async (name) => alarms.delete(name), get: async (name) => alarms.get(name), onAlarm: event()},
     tabs: {onUpdated: event(), onRemoved: event(), sendMessage: async (tabId, msg) => { tabMessages.push({tabId, msg}); }, query: async () => JSON.parse(JSON.stringify(tabs))},
+    webNavigation: {onBeforeNavigate: event(), onCommitted: event(), onTabReplaced: event()},
     action: {setBadgeBackgroundColor: async () => {}},
     cookies: {onChanged: event(), remove: async (d) => { cookieCalls.push({op: "remove", ...d}); }, set: async (d) => { cookieCalls.push({op: "set", ...d}); }},
     browsingData: {remove: async (options, types) => { browsingCalls.push(JSON.parse(JSON.stringify({options, types}))); }},
     declarativeNetRequest: {
-      getDynamicRules: async () => dynamicRules.map((r) => ({...r})),
-      updateDynamicRules: async ({removeRuleIds = [], addRules = []}) => { fail("dynamicUpdate", {removeRuleIds, addRules}); dynamicRules = JSON.parse(JSON.stringify([...dynamicRules.filter((r) => !removeRuleIds.includes(r.id)), ...addRules])); },
+      getDynamicRules: async () => { fail("dynamicRead", dynamicRules); return dynamicRules.map((r) => ({...r})); },
+      updateDynamicRules: async ({removeRuleIds = [], addRules = []}) => { fail("dynamicUpdate", {removeRuleIds, addRules}); dynamicUpdates.push(JSON.parse(JSON.stringify({removeRuleIds, addRules}))); dynamicRules = JSON.parse(JSON.stringify([...dynamicRules.filter((r) => !removeRuleIds.includes(r.id)), ...addRules])); },
       updateSessionRules: async ({removeRuleIds = [], addRules = []}) => { fail("sessionUpdate", {removeRuleIds, addRules}); sessionRules = JSON.parse(JSON.stringify([...sessionRules.filter((r) => !removeRuleIds.includes(r.id)), ...addRules])); },
       getSessionRules: async () => sessionRules.map((r) => ({...r})),
       onRuleMatchedDebug: event(),
@@ -94,7 +96,7 @@ async function worker({stored = fixture, packed = false, extraLocal = {}, extraS
   const cont = (blocked = "https://login.bad.example/x?y=1", tabId = 4, shown = blocked, frameId = 0) => warning({type: "continue-once", url: shown}, blocked, tabId, frameId);
   const matched = (tabId, url, type, rulesetId, ruleId = 1) => chrome.declarativeNetRequest.onRuleMatchedDebug.fire({request: {tabId, url, type}, rule: {ruleId, rulesetId}});
   const unwrapPage = (msg, link, tabId = 6, frameId = 0) => { const url = `${EXT}unwrap.html#${link}`; return send(msg, {url, frameId, tab: {id: tabId, url}}); };
-  return {disk, reloads, ctx, chrome, clock, faults, tabs, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground, cookieCalls, browsingCalls, unwrapPage,
+  return {disk, reloads, ctx, chrome, clock, faults, tabs, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground, cookieCalls, browsingCalls, unwrapPage, send, dynamicUpdates,
     dynamic: () => dynamicRules, sessionRules: () => sessionRules};
 }
 
@@ -102,7 +104,7 @@ test("manifest (Chrome): MV3 service worker, DNR rulesets, minimal permissions, 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.background.service_worker, "background.js");
   // cookies: tracking cookies removed as they are set; contextMenus + offscreen + clipboardWrite: "Copy clean link".
-  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "browsingData", "clipboardWrite", "contextMenus", "cookies", "declarativeNetRequest", "declarativeNetRequestFeedback", "offscreen", "scripting", "storage"]);
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "browsingData", "clipboardWrite", "contextMenus", "cookies", "declarativeNetRequest", "declarativeNetRequestFeedback", "offscreen", "scripting", "storage", "webNavigation"]);
   assert.deepEqual(manifest.host_permissions, ["http://*/*", "https://*/*"]);
   // Rulesets are written by the build (scripts/build-browser.mjs); the source manifest lists none.
   assert.deepEqual(manifest.declarative_net_request.rule_resources, []);
@@ -754,4 +756,297 @@ test("a failed local deletion cannot resurrect a revoked timed permission on res
   const reboot = await worker(restartOptions(w));
   assert.equal(reboot.sessionRules().length, 0);
   assert.equal(reboot.local.egressGuard.exceptions.length, 0);
+});
+
+const strictModes = () => ({schema: 2, scope: "top-level-psl-v2", psl: hosts.psl.sha256, defaultMode: "strict", sites: {}, allowHosts: {}, cleanOff: []});
+// Small independent condition model for mode-policy script blocks, not a browser.
+function scriptBlockedByMode(all, top, destination = top) {
+  const covers = (list, host) => list.some((domain) => hosts.withinScope(host, domain));
+  return all.some((rule) => {
+    const c = rule.condition;
+    return rule.action.type === "block" && rule.priority === dnr.PRIORITY.mode && c.resourceTypes.includes("script") &&
+      (!c.topDomains || covers(c.topDomains, top)) && (!c.excludedTopDomains || !covers(c.excludedTopDomains, top)) &&
+      (!c.requestDomains || covers(c.requestDomains, destination)) && (!c.excludedRequestDomains || !covers(c.excludedRequestDomains, destination));
+  });
+}
+
+test("Strict starts with a closed unknown-top hold and releases a prewarmed site only in the full atomic policy", async () => {
+  const w = await worker({stored: null, extraLocal: {egressGuardModes: strictModes()}});
+  const target = "new.example", targetUrl = `https://${target}/first?private=query`;
+  assert.equal(scriptBlockedByMode(w.dynamic(), target), true);
+  assert.equal(scriptBlockedByMode(w.dynamic(), "publisher.example"), false);
+  const before = await w.popup({type: "popup-state", tabId: 2, tabUrl: targetUrl});
+  assert.equal(before.preparation.state, "held");
+  assert.equal(before.policy.topPartyCoverage, "closed-until-prepared");
+  const calls = w.dynamicUpdates.length;
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 1, tabId: 2, url: targetUrl});
+  assert.equal(w.dynamicUpdates.length, calls, "a foreign child frame cannot prepare its own policy context");
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 2, url: targetUrl});
+  assert.equal(w.dynamicUpdates.length, calls + 1, "one atomic replacement, never an intermediate allow");
+  const replacement = w.dynamicUpdates.at(-1).addRules;
+  assert.equal(scriptBlockedByMode(replacement, target), false);
+  assert.equal(scriptBlockedByMode(replacement, target, "foreign-frame.example"), true, "the named cross-top deny is in the same replacement as the hold exclusion");
+  assert.equal(scriptBlockedByMode(replacement, "still-unseen.example"), true);
+  assert.equal(replacement.some((r) => ["allow", "allowAllRequests"].includes(r.action.type)), false);
+  const state = await w.popup({type: "popup-state", tabId: 2, tabUrl: targetUrl});
+  assert.equal(state.preparation.state, "prepared");
+  assert.equal(state.preparation.revision, state.policy.dynamicRevision);
+  assert.equal(JSON.stringify(w.local.egressGuardController).includes("private=query"), false, "only site names enter the policy receipt");
+  assert.deepEqual(w.reloads, [], "no automatic extension or page reload");
+});
+
+test("preparation failure retains the old hold; confirmed dynamic policy remains distinct from failed bookkeeping", async () => {
+  const w = await worker({stored: null, extraLocal: {egressGuardModes: strictModes()}});
+  const old = JSON.stringify(w.dynamic());
+  w.faults.dynamicUpdate = true;
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 2, url: "https://unready.example/"});
+  assert.equal(JSON.stringify(w.dynamic()), old);
+  let state = await w.popup({type: "popup-state", tabId: 2, tabUrl: "https://unready.example/"});
+  assert.equal(state.policy.state, "degraded");
+  assert.equal(state.preparation.state, "held");
+  w.faults.dynamicUpdate = false;
+  assert.equal((await w.popup({type: "retry-policy"})).ok, true);
+  state = await w.popup({type: "popup-state", tabId: 2, tabUrl: "https://unready.example/"});
+  assert.equal(state.preparation.state, "prepared");
+  w.faults.localWrite = (items) => Boolean(items.egressGuardController);
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 3, url: "https://confirmed.example/"});
+  state = await w.popup({type: "popup-state", tabId: 3, tabUrl: "https://confirmed.example/"});
+  assert.equal(state.policy.state, "degraded");
+  assert.equal(state.policy.appliedRevision, null);
+  assert.equal(state.preparation.state, "prepared", "the independently read-back dynamic rules are known even if the final local receipt cannot be written");
+  assert.equal(scriptBlockedByMode(w.dynamic(), "confirmed.example"), false);
+});
+
+test("failed dynamic readback invalidates the previous preparation receipt until recovery", async () => {
+  const w = await worker({stored: null, extraLocal: {egressGuardModes: strictModes()}});
+  let reads = 0;
+  w.faults.dynamicRead = () => ++reads === 2;
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 2, url: "https://unverified.example/"});
+  const unknown = await w.popup({type: "popup-state", tabId: 2, tabUrl: "https://unverified.example/"});
+  assert.equal(unknown.policy.state, "degraded");
+  assert.equal(unknown.policy.dynamicRevision, null);
+  assert.equal(unknown.policy.topPartyCoverage, "unknown");
+  assert.equal(unknown.preparation.state, "unknown");
+  assert.equal(unknown.mode, "unknown", "old policy is not reported as current after a successful mutation with failed readback");
+  w.faults.dynamicRead = false;
+  await w.popup({type: "retry-policy"});
+  assert.equal((await w.popup({type: "popup-state", tabId: 2, tabUrl: "https://unverified.example/"})).preparation.state, "prepared");
+});
+
+test("closing the last active context drops automatic preparation and removes its site from the receipt", async () => {
+  const tabs = [{id: 1, url: "https://open.example/"}, {id: 2, url: "https://open.example/second"}, {id: 3, url: "https://closed.example/"}];
+  const w = await worker({stored: null, tabs, extraLocal: {egressGuardModes: strictModes()}});
+  assert.equal(scriptBlockedByMode(w.dynamic(), "closed.example"), false);
+  w.tabs.pop();
+  await w.chrome.tabs.onRemoved.fire(3);
+  await w.api.sync();
+  assert.equal(scriptBlockedByMode(w.dynamic(), "closed.example"), true);
+  assert.equal(JSON.stringify(w.local.egressGuardController).includes("closed.example"), false);
+  w.tabs.shift();
+  await w.chrome.tabs.onRemoved.fire(1);
+  await w.api.sync();
+  assert.equal(scriptBlockedByMode(w.dynamic(), "open.example"), false, "another active tab still needs the site policy");
+  w.tabs.pop();
+  await w.chrome.tabs.onRemoved.fire(2);
+  await w.api.sync();
+  assert.equal(scriptBlockedByMode(w.dynamic(), "open.example"), true);
+  assert.deepEqual(w.local.egressGuardController.topSites, []);
+  assert.deepEqual(w.local.egressGuardController.preparedSites, []);
+  assert.equal(w.local.egressGuardController.preparedCache, undefined, "no inactive visit-history cache is stored");
+});
+
+test("prewarm candidates expire and never revive from a local receipt after worker restart", async () => {
+  const w = await worker({stored: null, extraLocal: {egressGuardModes: strictModes()}});
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 91, url: "https://prerender.example/"});
+  assert.equal(scriptBlockedByMode(w.dynamic(), "prerender.example"), false);
+  assert.equal(w.alarms.get("eg-expiry").when, START + 60000);
+  const restarted = await worker(restartOptions(w));
+  assert.equal(scriptBlockedByMode(restarted.dynamic(), "prerender.example"), true, "matching actual rules and a matching local digest still do not restore an inactive context");
+  assert.equal(JSON.stringify(restarted.local.egressGuardController).includes("prerender.example"), false);
+  const changedEpoch = JSON.parse(JSON.stringify(w.local));
+  changedEpoch.egressGuardController.epoch = "previous-build";
+  const upgraded = await worker(restartOptions(w, {extraLocal: changedEpoch}));
+  assert.equal(scriptBlockedByMode(upgraded.dynamic(), "prerender.example"), true);
+  w.clock.now = START + 61000;
+  await w.chrome.alarms.onAlarm.fire({name: "eg-expiry"});
+  assert.equal(scriptBlockedByMode(w.dynamic(), "prerender.example"), true, "scheduled pruning reinstates the hold");
+  assert.equal(scriptBlockedByMode(w.dynamic(), "publisher.example"), false, "current tabs remain prepared");
+  assert.equal(JSON.stringify(w.local.egressGuardController).includes("prerender.example"), false);
+});
+
+test("navigation prewarming is bounded and tab-bound, including replacement targets and closed prerenders", async () => {
+  const w = await worker({stored: null, extraLocal: {egressGuardModes: strictModes()}});
+  for (let i = 0; i < 129; i++) await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 1000 + i, url: `https://pending${i}.example/`});
+  assert.equal(w.local.egressGuardController.topSites.length, 129, "one active site plus at most 128 transient contexts");
+  assert.equal(scriptBlockedByMode(w.dynamic(), "pending0.example"), true, "oldest pending context loses its automatic preparation");
+  assert.equal(scriptBlockedByMode(w.dynamic(), "pending128.example"), false);
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 1128, url: "https://replacement.example/"});
+  assert.equal(scriptBlockedByMode(w.dynamic(), "pending128.example"), true, "one tab cannot accumulate a history of redirect targets");
+  assert.equal(scriptBlockedByMode(w.dynamic(), "replacement.example"), false);
+  await w.chrome.tabs.onRemoved.fire(1128);
+  await w.api.sync();
+  assert.equal(scriptBlockedByMode(w.dynamic(), "replacement.example"), true);
+  assert.equal(JSON.stringify(w.local.egressGuardController).includes("replacement.example"), false);
+});
+
+test("manual preparation accepts only the popup and the source tab's unchanged URL; it never reloads a page", async () => {
+  const w = await worker({stored: null, extraLocal: {egressGuardModes: strictModes()}});
+  w.tabs[0].url = "https://next.example/form-result";
+  const request = {type: "prepare-strict-site", tabId: 1, tabUrl: w.tabs[0].url};
+  assert.match((await w.page(request)).error, /Not allowed/);
+  assert.match((await w.popup({...request, tabUrl: "https://publisher.example/article"})).error, /tab changed/);
+  assert.match((await w.popup({...request, tabId: 100})).error, /tab changed/);
+  assert.equal(scriptBlockedByMode(w.dynamic(), "next.example"), true);
+  const answer = await w.popup(request);
+  assert.equal(answer.ok, true, answer.error);
+  assert.equal(answer.preparation.state, "prepared");
+  assert.deepEqual(w.reloads, []);
+  assert.equal(w.tabs[0].url, request.tabUrl);
+  assert.equal(w.tabMessages.some(({msg}) => /reload|replay|resume/.test(msg.type)), false);
+});
+
+test("a wildcard registry base stays held without a false prepared receipt for its parent site", async () => {
+  const url = "https://af-south-1.airflow.amazonaws.com/";
+  const w = await worker({stored: null, tabs: [{id: 1, url}], extraLocal: {egressGuardModes: strictModes()}});
+  const state = await w.popup({type: "popup-state", tabId: 1, tabUrl: url});
+  assert.equal(state.site, "amazonaws.com");
+  assert.equal(state.preparation.state, "held");
+  assert.equal(state.preparation.canPrepare, false);
+  assert.match(state.preparation.reason, /wildcard-registry/);
+  assert.equal(scriptBlockedByMode(w.dynamic(), new URL(url).hostname), true);
+  const count = w.dynamicUpdates.length;
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 1, url});
+  assert.equal(w.dynamicUpdates.length, count, "no useless prewarm/retry loop for an unrepresentable host");
+  assert.match((await w.popup({type: "prepare-strict-site", tabId: 1, tabUrl: url})).error, /cannot be prepared safely/);
+});
+
+test("unscopable local HTTP addresses report their Strict hold and never enter permissive domain exclusions", async () => {
+  for (const url of ["http://127.0.0.1:8765/", "http://[::1]:8765/", "http://localhost:8765/", "http://intranet/"]) {
+    const w = await worker({stored: null, tabs: [{id: 1, url}], extraLocal: {egressGuardModes: strictModes()}});
+    const state = await w.popup({type: "popup-state", tabId: 1, tabUrl: url});
+    assert.equal(state.site, null);
+    assert.equal(state.defaultMode, "strict");
+    assert.equal(state.preparation.state, "held", url);
+    assert.equal(state.preparation.canPrepare, false);
+    assert.match(state.preparation.reason, /IP addresses and single-label/);
+    const refused = await w.popup({type: "prepare-strict-site", tabId: 1, tabUrl: url});
+    assert.ok(refused.error);
+    assert.equal(refused.preparation.state, "held");
+    assert.equal(w.dynamic().some((r) => r.condition.excludedTopDomains), false, "no ad-hoc IP or localhost exemption is introduced");
+    assert.equal((await w.popup({type: "popup-state", tabId: 1, tabUrl: "chrome://settings/"})).preparation.state, "not-applicable");
+  }
+});
+
+test("prewarming keeps current source-tab grants scoped and leaves Standard policy unchanged", async () => {
+  const standard = await worker({stored: null});
+  await standard.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 2, url: "https://new.example/"});
+  assert.deepEqual(standard.dynamic(), []);
+  assert.equal((await standard.popup({type: "popup-state", tabId: 2, tabUrl: "https://new.example/"})).preparation.state, "not-applicable");
+  const strict = await worker({stored: null, extraLocal: {egressGuardModes: strictModes()}});
+  await repair(strict);
+  const original = JSON.stringify(strict.sessionRules());
+  await strict.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 1, url: "https://next.example/"});
+  assert.equal(JSON.stringify(strict.sessionRules()), original, "a speculative target never widens or transfers existing grants");
+  for (const rule of strict.sessionRules()) {
+    assert.deepEqual(rule.condition.tabIds, [1]);
+    assert.deepEqual(rule.condition.topDomains, ["publisher.example"]);
+  }
+});
+
+test("privacy controls authenticate the exact top-level settings page and remain usable while DNR is stalled", async () => {
+  const w = await worker({stored: null});
+  const request = {type: "browser-privacy-apply", selected: ["webrtc"]};
+  for (const sender of [
+    {url: `${EXT}popup.html`, frameId: 0},
+    {url: `${EXT}privacy.html`, frameId: 1},
+    {url: `${EXT}privacy.html?forged`, frameId: 0},
+    {url: "https://publisher.example/", frameId: 0, tab: {id: 1}},
+    {id: "foreign-extension", url: `${EXT}privacy.html`, frameId: 0},
+  ]) assert.match((await w.send(request, sender)).error, /only from their settings page/);
+  assert.equal(w.local.egressGuardBrowserPrivacy, undefined);
+  const originalRead = w.chrome.declarativeNetRequest.getDynamicRules;
+  let release;
+  const stalled = new Promise((resolve) => { release = resolve; });
+  w.chrome.declarativeNetRequest.getDynamicRules = async () => { await stalled; return originalRead(); };
+  const changing = w.popup({type: "set-mode", tabUrl: "https://publisher.example/", mode: "strict"});
+  await settle();
+  let timeout;
+  try {
+    const reply = await Promise.race([
+      w.send(request, {url: `${EXT}privacy.html`, frameId: 0}),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("Privacy recovery was blocked behind DNR")), 1000); }),
+    ]);
+    assert.equal(reply.schema, 1);
+    assert.equal(reply.permission, false, "no profile or permission changes are made by the test");
+    assert.deepEqual(w.local.egressGuardBrowserPrivacy.selected, ["webrtc"]);
+  } finally { clearTimeout(timeout); release(); await changing; }
+});
+
+test("same-document URL changes notify content to re-read its own location without transmitting a URL", async () => {
+  const w = await worker({stored: null});
+  await w.chrome.tabs.onUpdated.fire(1, {url: "https://publisher.example/new-path?private=value"}, w.tabs[0]);
+  assert.ok(w.tabMessages.some((entry) => entry.tabId === 1 && JSON.stringify(entry.msg) === '{"type":"page-location"}'));
+});
+
+async function stallReconciliationRead(w) {
+  const read = w.chrome.declarativeNetRequest.getDynamicRules;
+  let release, entered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { entered = resolve; });
+  let first = true;
+  w.chrome.declarativeNetRequest.getDynamicRules = async () => {
+    if (first) { first = false; entered(); await gate; }
+    return read();
+  };
+  const running = w.api.sync();
+  await started;
+  return {release, running};
+}
+
+test("queued tab retirement defeats a navigation prewarm already waiting behind a stalled reconciliation", async () => {
+  const w = await worker({stored: null, tabs: [{id: 1, url: "https://publisher.example/"}, {id: 71, url: "about:blank"}], extraLocal: {egressGuardModes: strictModes()}});
+  const stall = await stallReconciliationRead(w);
+  const pending = w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 71, url: "https://closed-before-prepare.example/"});
+  w.tabs.pop();
+  const retired = w.chrome.tabs.onRemoved.fire(71);
+  stall.release();
+  await Promise.all([stall.running, pending, retired]);
+  assert.equal(scriptBlockedByMode(w.dynamic(), "closed-before-prepare.example"), true);
+  assert.equal(w.local.egressGuardController.preparedSites.includes("closed-before-prepare.example"), false);
+  assert.deepEqual(w.local.egressGuardController.topSites, ["publisher.example"]);
+  assert.equal(w.alarms.has("eg-expiry"), false, "the retired prewarm does not receive a fresh expiry window");
+});
+
+test("queued tab retirement defeats a pending content sender and cannot resurrect its site after expiry", async () => {
+  const closedUrl = "https://closed-sender.example/private/path";
+  const w = await worker({stored: null, tabs: [{id: 1, url: "https://publisher.example/"}, {id: 71, url: closedUrl}], extraLocal: {egressGuardModes: strictModes()}});
+  const stall = await stallReconciliationRead(w);
+  const message = w.page({type: "page-rules"}, closedUrl, 71);
+  w.tabs.pop();
+  const retired = w.chrome.tabs.onRemoved.fire(71);
+  stall.release();
+  await Promise.all([stall.running, message, retired]);
+  assert.equal(scriptBlockedByMode(w.dynamic(), "closed-sender.example"), true);
+  assert.deepEqual(w.local.egressGuardController.topSites, ["publisher.example"]);
+  w.clock.now += 60 * 60 * 1000;
+  await w.chrome.alarms.onAlarm.fire({name: "eg-reconcile"});
+  assert.equal(JSON.stringify(w.local.egressGuardController).includes("closed-sender.example"), false, "the absent-tab fallback cannot retain an old queued sender indefinitely");
+  assert.deepEqual(w.local.egressGuardController.preparedSites, ["publisher.example"]);
+});
+
+test("tab replacement retires the old sender, prewarm and grants without relying on onRemoved", async () => {
+  const w = await worker({stored: null, extraLocal: {egressGuardModes: strictModes()}});
+  await w.page({type: "page-rules"});
+  await repair(w);
+  await w.chrome.webNavigation.onBeforeNavigate.fire({frameId: 0, tabId: 1, url: "https://retired-prewarm.example/"});
+  assert.equal(w.sessionRules().length, 2);
+  w.tabs.splice(0, w.tabs.length, {id: 2, url: "https://replacement.example/"});
+  await w.chrome.webNavigation.onTabReplaced.fire({replacedTabId: 1, tabId: 2});
+  assert.deepEqual(w.local.egressGuardController.topSites, ["replacement.example"]);
+  assert.deepEqual(w.local.egressGuardController.preparedSites, ["replacement.example"]);
+  assert.equal(scriptBlockedByMode(w.dynamic(), "publisher.example"), true);
+  assert.equal(scriptBlockedByMode(w.dynamic(), "retired-prewarm.example"), true);
+  assert.equal(scriptBlockedByMode(w.dynamic(), "replacement.example"), false);
+  assert.equal(w.sessionRules().length, 0);
+  assert.deepEqual(w.local.egressGuard.exceptions, []);
 });

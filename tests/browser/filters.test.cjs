@@ -607,7 +607,9 @@ test("site modes: No scripts blocks every script of the site and adds script-src
   assert.ok(rules.some((r) => r.action.type === "modifyHeaders" && r.action.responseHeaders && r.action.responseHeaders[0].value === "script-src 'none'" && r.condition.requestDomains.includes("reader.example")));
   assert.equal(outcome(rules, {url: "https://vendor.example/w.js", initiator: "any.example", type: "script"}), "block", "Strict by default");
   assert.equal(outcome(rules, {url: "https://vendor.example/w.js", initiator: "app.example", type: "script"}), "none", "a site set to Standard");
-  assert.equal(outcome(rules, {url: "https://m.stripe.network/inner.js", initiator: "js.stripe.com", type: "script"}), "none", "functional providers' own frames are not held to Strict");
+  const paymentScript = {url: "https://m.stripe.network/inner.js", initiator: "js.stripe.com", type: "script"};
+  assert.equal(outcome(rules, paymentScript), "block", "unprepared contexts have no implicit functional-provider bypass");
+  assert.equal(outcome(dnr.compileModes({defaultMode: "strict"}, {topSites: ["stripe.com"]}).rules, paymentScript), "none", "the existing functional exception returns with the complete prepared policy");
   for (const r of rules) assert.ok([dnr.PRIORITY.mode, dnr.PRIORITY.clean, dnr.PRIORITY.modeHeaders, dnr.PRIORITY.relax].includes(r.priority));
   // The No-scripts policy sits above the cleaning brake: switching cleaning off cannot switch scripts back on.
   const braked = dnr.compileModes({sites: {"reader.example": "noscript"}, cleanOff: ["reader.example"]}).rules;

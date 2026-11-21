@@ -70,6 +70,7 @@
     beacons: {label: "Third-party beacon"},
     links: {label: "Link tracker unwrapped"},
     surrogates: {label: "Tracker answered by a stub"},
+    preparation: {label: "Strict preparation"},
     strict: {label: "Strict mode (third party)"},
     noscript: {label: "Scripts off for this site"},
     embeds: {label: "Embed held until clicked"},
@@ -258,6 +259,33 @@
     const excluded = hosts.scopeExclusions(site);
     return {topDomains: [site], ...(excluded.length ? {excludedTopDomains: excluded} : {})};
   };
+
+  /**
+   * Complement of the prepared PSL site scopes. A bare excludedTopDomains list
+   * would exempt independent tenants as well as their hosting company's pages.
+   * Restore those nested boundaries, excluding only prepared sites *inside*
+   * each boundary. Equal exclusion sets can share one bounded domain list.
+   * No request-to-initiator comparison is involved: the unknown top page is held
+   * even when a foreign iframe requests its own same-origin script.
+   */
+  function preparationScopes(preparedSites) {
+    const prepared = [...new Set(preparedSites.filter((site) => hosts.siteOf(site) === site && hosts.canScopeSite(site)))].sort();
+    if (prepared.length > 4096) throw new Error("Too many sites to prepare safely. Close unused tabs or reduce site overrides.");
+    const scopes = [{...(prepared.length ? {excludedTopDomains: prepared} : {})}];
+    const boundaries = [...new Set(prepared.flatMap((site) => hosts.scopeExclusions(site)))].sort();
+    const groups = new Map();
+    for (const boundary of boundaries) {
+      const excluded = prepared.filter((site) => hosts.withinScope(site, boundary));
+      const key = excluded.join("\n");
+      if (!groups.has(key)) groups.set(key, {domains: [], excluded});
+      groups.get(key).domains.push(boundary);
+    }
+    for (const {domains, excluded} of groups.values()) {
+      for (const part of chunks(domains, 1000)) scopes.push({topDomains: part, ...(excluded.length ? {excludedTopDomains: excluded} : {})});
+    }
+    return scopes;
+  }
+
   function compileModes(modes, {firstId = MODE_BASE, topSites = []} = {}) {
     const sites = (modes && modes.sites) || {};
     const allowHosts = (modes && modes.allowHosts) || {};
@@ -283,7 +311,9 @@
       add(null, PRIORITY.clean, {type: "allow"}, {requestDomains: [site], ...(excluded.length ? {excludedRequestDomains: excluded} : {}), resourceTypes: ["main_frame"]});
     }
 
-    // Strict: one set for the sites switched to Strict, one for "everything else" when Strict is the default.
+    // Named Strict policy is released atomically with the preparation hold's
+    // exclusion. Until then, default Strict blocks active resources regardless
+    // of initiator and sanitizes subresources, including first-party requests.
     const strictSets = [];
     // Under a Strict default, a site with hosts you allowed (and no level of its own) gets its own Strict rules, so
     // that its allowances apply there and nowhere else.
@@ -293,9 +323,13 @@
     if (strictSites.length) strictSets.push({topDomains: strictSites});
     if (defaultMode === "strict") {
       const excluded = [...by.relaxed, ...by.standard, ...strictSites, ...by.noscript];
-      // For an unobserved site the declarative backstop still compares the initiator.
-      // Named top sites below close nested-frame gaps; the adapter adds them on navigation.
-      strictSets.push({...(excluded.length ? {excludedTopDomains: [...new Set(excluded)].sort()} : {}), domainType: "thirdParty"});
+      for (const scope of preparationScopes(excluded)) {
+        add("preparation", PRIORITY.mode, {type: "block"}, {...scope, resourceTypes: ["script", "sub_frame", "font", "object"]});
+        // The hold grants no implicit functional-host exception. Named policy
+        // restores the existing compatibility exceptions only after readback.
+        add(null, PRIORITY.clean, {type: "modifyHeaders", requestHeaders: [{header: "cookie", operation: "remove"}, {header: "referer", operation: "remove"}],
+          responseHeaders: [{header: "set-cookie", operation: "remove"}]}, {...scope, resourceTypes: [...SUBRESOURCE_TYPES]});
+      }
     }
     for (const scope of [...strictSets, ...(by.noscript.length ? [{topDomains: by.noscript, noscript: true}] : [])]) {
       const {noscript, ...who} = scope;
@@ -333,7 +367,7 @@
       add(null, PRIORITY.modeHeaders, noScriptHeaders, {requestDomains: [site], ...(excluded.length ? {excludedRequestDomains: excluded} : {}), resourceTypes: ["main_frame"]});
       add(null, PRIORITY.modeHeaders, noScriptHeaders, {...scope, resourceTypes: ["sub_frame"]});
     }
-    return {rules, kinds};
+    return {rules, kinds, preparedSites: strictSites, preparationHold: defaultMode === "strict"};
   }
 
   /**
@@ -344,8 +378,9 @@
   function embedRule(id, embedId, tabId, {withCookies = false, topSite = null} = {}) {
     const embed = EMBEDS.find((e) => e.id === embedId);
     if (!embed || !Number.isInteger(tabId) || tabId < 0 || !Number.isInteger(id) || id < 1) throw new Error("embed needs a provider and a tab");
+    if (topSite !== null && (hosts.siteOf(topSite) !== topSite || !hosts.canScopeSite(topSite))) throw new Error("embed needs a safely scoped top site");
     return {id, priority: withCookies ? PRIORITY.embedCookies : PRIORITY.embed, action: {type: "allow"},
-      condition: {requestDomains: [...embed.domains], ...(topSite ? {topDomains: [topSite]} : {}), tabIds: [tabId], resourceTypes: ["sub_frame", "script", "stylesheet", "image", "font", "xmlhttprequest", "media"]}};
+      condition: {requestDomains: [...embed.domains], ...(topSite ? topScope(topSite) : {}), tabIds: [tabId], resourceTypes: ["sub_frame", "script", "stylesheet", "image", "font", "xmlhttprequest", "media"]}};
   }
 
   /**

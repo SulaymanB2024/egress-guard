@@ -22,6 +22,10 @@
   // (popup, warning page after the DNR redirect) still run at the fixed-id origin.
   const OWN = `chrome-extension://${C.runtime.id}/`;
   const EXCEPTION_MINUTES_MAX = rulesApi.MAX_EXCEPTION_MINUTES;
+  // Optional profile controls have their own saved-intent/readback controller.
+  // They must remain recoverable when the unrelated DNR queue is stalled.
+  const browserPrivacy = root.EGBrowserPrivacy ? root.EGBrowserPrivacy.createController(C) : null;
+  if (browserPrivacy) browserPrivacy.ready.catch(() => {});
 
   const store = new RuleStore({persist: {
     load: async () => (await C.storage.local.get(KEY))[KEY],
@@ -263,16 +267,21 @@
   const ENDPOINT_BASE = 400000;
   const PERSISTENT_ALLOW_BASE = 600000;
   const MAX_GRANTS = 500;
+  // Bounded, in-memory navigation prewarming, never a persistent visit history.
+  // The registered dynamic policy/receipt can retain a site until reconciliation;
+  // these transient contexts themselves are never restored after worker restart.
+  const MAX_PREWARM_CONTEXTS = 128, PREWARM_MS = 60000;
   const EMBED_MS = 60 * 60000;
-  const EPOCH = `${C.runtime.getManifest ? C.runtime.getManifest().version : "0.7"}:${LISTS.build || "source"}:${hosts.psl.sha256}`;
+  const EPOCH = `${C.runtime.getManifest ? C.runtime.getManifest().version : "0.8"}:${LISTS.build || "source"}:${hosts.psl.sha256}`;
   let loaded = false, restoredSessions = false;
   let endedWhileAsleep = [];
   let grants = [], journal = null, savedReceipt = null, applied = null;
   let endpointIds = {};
   let lastWall = Date.now();
   const knownTabs = new Map();
+  const prewarmContexts = new Map(); // source tab id -> {site, expiresAt}
   const policy = {state: "pending", desiredRevision: null, savedRevision: null, appliedRevision: null,
-    error: null, grantsPending: false, expirySemantics: "scheduled", warnings: [], topPartyCoverage: "scoped"};
+    error: null, grantsPending: false, expirySemantics: "scheduled", warnings: [], topPartyCoverage: "unknown"};
   let syncing = Promise.resolve();
   const clone = (v) => JSON.parse(JSON.stringify(v));
   const canonical = (v) => JSON.stringify(v, function (key, value) {
@@ -285,10 +294,62 @@
     return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
   }
   const noteError = (error) => { policy.state = "degraded"; policy.error = String(error && error.message || error); };
+  function forgetDynamicReceipt() {
+    applied = null;
+    policy.dynamicRevision = null; policy.appliedRevision = null;
+    policy.topPartyCoverage = "unknown";
+  }
   function serial(fn) {
     const run = syncing.catch(() => {}).then(fn);
     syncing = run;
     return run;
+  }
+
+  const safelyScopedSite = (site) => hosts.siteOf(site) === site && hosts.canScopeSite(site);
+  // Wildcard registry bases are conservatively excluded with their descendants:
+  // DNR topDomains cannot express "all child tenants except the base hostname".
+  const preparedHostScope = (site, host) => Boolean(site && safelyScopedSite(site) && hosts.inSiteScope(host, site) &&
+    !hosts.scopeExclusions(site).some((boundary) => hosts.withinScope(host, boundary)));
+  function preparationFor(site, topHost = site) {
+    const revision = applied && applied.revision || null;
+    const canPrepare = preparedHostScope(site, topHost);
+    const base = {site, revision, canPrepare};
+    if (!topHost) return {...base, state: "not-applicable"};
+    if (!applied) return {...base, state: "unknown"};
+    const mode = ((site && applied.effectiveModes.sites[site]) || applied.effectiveModes.defaultMode);
+    if (mode !== "strict") return {...base, state: "not-applicable"};
+    if (applied.preparationSchema !== 1 || !Array.isArray(applied.preparedSites)) return {...base, state: "unknown"};
+    return {...base, state: canPrepare && applied.preparedSites.includes(site) ? "prepared" : applied.preparationHold ? "held" : "unknown",
+      ...(!canPrepare ? {reason: hosts.normalizeHost(topHost)
+        ? "This public-suffix or wildcard-registry address cannot be prepared safely with Chrome's domain conditions."
+        : "IP addresses and single-label hosts cannot be prepared safely with Chrome's domain conditions. Default Strict still holds their active resources."} : {})};
+  }
+  function preparationForUrl(url) {
+    let parsed;
+    try { parsed = new URL(url); } catch { return preparationFor(null); }
+    if (!["http:", "https:"].includes(parsed.protocol)) return preparationFor(null);
+    const host = hosts.hostOfUrl(url);
+    // Raw HTTP(S) hostnames are used only for an honest unsupported-address
+    // receipt. They never become a DNR exclusion, permission or prepared scope.
+    return preparationFor(host && hosts.siteOf(host), host || parsed.hostname);
+  }
+
+  function preparationCandidates(activeSites, requestedModes, now) {
+    for (const [tabId, entry] of prewarmContexts) if (entry.expiresAt <= now || entry.expiresAt > now + PREWARM_MS) prewarmContexts.delete(tabId);
+    if (requestedModes.defaultMode !== "strict") prewarmContexts.clear();
+    return [...new Set([...activeSites, ...[...prewarmContexts.values()].map((entry) => entry.site)])].sort();
+  }
+
+  function prewarm(url, tabId) {
+    const host = hosts.hostOfUrl(url || ""), site = hosts.siteOf(host);
+    if (!preparedHostScope(site, host)) return Promise.resolve();
+    return serial(async () => {
+      if (!loaded) await loadState();
+      if (modes.defaultMode !== "strict") return;
+      prewarmContexts.delete(tabId); prewarmContexts.set(tabId, {site, expiresAt: Date.now() + PREWARM_MS});
+      while (prewarmContexts.size > MAX_PREWARM_CONTEXTS) prewarmContexts.delete(prewarmContexts.keys().next().value);
+      await apply();
+    });
   }
 
   async function loadState() {
@@ -420,7 +481,7 @@
       await saveModes().catch((error) => { modes = nextModes; policy.warnings.push(`Threat reclassification could not be saved: ${String(error.message || error)}`); });
     }
     if (rollback) {
-      grants = []; pauses = {};
+      grants = []; pauses = {}; prewarmContexts.clear();
       policy.warnings.push("The system clock moved backwards; temporary permissions were revoked.");
       await savePauses().catch(() => { pauses = {}; });
     }
@@ -438,8 +499,14 @@
     lastWall = Math.max(lastWall, now);
     policy.state = "pending"; policy.error = null;
     const [tabs, currentDynamic, currentSession] = await Promise.all([readTabs(), D.getDynamicRules(), D.getSessionRules()]);
+    const currentDigest = await digest(currentDynamic);
+    if (applied && applied.dynamicDigest !== currentDigest) forgetDynamicReceipt();
     if (!applied && savedReceipt && savedReceipt.schema === 2 && savedReceipt.epoch === EPOCH &&
-        savedReceipt.dynamicDigest === await digest(currentDynamic)) applied = savedReceipt;
+        savedReceipt.dynamicDigest === currentDigest) {
+      applied = savedReceipt;
+      policy.dynamicRevision = applied.revision;
+      policy.topPartyCoverage = applied.preparationSchema === 1 ? (applied.preparationHold ? "closed-until-prepared" : "explicit-top-sites") : "unknown";
+    }
     await revalidatePermissions(now, rollback, tabs);
     const validJournal = journal && journal.schema === 2 && journal.epoch === EPOCH && journal.phase === "applied" && !rollback &&
       Number.isFinite(journal.observedAt) && journal.observedAt <= now + 1000;
@@ -482,7 +549,9 @@
       const host = hosts.hostOfUrl(tab.url || "");
       if (host && Number.isInteger(tab.id) && tab.id >= 0) (tabIdsBySite[host] ||= []).push(tab.id);
     }
-    const topSites = [...new Set(Object.keys(tabIdsBySite).map((h) => hosts.siteOf(h)).filter(Boolean))].sort();
+    const activeSites = [...new Set(Object.keys(tabIdsBySite).map((h) => hosts.siteOf(h)).filter((site) => site && safelyScopedSite(site)))].sort();
+    const requestedModes = clone(effectiveModes());
+    const topSites = preparationCandidates(activeSites, requestedModes, now);
     const compiled = dnr.compileUserState(store.rules.filter((r) => r.action !== "allow"), [], now);
     const persistent = dnr.compileUserState(store.rules.filter((r) => r.action === "allow"), [], now, {firstId: PERSISTENT_ALLOW_BASE, tabIdsBySite});
     endpointIds = Object.fromEntries(store.exceptions.filter((exc) => Number.isInteger(endpointIds[exc.id])).map((exc) => [exc.id, endpointIds[exc.id]]));
@@ -500,26 +569,31 @@
       endpointRules.push(...pair);
       endpointGroups.push({id: exc.id, ruleId, exception: clone(exc)});
     }
-    const requestedModes = clone(effectiveModes());
     const siteModes = dnr.compileModes(requestedModes, {topSites});
     const wantedDynamic = [...compiled.rules, ...siteModes.rules];
     const wantedSession = [...grants.flatMap(rulesForGrant), ...persistent.rules, ...endpointRules];
-    const snapshot = {schema: 2, epoch: EPOCH, modes: clone(modes), effectiveModes: requestedModes, pauses: clone(pauses), rules: store.snapshot(), topSites};
+    const snapshot = {schema: 2, epoch: EPOCH, modes: clone(modes), effectiveModes: requestedModes, pauses: clone(pauses), rules: store.snapshot(), topSites,
+      preparationSchema: 1, preparationHold: siteModes.preparationHold, preparedSites: siteModes.preparedSites};
     const revision = await digest({...snapshot, grants, dynamic: wantedDynamic, session: wantedSession});
     policy.desiredRevision = revision;
-    policy.topPartyCoverage = modes.defaultMode === "strict" ? "current-tabs-with-initiator-backstop" : "explicit-top-sites";
     checkQuota(wantedDynamic, wantedSession);
 
     // Revocations precede permission additions and dynamic changes. Unknown rules,
     // including rules from older extension versions, are removed unconditionally.
     const remove = currentSession.filter((old) => !wantedSession.some((r) => canonical(r) === canonical(old))).map((r) => r.id);
     if (remove.length) await D.updateSessionRules({removeRuleIds: remove});
-    if (!sameRules(currentDynamic, wantedDynamic)) await D.updateDynamicRules({removeRuleIds: currentDynamic.map((r) => r.id), addRules: wantedDynamic});
+    if (!sameRules(currentDynamic, wantedDynamic)) {
+      await D.updateDynamicRules({removeRuleIds: currentDynamic.map((r) => r.id), addRules: wantedDynamic});
+      // A successful mutation invalidates the old receipt immediately. If the
+      // readback fails, neither old nor requested policy is attested as current.
+      forgetDynamicReceipt();
+    }
     const checkedDynamic = await D.getDynamicRules();
     if (!sameRules(checkedDynamic, wantedDynamic)) throw new Error("Chrome did not confirm the requested dynamic policy.");
     // Dynamic modes are independently confirmed even if a later session/storage step fails.
     applied = {...snapshot, revision, dynamicDigest: await digest(checkedDynamic), observedAt: now, clockHighWater: lastWall};
     policy.dynamicRevision = revision; policy.appliedRevision = null;
+    policy.topPartyCoverage = siteModes.preparationHold ? "closed-until-prepared" : "explicit-top-sites";
     sources = compiled.sources; modeKinds = siteModes.kinds;
     allowIds = new Set(compiled.rules.filter((r) => r.action.type !== "block").map((r) => r.id));
 
@@ -570,7 +644,7 @@
     await C.alarms.clear(ALARM);
     const now = Date.now();
     const times = [...store.rules, ...store.exceptions, ...grants].map((x) => x.expiresAt)
-      .concat(Object.values(pauses)).filter((t) => Number.isFinite(t) && t > now);
+      .concat(Object.values(pauses), [...prewarmContexts.values()].map((entry) => entry.expiresAt)).filter((t) => Number.isFinite(t) && t > now);
     if (times.length) await C.alarms.create(ALARM, {when: Math.max(Math.min(...times), now + 1000)});
     await C.alarms.create(RECOVERY_ALARM, {delayInMinutes: 1, periodInMinutes: 1});
   }
@@ -730,16 +804,50 @@
     }
   }
 
+  function retireTab(tabId) {
+    if (!Number.isInteger(tabId) || tabId < 0) return Promise.resolve();
+    // A page message or prewarm may already be waiting behind a slow rule API.
+    // Final deletion must run after those earlier writers, in their same queue;
+    // deleting synchronously in onRemoved lets them resurrect a retired context.
+    return serial(async () => {
+      knownTabs.delete(tabId);
+      prewarmContexts.delete(tabId);
+      logs.delete(tabId); carried.delete(tabId); counts.links.delete(tabId);
+      await C.storage.session.remove([`log:${tabId}`, `nav:${tabId}`]).catch(() => {});
+      await saveEndpointRevocations(store.exceptions.filter((entry) => entry.tabId !== tabId));
+      grants = grants.filter((entry) => entry.tabId !== tabId);
+      await apply();
+    });
+  }
+
   // ---- events (registered synchronously so they wake the worker) ----------------
   if (C.declarativeNetRequest.onRuleMatchedDebug) C.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => { onMatched(info).catch(() => {}); });
   if (C.declarativeNetRequest.setExtensionActionOptions) C.declarativeNetRequest.setExtensionActionOptions({displayActionCountAsBadgeText: true}).catch(() => {});
   if (C.action && C.action.setBadgeBackgroundColor) C.action.setBadgeBackgroundColor({color: "#19382e"}).catch(() => {});
+
+  // Navigation events only prewarm named policy; they are not a network barrier.
+  // The already-installed preparation hold handles requests that arrive first.
+  // Prerender targets need not be visible to tabs.query for safe site preparation.
+  if (C.webNavigation) {
+    const prepareNavigation = (details) => {
+      if (details && details.frameId === 0 && Number.isInteger(details.tabId) && details.tabId >= 0) return prewarm(details.url, details.tabId).catch(() => {});
+    };
+    for (const event of [C.webNavigation.onBeforeNavigate, C.webNavigation.onCommitted]) if (event) event.addListener(prepareNavigation, {url: [{schemes: ["http", "https"]}]});
+    if (C.webNavigation.onTabReplaced) C.webNavigation.onTabReplaced.addListener((details) => {
+      // The retired id is explicit; do not depend on a separate onRemoved event.
+      if (details && Number.isInteger(details.replacedTabId) && details.replacedTabId >= 0) return retireTab(details.replacedTabId).catch(() => {});
+      return sync().catch(() => {});
+    });
+  }
 
   C.tabs.onUpdated.addListener((tabId, info, tab) => {
     if (typeof info.url === "string") {
       knownTabs.set(tabId, {id: tabId, url: info.url});
       const top = hosts.hostOfUrl(info.url);
       dropEndpoints((exc) => exc.tabId === tabId && !(top && hosts.inSiteScope(top, exc.site))).catch(() => {});
+      // Same-document navigation need not change the DOM. The content script
+      // re-reads its own location; no page-controlled URL is sent as authority.
+      C.tabs.sendMessage(tabId, {type: "page-location"}).catch(() => {});
     }
     else if (tab && typeof tab.url === "string") knownTabs.set(tabId, {id: tabId, url: tab.url});
     if (info.status === "loading") resetTab(tabId, (tab && tab.url) || info.url).catch(() => {});
@@ -754,17 +862,7 @@
     }
     if (typeof info.url === "string" || info.status === "loading") sync().catch(() => {});
   });
-  C.tabs.onRemoved.addListener((tabId) => {
-    knownTabs.delete(tabId);
-    dropEndpoints((exc) => exc.tabId === tabId).catch(() => {});
-    logs.delete(tabId);
-    carried.delete(tabId);
-    counts.links.delete(tabId);
-    C.storage.session.remove([`log:${tabId}`, `nav:${tabId}`]).catch(() => {});
-    dropContinues((c) => c.tabId === tabId).catch(() => {});
-    dropEmbeds(tabId).catch(() => {});
-    dropPasses((x) => x.tabId === tabId).catch(() => {});
-  });
+  C.tabs.onRemoved.addListener((tabId) => retireTab(tabId).catch(() => {}));
   // ---- noticing a rebuilt extension folder ---------------------------------------------------
   // An unpacked extension's files are read from its folder live. When `node scripts/build-browser.mjs` rewrites that
   // folder, rules/build.json changes; the worker notices on its hourly check and the popup asks the user to press
@@ -944,10 +1042,24 @@
         await apply(); await broadcast();
         return {ok: true, policy: {...policy}, coverage: LISTS.coverage || {complete: false, missing: ["build metadata"]}};
       }
+      case "prepare-strict-site": {
+        if (!Number.isInteger(message.tabId) || message.tabId < 0 || typeof message.tabUrl !== "string") return {error: "Open a web page first."};
+        const tab = (await readTabs()).find((entry) => entry.id === message.tabId);
+        if (!tab || tab.url !== message.tabUrl) return {error: "The tab changed. Reopen the popup before preparing this site."};
+        const host = hosts.hostOfUrl(tab.url), site = hosts.siteOf(host);
+        if (!preparedHostScope(site, host)) return {error: "This address cannot be prepared safely with Chrome's domain conditions.", preparation: preparationForUrl(tab.url)};
+        // The actual open tab is already an authoritative preparation context;
+        // this manual action creates no persistent or inactive-site permission.
+        await apply();
+        const preparation = preparationFor(site, host);
+        if (preparation.state !== "prepared") return {error: "Strict site policy was not confirmed. Consult the policy receipt.", preparation};
+        return {ok: true, preparation};
+      }
       case "popup-state": {
         const host = hosts.hostOfUrl(message.tabUrl);
         const lists = listsSummary();
-        if (!host) return {site: null, lists, policy: {...policy}, coverage: LISTS.coverage || {complete: false, missing: ["build metadata"]}};
+        if (!host) return {site: null, lists, policy: {...policy}, preparation: preparationForUrl(message.tabUrl), coverage: LISTS.coverage || {complete: false, missing: ["build metadata"]},
+          mode: modeFor(null), siteMode: null, defaultMode: applied ? applied.modes.defaultMode : "unknown", requestedMode: modes.defaultMode, requestedDefaultMode: modes.defaultMode};
         const now = Date.now();
         const active = store.activeFor(host);
         const report = await blockedReport(message.tabId);
@@ -959,6 +1071,7 @@
           types: rulesApi.RESOURCE_TYPES,
           categories: Object.fromEntries(Object.entries(dnr.CATEGORIES).filter(([, v]) => v.label).map(([k, v]) => [k, v.label])),
           policy: {...policy}, coverage: LISTS.coverage || {complete: false, missing: ["build metadata"]},
+          preparation: preparationFor(hosts.siteOf(host), host),
           mode: modeFor(hosts.siteOf(host)), siteMode: applied ? applied.modes.sites[hosts.siteOf(host)] || null : null, defaultMode: applied ? applied.modes.defaultMode : "unknown",
           requestedMode: savedModeFor(hosts.siteOf(host)), requestedDefaultMode: modes.defaultMode,
           paused: pausedUntil(hosts.siteOf(host)), resumeMode: savedModeFor(hosts.siteOf(host)),
@@ -1086,7 +1199,22 @@
     }
   }
 
+  async function handlePrivacy(message, sender) {
+    if (!sender || sender.id !== C.runtime.id || sender.url !== `${OWN}privacy.html` || sender.frameId !== 0) return {error: "Browser privacy controls are available only from their settings page."};
+    if (!browserPrivacy) return {error: "Browser privacy controls are unavailable."};
+    switch (message.type) {
+      case "browser-privacy-status": return browserPrivacy.status();
+      case "browser-privacy-apply": return browserPrivacy.apply(message.selected);
+      case "browser-privacy-retry": return browserPrivacy.retry();
+      case "browser-privacy-release": return browserPrivacy.release();
+      default: return {error: "Unknown browser privacy message."};
+    }
+  }
+
   function handle(message, sender) {
+    // Separate authority and queue: DNR/storage recovery cannot block the exact
+    // extension-owned privacy page's independent profile-control receipt.
+    if (message && typeof message.type === "string" && message.type.startsWith("browser-privacy-")) return handlePrivacy(message, sender);
     // One queue owns all intent mutations and reconciliation. An event cannot
     // publish a half-saved message preference or overwrite a simultaneous edit.
     return serial(() => handleMessage(message, sender));

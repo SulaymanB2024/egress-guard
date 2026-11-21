@@ -1,6 +1,6 @@
-# Browser companion 0.7
+# Browser companion 0.8
 
-The companion supplies controls a domain proxy cannot: URL-level request rules, tracking-parameter and cookie cleaning, page-element hiding, and optional local review of sponsored cards. Chrome is the primary implementation. Firefox retains manual request/cosmetic rules; it does not have the Chrome built-in list and model feature set.
+The companion supplies URL-level request rules, tracking-parameter and cookie cleaning, indexed generic and scoped page-element hiding, optional local review of sponsored cards, and explicit Chrome profile privacy controls. Chrome is the primary implementation. Firefox retains manual request/cosmetic rules; it does not have the Chrome built-in list, model or profile-control feature set.
 
 The extension remains an unsigned alpha. It works without the proxy. An optional read-only bridge can show the proxy's authenticated state in the popup; that connection does not route browser traffic or establish device-wide protection.
 
@@ -37,7 +37,7 @@ The browser extension itself reads packaged filter data. The build process downl
 | `--no-lists` / `--no-filters` | Explicitly leave out those sources; the result is reduced. |
 | `--accept-list-change ID` | Accept a reviewed large change in a named source's size, entries or exceptions. |
 
-Normal builds require every selected source. A Medium fallback does not fulfill a request for Full threat coverage. Choose Medium explicitly if that is the intended tier. Required URL sources must produce at least one blocking rule; having a source file alone is insufficient. Missing sources, ineffective compilation and development size overrides are recorded in `rules/build.json` and the popup reports reduced coverage. Stale snapshots are also reported.
+Normal builds require every selected source. A Medium fallback does not fulfill a request for Full threat coverage. Choose Medium explicitly if that is the intended tier. Required URL sources must produce at least one blocking rule; having a source file alone is insufficient. Missing sources, ineffective compilation, development size overrides and conservative cosmetic-exception fallbacks are recorded in `rules/build.json`; the popup reports reduced coverage. Normal builds refuse a source exception they cannot preserve without disabling imported coverage. Explicit reduced builds remain available for review. Stale snapshots are also reported.
 
 The compiler supports a bounded subset of filter syntax. A complete source receipt means the selected required sources are present and produced the required output; it does **not** mean every upstream rule was implemented. Conversion and rejection counts are in the build output and receipt.
 
@@ -51,8 +51,8 @@ The fixed development public key gives the unpacked build the ID `danbhmcinakkkk
 | --- | --- |
 | Relaxed | Domain lists, threat protection and manual rules; reduced URL and cleaning behavior. |
 | Standard | Domain and URL filters, supported tracker substitutes, beacon/link protections and normal cleaning. |
-| Strict | Standard plus restrictions on third-party scripts, frames and fonts, stronger header cleaning, and held supported embeds. |
-| No scripts | Strict plus JavaScript restrictions, intended for reading. |
+| Strict | Standard plus restrictions on third-party scripts, frames and fonts, stronger header cleaning, and held supported embeds. Default Strict additionally holds active resources on unprepared sites. |
+| No scripts | Strict plus script-request blocks and response policy restrictions, intended for reading. Existing execution and cached/service-worker responses require separate care. |
 
 Named site rules use Chrome's top-level-domain condition, so nested frames do not acquire a different site's permissions through their initiator. Registrable-site boundaries come from the complete pinned Public Suffix List, including private suffixes. A hosted tenant is not automatically trusted because its hostname ends with a larger platform's name.
 
@@ -62,23 +62,47 @@ Ordinary endpoint exceptions are exact-path/type, bound to the source tab and to
 
 The threat warning has a separate two-step **Continue anyway** action. It permits the named host's navigation in that tab, with sanitation; the threat host's subresources remain blocked. This can produce an incomplete page. Leaving the site, closing the tab or expiry revokes the grant.
 
-Expiry uses scheduled worker reconciliation. Chrome does not provide a DNR rule with a built-in wall-clock expiration. Sleep, delayed alarms and API failures can delay revocation, so “15 minutes” is a scheduled lifetime, not a hard security lease. Browser restart clears session grants. See [enforcement and recovery](enforcement-0.7.md) for failure behavior and the first-navigation limitation of default Strict.
+Expiry uses scheduled worker reconciliation. Chrome does not provide a DNR rule with a built-in wall-clock expiration. Sleep, delayed alarms and API failures can delay revocation, so “15 minutes” is a scheduled lifetime, not a hard security lease. Browser restart clears session grants. See [the grant journal and recovery](enforcement-0.7.md).
+
+### Default Strict preparation
+
+Once default Strict's new policy is applied, scripts, subframes, fonts and objects are blocked on an unknown top-level site until its complete named policy is installed. Other subresources receive Cookie, Referer and Set-Cookie stripping. Navigation itself can proceed. This closes the earlier gap where a nested frame's same-origin resources could pass before the outer site's rules were ready. A prepared hosting company never releases independent private tenants.
+
+The popup distinguishes **Held**, **Prepared** and unknown preparation. **Prepare this site** requests the full policy and verifies it; it never reloads the page or replays a request. If early resources were held and the page is incomplete, use Chrome's Reload after preparation. A reload following a form submission still has the browser's normal resubmission implications.
+
+IP literals, localhost, single-label hosts, public-suffix addresses and certain wildcard registry bases cannot receive a safe preparation exclusion. They remain held under default Strict, including local dashboard scripts. The popup explains the limitation and keeps the default-mode control available; explicitly choose Standard when needed. These addresses are not given an unsafe broad exception.
+
+Automatic preparation uses current tabs plus bounded in-memory navigation targets scheduled to expire after 60 seconds. Closing a tab drops its context; inactive sites are not restored from receipts at worker restart. Dynamic rules and local applied receipts can retain stale scopes until successful reconciliation. Preparation is not a persistent browsing-history cache or a hard deletion timer.
+
+The installed hold protects requests that race navigation events. Prewarming improves compatibility but has no timing guarantee. First extension activation/upgrade, failed migration, responses generated by service workers and Cache Storage retain explicit limits. Read [the 0.8 enforcement design](enforcement-0.8.md) before using default Strict as a blanket default.
 
 ## More page-level blocking
 
-Three mechanisms run without a model:
+The content engine uses these mechanisms without a model:
 
 - The fixed set of common ad-slot selectors.
-- Safe domain-specific cosmetic rules compiled from verified filter sources.
+- Indexed generic ID/class rules and scoped cosmetic rules compiled from verified filter sources.
 - Conservative sponsored-card detection using a short disclosure and repeated linked-card structure.
 
 Imported rules use a restricted selector grammar and reversible hide records. Forms, editors, players, focused controls and protected structure are checked before hiding and during later changes. Work is processed in bounded subtree tasks, so a busy page no longer exhausts a per-minute counter and automatically restores every ad.
 
 Use **Rules → Block an element** for a manual rule. The picker tries a precise ID or attribute value before broader shared attributes. **Restore everything hidden here** and individual Show/Hide controls remain available.
 
-Imported `#@#` exceptions suppress imported rules with the same canonical selector and matching scope. They do not disable the independent fixed slot stylesheet; the site's built-in-hiding switch controls that. Unsupported generic list selectors, procedural filters, scriptlets and unrestricted CSS are not imported.
+Generic rules use token maps and bounded DOM traversal, not a query for every imported rule. Scoped rules support PSL-derived entity scopes and narrowly bounded native `:has()` relations. Entity names describe cosmetic scope, not verified ownership; they never grant network access or change the manual-rule grammar.
 
-Cosmetic hiding changes display. It cannot undo a request, cookie write or impression that already happened. See [content engine details](content-0.7.md) for exact limits and protected-content behavior.
+Imported `#@#` exceptions suppress imported rules with the same canonical selector and matching scope. Supported `generichide`, `specifichide` and `elemhide` page exceptions disable their imported families, including after same-document URL changes. Unsupported exceptions quarantine the affected selector or disable the affected family and mark coverage reduced. Exceptions do not disable the independent fixed slot stylesheet; the site's built-in-hiding switch controls that. Complex generic selectors, procedural filters, scriptlets and unrestricted CSS remain unsupported.
+
+Discovery and retained hides have explicit work/record caps. Reaching a cap or a degraded exception evaluation appears as reduced imported coverage in the popup. A legitimate source page exception is reported as an exemption, not an error.
+
+Cosmetic hiding changes display. It cannot undo a request, cookie write or impression that already happened. See [0.8 content engine details](content-0.8.md) and [the existing reversible/protected-content design](content-0.7.md).
+
+## Optional Chrome profile controls
+
+Open **Settings → Browser privacy → Manage browser privacy**. Review the ten fixed choices and click **Apply selected protections** to request Chrome's optional `privacy` permission. No settings are changed by opening the page. Choices cover speculative loading, non-proxied WebRTC UDP, link auditing, third-party cookies, exposed advertising APIs, search suggestions and selected remote browser services.
+
+The page reports actual read-back values and ownership. Another extension or organization policy can prevent a requested setting from taking effect. **Release all controls** removes only Egress Guard's overrides; it never writes back a stale copy of previous user preferences. This controller has its own queue, so a stalled request-policy update does not block privacy-setting recovery.
+
+These are regular-profile controls with compatibility costs, not IP masking or verified routing. WebRTC may still use TCP and expose a public address; Chrome's cookie exemptions remain possible. No Safe Browsing or password-manager setting is changed. See [the setting catalog, ownership and recovery contract](browser-privacy-0.8.md).
 
 ## Optional local ad review
 
@@ -121,8 +145,9 @@ egress-guard native-host unregister \
 
 ## Upgrade behavior
 
-- Chrome's minimum version is now 145.
-- Old browser state is migrated to the new suffix/scope semantics. Permissive settings whose old scope cannot be trusted are discarded; re-create only the repairs you still need.
+- Chrome's minimum version remains 145. The extension now requires `webNavigation` for preparation hints and requests optional `privacy` only through the new settings page.
+- The 0.7 suffix/scope migration remains in place. Permissive older settings whose scope cannot be trusted are discarded; re-create only the repairs you still need.
+- An existing default Strict choice now has the preparation behavior and compatibility costs above after the new policy is applied. Standard remains available, and profile privacy choices start unapplied.
 - Saved settings may remain pending when Chrome or storage rejects an update. Check the popup receipt and retry.
 - Fresh Python configuration uses `history = "none"`. Existing explicit `full` or `aggregate` values are retained. Choose `none` in an existing configuration if wanted; old rows are not erased.
 - Refresh and rebuild to update packaged lists. They are not silently downloaded or replaced inside the running extension.
@@ -137,4 +162,6 @@ node --test tests/browser/*.test.cjs
 
 Optional real-browser fixture scripts remain in `tests/browser/`. They use throwaway profiles and loopback fixtures. They need a permitted Chrome environment and are separate from the DOM-stub/worker tests. The current source tests do not establish actual browser header behavior, CSS/SRI/CSP enforcement, model quality or installed-native-host operation.
 
-The [0.6 guide and measurements](browser-companion-0.6.md) are preserved as historical evidence, not 0.7 qualification. Current checks and remaining target work are recorded in the [0.7 release notes](release-0.7.md).
+The dedicated `tests/browser/chrome-0.8.mjs` adds native imported-CSS cases, Chrome's hypothetical Strict rule evaluator and an optional visible privacy-permission/setting check. Its `--check` mode only validates fixture contracts and launches no browser. See [commands and the remaining native matrix](releasing.md#focused-08-chrome-fixture).
+
+The [0.6 guide and measurements](browser-companion-0.6.md) and [0.7 record](release-0.7.md) are historical evidence. Current checks and remaining target work are recorded in the [0.8 release notes](release-0.8.md).

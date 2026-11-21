@@ -55,6 +55,32 @@ test("a complete build refuses missing coverage before replacing any last-good o
     assert.match(stamp.psl_sha256, /^[a-f0-9]{64}$/);
     assert.ok(fs.existsSync(path.join(out, "chrome/vendor/public_suffix_list.dat")));
     assert.ok(fs.existsSync(path.join(out, "chrome/semantic.html")));
+    assert.ok(fs.existsSync(path.join(out, "chrome/privacy.html")));
+    assert.ok(fs.existsSync(path.join(out, "chrome/core/cosmetic-selectors.js")));
+    assert.ok(fs.existsSync(path.join(out, "chrome/core/browser-privacy.js")));
+    const manifest = JSON.parse(fs.readFileSync(path.join(out, "chrome/manifest.json")));
+    assert.ok(manifest.optional_permissions.includes("privacy"));
+    assert.ok(manifest.permissions.includes("webNavigation"));
+  } finally { fs.rmSync(out, {recursive: true, force: true}); }
+});
+
+test("unsupported cosmetic exemptions are visible and cannot report complete coverage", async () => {
+  const {buildCoverage, feedSpecs, FILTER_LISTS, build} = await load();
+  const {compileCosmetics} = require("../../scripts/lib/cosmetic-compiler.cjs");
+  const lists = Object.fromEntries(Object.entries(feedSpecs("pro.plus")).map(([kind, specs]) => [kind, {
+    required: specs.map(spec => spec.id), sources: specs.map(spec => ({id: spec.id, updated_at: Date.now() / 1000})), domains: [],
+  }]));
+  const filters = Object.fromEntries(FILTER_LISTS.map(spec => [spec.id, {source: {stale: false}, text: "||tracker.example^\n##.adunit\n@@||example.com^$generichide,unknown-option"}]));
+  const data = compileCosmetics([filters.easylist.text]);
+  const receipt = buildCoverage(lists, filters, null, data);
+  assert.equal(receipt.complete, false); assert.equal(receipt.cosmetics.reduced, true);
+  assert.deepEqual(receipt.cosmetics.disabledFamilies, ["generic"]);
+  assert.equal(receipt.cosmetics.genericRules, 1);
+  const out = temp();
+  try {
+    fs.mkdirSync(path.join(out, "chrome")); fs.writeFileSync(path.join(out, "chrome", "last-good"), "unchanged");
+    assert.throws(() => build({out, lists, filters, requireComplete: true}), /cosmetic coverage was reduced/);
+    assert.equal(fs.readFileSync(path.join(out, "chrome", "last-good"), "utf8"), "unchanged");
   } finally { fs.rmSync(out, {recursive: true, force: true}); }
 });
 

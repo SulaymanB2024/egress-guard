@@ -15,9 +15,11 @@
   const MAX_DIRTY_ROOTS = 32;
   const MAX_RECORDS = 500;
   const MAX_WALK = 3000;
+  const GENERIC_NODES_PER_TASK = 96, MAX_GENERIC_DEPTH = 64, MAX_GENERIC_NODES = 50000;
   const PROTECTED_TAGS = new Set(["html", "head", "body", "main", "nav", "header", "footer", "form", "video", "audio", "dialog", "input", "textarea", "select", "button"]);
   const PROTECTED_INSIDE = new Set(["main", "nav", "form", "video", "audio", "input", "textarea", "select", "button", "dialog", "iframe"]);
   const PROTECTED_ROLES = new Set(["main", "navigation", "dialog", "alertdialog", "textbox", "searchbox", "combobox"]);
+  const PROTECTED_CONTEXT = new Set(["form", "video", "audio", "dialog", "button", "input", "textarea", "select"]);
   const UI = "data-eg-page-ui";
   const CSS = `
     :host { all: initial; display: block; font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1b1f1d; }
@@ -46,6 +48,9 @@
   let revealed = new WeakSet();        // shown by the user for this page load
   const protectedHits = new Set();     // rule ids that matched protected structure
   const overbroad = new Set();         // rule ids matching more than MAX_PER_RULE elements
+  let indexed = null, importedPolicy = null;
+  const genericCounts = new Map(), genericLimits = new Set();
+  let genericVisited = 0;
   let pick = null, toast = null;
   const documentId = root.crypto && typeof root.crypto.randomUUID === "function" ? root.crypto.randomUUID() : `doc-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   let domGeneration = 0, nextCandidate = 0, semanticMuted = false;
@@ -81,6 +86,11 @@
     if (!node.isConnected || !node.parentElement || inUi(node)) return false;
     if (PROTECTED_TAGS.has(node.localName) || protectedRole(node) || editable(node)) return false;
     if (document.activeElement && document.activeElement !== document.body && node.contains(document.activeElement)) return false;
+    let depth = 0;
+    for (let parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+      if (++depth > MAX_GENERIC_DEPTH || PROTECTED_CONTEXT.has(parent.localName) || editable(parent) ||
+          /(?:^|\s)(?:dialog|alertdialog|textbox|searchbox|combobox)(?:\s|$)/.test(parent.getAttribute("role") || "")) return false;
+    }
     const stack = [...node.children];
     let seen = 0;
     while (stack.length) {
@@ -109,7 +119,7 @@
       restoreDisplay(record);
     }
     record.hidden = hidden;
-    record.label.textContent = hidden ? (record.source === "native" || record.source === "model" ? "Paid placement hidden on this page." : record.source === "scoped" ? "Hidden by a rule for this site." : "Hidden by your rule for this site.") : "Shown for this page load.";
+    record.label.textContent = hidden ? (record.source === "native" || record.source === "model" ? "Paid placement hidden on this page." : record.source === "generic" ? "Hidden by an imported ad rule." : record.source === "scoped" ? "Hidden by a rule for this site." : "Hidden by your rule for this site.") : "Shown for this page load.";
     record.button.textContent = hidden ? "Show" : "Hide again";
     record.button.setAttribute("aria-expanded", String(!hidden));
   }
@@ -121,9 +131,14 @@
   }
 
   function release(record) {
+    if (records.get(record.node) !== record) return;
     restoreDisplay(record);
     record.placeholder.remove();
     records.delete(record.node);
+    if (record.source === "generic") {
+      const count = (genericCounts.get(record.ruleId) || 1) - 1;
+      if (count > 0) genericCounts.set(record.ruleId, count); else genericCounts.delete(record.ruleId);
+    }
   }
 
   function hide(node, rule) {
@@ -141,11 +156,28 @@
     shadow.append(row);
     node.before(placeholder);
     records.set(node, record);
+    if (record.source === "generic") genericCounts.set(record.ruleId, (genericCounts.get(record.ruleId) || 0) + 1);
     setHidden(record, true);
     return true;
   }
 
   const activeRules = () => rules.concat(genericWanted && !genericPaused ? scoped : []);
+  const indexedOn = () => genericWanted && !genericPaused && indexed && indexed.policy.generic && indexed.rules.size > 0;
+  function refreshImported() {
+    const host = root.location && root.location.hostname || site;
+    indexed = generic && generic.genericIndex ? generic.genericIndex(host, currentHref()) : null;
+    importedPolicy = indexed ? indexed.policy : null;
+    scoped = generic && generic.scopedRules ? generic.scopedRules(host, undefined, 200, currentHref(), importedPolicy || undefined) : [];
+    genericLimits.clear();
+  }
+  function noticeLocation() {
+    if (lastHref === currentHref()) return false;
+    lastHref = currentHref(); invalidateCandidates(); refreshImported();
+    for (const record of [...records.values()]) if (record.source === "native" || record.source === "model") release(record);
+    tasks = []; taskAt = 0; fullScan = true; dirtyRoots.clear();
+    enqueue(document, true);
+    return true;
+  }
   function observe() {
     if (observer && !paused && document.documentElement) observer.observe(document.documentElement, {
       childList: true, subtree: true, characterData: true, attributes: true,
@@ -166,11 +198,44 @@
     fullScan = false; dirtyRoots.clear();
     const live = new Map(activeRules().map((r) => [r.id, r]));
     // Checking records is bounded and separate from finding new matches. Workload never restores them en masse.
-    for (const record of records.values()) tasks.push({kind: "record", record, rule: live.get(record.ruleId)});
+    for (const record of records.values()) tasks.push({kind: "record", record, rule: live.get(record.ruleId) || (indexedOn() ? indexed.rules.get(record.ruleId) : null)});
+    // :has() can change an ancestor outside the mutation's immediate subtree.
+    // Schedule each applicable relational rule once for the document, within the
+    // same bounded task queue, rather than missing the changed outer container.
+    for (const rule of live.values()) if (rule.relational) tasks.push({kind: "rule", scope: document, rule});
     for (const scope of scopes) {
-      for (const rule of live.values()) tasks.push({kind: "rule", scope, rule});
+      for (const rule of live.values()) if (!rule.relational) tasks.push({kind: "rule", scope, rule});
+      if (indexedOn()) tasks.push({kind: "generic", scope, stack: [{node: scope === document ? document.documentElement : scope, child: -1}], visited: 0});
       if (semantic && genericWanted && !genericPaused && !semanticMuted) tasks.push({kind: "native", scope});
     }
+  }
+  function genericTask(task) {
+    if (!indexedOn() || !task.stack.length || (task.scope !== document && !task.scope.isConnected)) return true;
+    let consumed = 0;
+    while (task.stack.length && consumed < GENERIC_NODES_PER_TASK) {
+      if (records.size >= MAX_RECORDS) { genericLimits.add("hide-records"); return true; }
+      if (task.visited >= MAX_GENERIC_NODES) { genericLimits.add("subtree-nodes"); return true; }
+      const frame = task.stack[task.stack.length - 1], node = frame.node;
+      if (!node || !node.isConnected || inUi(node)) { task.stack.pop(); consumed++; task.visited++; continue; }
+      if (frame.child === -1) {
+        frame.child = 0; task.visited++; genericVisited++; consumed++;
+        if (!records.has(node) && !revealed.has(node)) {
+          const classes = node.classList || [];
+          if (classes.length > 32) genericLimits.add("class-tokens");
+          const matches = generic.genericMatches(indexed, node.id || "", classes);
+          if (matches.length && safe(node)) for (const rule of matches) {
+            if ((genericCounts.get(rule.id) || 0) >= MAX_PER_RULE) { genericLimits.add("per-selector-records"); continue; }
+            if (hide(node, rule)) break;
+          }
+          else for (const rule of matches) if (protectedHits.size < 500) protectedHits.add(rule.id);
+        }
+      }
+      const children = node.children || [];
+      if (frame.child >= children.length) { task.stack.pop(); continue; }
+      if (task.stack.length >= MAX_GENERIC_DEPTH) { genericLimits.add("subtree-depth"); task.stack.pop(); continue; }
+      task.stack.push({node: children[frame.child++], child: -1});
+    }
+    return task.stack.length === 0;
   }
   function scan() {
     timer = null;
@@ -186,6 +251,8 @@
         const semanticRecord = record.source === "native" || record.source === "model";
         if (!safe(record.node) || record.placeholder.parentElement !== record.node.parentElement ||
             (semanticRecord ? record.stale || fingerprint(record.node) !== record.fingerprint : !rule || !record.node.matches(rule.selector))) release(record);
+      } else if (task.kind === "generic") {
+        if (!genericTask(task)) { taskAt--; break; }
       } else if (task.kind === "native") {
         if (semanticMuted || !genericWanted || genericPaused || sensitivePage()) continue;
         for (const node of collectCards(task.scope, true)) {
@@ -223,10 +290,7 @@
 
   function onMutations(mutations) {
     if (paused) return;
-    if (lastHref !== currentHref()) {
-      lastHref = currentHref(); invalidateCandidates();
-      for (const record of [...records.values()]) if (record.source === "native" || record.source === "model") release(record);
-    }
+    noticeLocation();
     for (const m of mutations) {
       if (inUi(m.target)) continue;
       const target = m.target.nodeType === 1 ? m.target : m.target.parentElement;
@@ -241,10 +305,11 @@
   }
 
   function setRules(list) {
+    noticeLocation();
     rules = Array.isArray(list) ? list.filter((r) => r && r.kind === "cosmetic" && typeof r.selector === "string" && typeof r.id === "string") : [];
     protectedHits.clear();
     applyGeneric(); // Recovery broadcasts retry a previously rejected stylesheet operation.
-    if (!observer && (rules.length || scoped.length || semantic) && typeof root.MutationObserver === "function") observer = new root.MutationObserver(onMutations);
+    if (!observer && (rules.length || scoped.length || indexedOn() || semantic) && typeof root.MutationObserver === "function") observer = new root.MutationObserver(onMutations);
     tasks = []; taskAt = 0; fullScan = true; dirtyRoots.clear();
     clearTimeout(timer); timer = null;
     scan();
@@ -286,7 +351,7 @@
       // Whole-site Pause uses this same switch. Previously selected semantic hides
       // must not survive a user action that restores this site's automatic hiding.
       if (observer) observer.disconnect();
-      for (const record of [...records.values()]) if (record.source === "native" || record.source === "model") release(record);
+      for (const record of [...records.values()]) if (["native", "model", "generic", "scoped"].includes(record.source)) release(record);
       invalidateCandidates(); observe();
     }
     enqueue(document, true); return status();
@@ -316,12 +381,21 @@
   function resume() { paused = false; pausedReason = ""; genericPaused = false; semanticMuted = false; applyGeneric(); fullScan = true; scan(); return status(); }
 
   function status() {
+    noticeLocation();
     const values = [...records.values()];
     return {
       site, paused, reason: pausedReason, rules: rules.length,
       hidden: values.filter((r) => r.hidden).length, shown: values.filter((r) => !r.hidden).length,
       protectedRules: [...protectedHits], overbroadRules: [...overbroad], picking: Boolean(pick),
       generic: generic ? {available: true, on: Boolean(genericStyle), wanted: genericWanted, slots: genericCount(), error: styleError, pending: styleQueued > 0, scopedRules: scoped.length} : {available: false},
+      imported: {genericRules: indexed ? indexed.rules.size : 0, scopedRules: scoped.length,
+        genericEnabled: Boolean(importedPolicy && importedPolicy.generic && genericWanted && !genericPaused),
+        scopedEnabled: Boolean(importedPolicy && importedPolicy.scoped && genericWanted && !genericPaused),
+        exceptionSteps: importedPolicy ? importedPolicy.exceptionSteps : 0,
+        exceptionBudgetExhausted: Boolean(importedPolicy && importedPolicy.exceptionBudgetExhausted),
+        sourceExemptions: importedPolicy ? [...importedPolicy.sourceExemptions] : [],
+        degradedFamilies: importedPolicy ? [...importedPolicy.degradedFamilies] : [],
+        reasons: importedPolicy ? [...importedPolicy.reasons] : [], limits: [...genericLimits], visited: genericVisited},
       semantic: {available: Boolean(semantic), hidden: values.filter((r) => r.hidden && (r.source === "native" || r.source === "model")).length, paused: semanticMuted, documentId, domGeneration},
       workPending: taskAt < tasks.length || fullScan || dirtyRoots.size > 0,
     };
@@ -423,11 +497,11 @@
   }
   function invalidateCandidates() { candidates.clear(); domGeneration++; }
   function semanticCandidates() {
+    noticeLocation();
     invalidateCandidates();
     const disabledReason = paused ? "Hiding is paused for this page." : sensitivePage();
     const response = {ok: true, documentId, domGeneration, site, candidates: []};
     if (disabledReason) return {...response, disabledReason};
-    lastHref = currentHref();
     for (const node of collectCards(document)) {
       const data = describeCard(node);
       if (!data) continue;
@@ -611,6 +685,7 @@
       case "resume": return Promise.resolve(resume());
       case "start-picker": startPicker(); return Promise.resolve(status());
       case "generic": return Promise.resolve(setGeneric(message.on));
+      case "page-location": noticeLocation(); return Promise.resolve(status());
       case "semantic-candidates": return Promise.resolve(semanticCandidates());
       case "semantic-apply": return Promise.resolve(semanticApply(message));
       case "semantic-restore": return Promise.resolve(semanticRestore());
@@ -626,12 +701,13 @@
   });
 
   applyGeneric();
+  if (typeof root.addEventListener === "function") for (const event of ["popstate", "hashchange", "pageshow"]) root.addEventListener(event, noticeLocation);
   document.addEventListener("focusin", () => {
     for (const record of [...records.values()]) if (document.activeElement && record.node.contains(document.activeElement)) release(record);
   }, true);
   const ready = B.runtime.sendMessage({type: "page-rules"}).then((reply) => {
     site = reply && reply.site ? reply.site : null;
-    scoped = generic && generic.scopedRules ? generic.scopedRules(root.location && root.location.hostname || site) : [];
+    refreshImported();
     if (reply && reply.generic === false) setGeneric(false);
     const apply = () => setRules(reply && reply.rules);
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply, {once: true});
