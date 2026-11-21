@@ -74,7 +74,10 @@ def load_config(path: Path | None = None) -> dict:
     if (not isinstance(result["block"]["list_tier"], str)
             or result["block"]["list_tier"] not in {"pro", "pro.plus", "ultimate"}):
         raise ValueError("Unsupported filter tier")
-    for key in ("cname_protection",):
+    if (not isinstance(result["block"]["threat_tier"], str)
+            or result["block"]["threat_tier"] not in {"full", "medium"}):
+        raise ValueError("threat_tier must be full or medium")
+    for key in ("cname_protection", "block_encrypted_dns"):
         if type(result["block"][key]) is not bool:
             raise ValueError(f"{key} must be true or false")
     if type(result["risk"]["block_plaintext_credentials"]) is not bool:

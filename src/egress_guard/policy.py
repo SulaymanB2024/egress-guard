@@ -11,12 +11,30 @@ from pathlib import Path
 from typing import Callable
 
 from egress_guard.config import EXEMPTION_PRESETS
-from egress_guard.feeds import CNAME_FEEDS, THREATS, TRACKERS, CachedFeed, dns_name, load_cached_feed, selected_feeds
+from egress_guard.feeds import (ALL_FEEDS, THREAT_TIERS, CachedFeed, HostSet, dns_name, ip_literal,
+                                load_cached_feed, selected_feeds)
+from egress_guard.heuristics import DOH_RESOLVER_IPS, SAFETY_HOSTS, lookalike
 
 MAX_CONTROL_BYTES = 64 * 1024
 MAX_EXCEPTION_SECONDS = 24 * 60 * 60
-BLOCKED = {"invalid-host", "threat-intel", "local-block", "tracker-feed", "cname-feed"}
-ALLOWABLE = {"tracker-feed", "cname-feed"}
+STANDARD_PORTS = frozenset({80, 443})
+BLOCKED = {"invalid-host", "threat-intel", "malware-feed", "phishing-feed", "lookalike-domain", "local-block",
+           "doh-feed", "tracker-feed", "cname-feed"}
+ALLOWABLE = {"tracker-feed", "cname-feed", "doh-feed"}
+# What the dashboard shows for each ledger `source`. The ledger stores only the source, so every
+# source maps to exactly one category. Allowed decisions use the last four categories.
+CATEGORIES = {
+    "invalid-host": "invalid", "invalid-request": "invalid", "not-ready": "invalid",
+    "threat-intel": "threat", "malware-feed": "malware", "phishing-feed": "phishing",
+    "lookalike-domain": "lookalike", "local-block": "manual", "doh-feed": "doh",
+    "tracker-feed": "ads-trackers", "cname-feed": "cname-cloak",
+    "plaintext-credentials": "transport", "non-tls-tunnel": "transport",
+    "safety-list": "safety",
+    "local-allow": "exception", "dashboard-exception": "exception", "temporary-exception": "exception",
+    "tracker-paused": "exception",
+    "ip-literal": "unfiltered", "nonstandard-port": "unfiltered",
+    "no-match": "none",
+}
 
 
 def normalize_host(value: object) -> str | None:
@@ -38,12 +56,24 @@ def is_loopback(host: str) -> bool:
         return False
 
 
-def _match(host: str, names: set[str]) -> str | None:
+def _suffixes(host: str) -> list[str]:
+    """The host and each parent domain. One list per lookup keeps each string's hash cached."""
+    result = []
     while host:
-        if host in names:
-            return host
+        result.append(host)
         _, _, host = host.partition(".")
+    return result
+
+
+def _first(suffixes: list[str], names) -> str | None:
+    for suffix in suffixes:
+        if suffix in names:
+            return suffix
     return None
+
+
+def _match(host: str, names) -> str | None:
+    return _first(_suffixes(host), names)
 
 
 def _read_small(path: Path) -> str:
@@ -88,15 +118,9 @@ def _expiry_valid(value: object, now: float) -> bool:
     return type(value) in (int, float) and now < value <= now + MAX_EXCEPTION_SECONDS
 
 
-def _union(parts: list[set[str]]) -> set[str]:
-    # A single snapshot is shared rather than copied; large feeds stay one set.
-    return parts[0] if len(parts) == 1 else set().union(*parts)
-
-
 def watched_paths(config_path: Path, state: Path) -> tuple[Path, ...]:
     """Every file whose contents can change a host decision's policy revision."""
-    feeds = (*TRACKERS.values(), THREATS, *CNAME_FEEDS)
-    return (config_path, state / "block.txt", state / "allow.txt", *(feed.path(state) for feed in feeds))
+    return (config_path, state / "block.txt", state / "allow.txt", *(feed.path(state) for feed in ALL_FEEDS))
 
 
 def policy_stamp(config_path: Path, state: Path) -> tuple:
@@ -124,7 +148,8 @@ class Policy:
         prior = previous.components if previous is not None else {}
         self.components: dict[str, CachedFeed] = {}
         self.coverage: dict[str, str] = {}
-        groups: dict[str, list[set[str]]] = {"threat": [], "tracker": [], "cname": []}
+        # Feeds stay separate compact sets, in selection order, rather than one copied union.
+        groups: dict[str, list] = {"threat": [], "tracker": [], "cname": [], "doh": []}
         for feed in self.feeds:
             snapshot = load_cached_feed(state, feed)
             if snapshot is not None:
@@ -132,14 +157,23 @@ class Policy:
             elif feed.id in prior:
                 snapshot = prior[feed.id]
                 self.coverage[feed.id] = "last-good"
+            elif (substitute := self._other_threat_tier(state, feed)) is not None:
+                # After a tier change (or an upgrade to the full tier), keep enforcing the other
+                # verified HaGeZi tier until the selected one downloads. Reported as degraded.
+                snapshot = substitute
+                self.coverage[feed.id] = "substitute"
             else:
                 self.coverage[feed.id] = "missing"
                 continue
             self.components[feed.id] = snapshot
-            groups[feed.category].append(snapshot.names)
-        self.threats = _union(groups["threat"])
-        self.trackers = _union(groups["tracker"])
-        self.cname = _union(groups["cname"])
+            names = snapshot.names
+            groups[feed.category].append((feed, names if isinstance(names, HostSet) else HostSet.from_names(names)))
+        self.threats = groups["threat"]
+        self.ip_threats = [(feed, names) for feed, names in self.threats if feed.ips]
+        self.trackers = [names for _, names in groups["tracker"]]
+        self.cname = [names for _, names in groups["cname"]]
+        self.doh = [names for _, names in groups["doh"]]
+        self.block_encrypted_dns = block.get("block_encrypted_dns", True)
         self.manual = _rules(state / "block.txt")
         self.manual.update(host for name in block.get("hosts", []) if (host := dns_name(name)))
         self.allow = _rules(state / "allow.txt")
@@ -162,6 +196,15 @@ class Policy:
         ).hexdigest()
         self.reload_controls()
 
+    @staticmethod
+    def _other_threat_tier(state: Path, feed) -> CachedFeed | None:
+        if feed not in THREAT_TIERS.values():
+            return None
+        for other in THREAT_TIERS.values():
+            if other != feed and (snapshot := load_cached_feed(state, other)) is not None:
+                return snapshot
+        return None
+
     def enforceable(self) -> bool:
         """Threat and tracker data are present, so the proxy can filter at all."""
         return bool(self.threats and self.trackers)
@@ -171,7 +214,7 @@ class Policy:
         return self.enforceable() and "missing" not in self.coverage.values()
 
     def degraded(self) -> bool:
-        return not self.ready() or "last-good" in self.coverage.values()
+        return not self.ready() or bool({"last-good", "substitute"} & set(self.coverage.values()))
 
     def published_at(self, feed_id: str) -> float | None:
         component = self.components.get(feed_id)
@@ -185,42 +228,81 @@ class Policy:
         self.controls = _read_controls(self.state / "filter-controls.json")
         self.exceptions = _read_controls(self.state / "tracker-exceptions.json")
 
-    def _source(self, host: str) -> tuple[str, str | None]:
-        # Domain rules are DNS rules. IP literals are accepted by the proxy,
-        # but IP text is never matched against a DNS suffix.
+    def _ip_source(self, address: str) -> tuple[str, str | None]:
+        # IP literals never match a DNS suffix, only IP entries listed by an IP-capable feed.
+        for feed, names in self.ip_threats:
+            if address in names:
+                return feed.source, address
+        if self.block_encrypted_dns and address in DOH_RESOLVER_IPS:
+            return "doh-feed", address
+        # A public address skips every hostname rule; label it so the activity shows that.
+        return ("ip-literal", address) if ipaddress.ip_address(address).is_global else ("no-match", None)
+
+    def _source(self, host: str, port: int | None) -> tuple[str, str | None]:
         if dns_name(host) is None:
-            return "no-match", None
-        if match := _match(host, self.threats):
-            return "threat-intel", match
-        if match := _match(host, self.manual):
-            return "local-block", match
-        tracker = _match(host, self.trackers)
-        if tracker is None and host not in self.cname:
-            return "no-match", None
+            # An IP literal is never a valid DNS name (its last label has no letter).
+            address = ip_literal(host)
+            return self._ip_source(address) if address is not None else ("no-match", None)
+        suffixes = _suffixes(host)
+        manual = _first(suffixes, self.manual)
+        # Built-in exact safety hosts outrank every downloaded list, never the user's own blocks.
+        if host in SAFETY_HOSTS and manual is None:
+            return "safety-list", host
+        # Feeds hold only dotted names (see _parse_feed), so the bare top-level label is skipped.
+        listed = suffixes[:-1]
+        probes = HostSet.probes(listed)
+
+        def first(stores) -> str | None:
+            for names in stores:
+                if (position := names.first(probes)) is not None:
+                    return listed[position]
+            return None
+
+        # Threat data is never overridden by allow rules, exemptions or pauses.
+        for feed, names in self.threats:
+            if (position := names.first(probes)) is not None:
+                return feed.source, listed[position]
+        if manual:
+            return "local-block", manual
+        allowed = _first(suffixes, self.allow)
+        if allowed is None and (imitation := lookalike(host)) is not None:
+            return "lookalike-domain", imitation[0]
+        doh = first(self.doh)
+        tracker = first(self.trackers)
+        # CNAME data is exact: only the host itself, the first probe, is checked.
+        if doh is None and tracker is None and not any(names.first(probes[:1]) is not None for names in self.cname):
+            return ("no-match", None) if port is None or port in STANDARD_PORTS else ("nonstandard-port", None)
         if host in self.dashboard_hosts:
             return "dashboard-exception", host
-        if match := _match(host, self.allow):
-            return "local-allow", match
+        if allowed:
+            return "local-allow", allowed
         now = time.time()
+        excepted = _expiry_valid(self.exceptions.get(host), now)
+        if doh is not None:
+            # A timed exact-host exception covers DoH; pausing ad filtering does not.
+            return ("temporary-exception", host) if excepted else ("doh-feed", doh)
         if _expiry_valid(self.controls.get("tracker_pause_until"), now):
             return "tracker-paused", host
-        if _expiry_valid(self.exceptions.get(host), now):
+        if excepted:
             return "temporary-exception", host
         return ("tracker-feed", tracker) if tracker else ("cname-feed", host)
 
-    def decision(self, host: str) -> dict:
+    def decision(self, host: str, port: int | None = None) -> dict:
+        """Decide one request target. `port` is optional; when given, an otherwise unmatched host
+        on a port other than 80 or 443 is reported as `nonstandard-port` (still allowed)."""
         normalized = normalize_host(host)
-        source, match = self._source(normalized) if normalized else ("invalid-host", None)
+        source, match = self._source(normalized, port) if normalized else ("invalid-host", None)
         return {
             "decision": "blocked" if source in BLOCKED else "allowed",
             "source": source,
+            "category": CATEGORIES[source],
             "matched_domain": match,
             "can_allow": source in ALLOWABLE,
         }
 
-    def explain(self, host: str) -> dict:
+    def explain(self, host: str, port: int | None = None) -> dict:
         """A decision that says `indeterminate` when missing coverage could change an allow."""
-        result = self.decision(host)
+        result = self.decision(host, port)
         if result["decision"] == "allowed" and not self.ready():
             result["decision"] = "indeterminate"
         return {**result, "policy_ready": self.ready(), **self.summary()}
