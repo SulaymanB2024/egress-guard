@@ -55,7 +55,7 @@ main > .inline-error { padding: var(--s3) var(--s4) 0; }
 .row:hover .fit-rest, .row:focus-within .fit-rest { display: none; }
 .acts { display: flex; gap: var(--s2); }
 /* At rest the action takes no space at all (DESIGN.md 8.5): one column, no gap. */
-.row.has-act:not(:hover):not(:focus-within) { grid-template-columns: minmax(0, 1fr); }
+.row.has-act:not(:hover):not(:focus-within), .row:not(.has-act):not(:has(> .trail)) { grid-template-columns: minmax(0, 1fr); }
 .row.has-act:not(:hover):not(:focus-within) .acts { display: none; }
 .line1.ellipsis { text-overflow: ellipsis; }
 .measure { position: absolute; left: 0; top: 0; visibility: hidden; white-space: nowrap; pointer-events: none; }

@@ -64,7 +64,7 @@ export const POPUP = [
   ["longhost-blocked", null, null, null, "same:longhost;tab:blocked"],
   ["idn", {...BASE, host: IDN_HOST, site: IDN_HOST}, PAGE, null],
   ["threat", {...BASE, blocked: [{host: "cdn.bad-fixture.example", path: "/payload/loader.js", type: "script", list: "threats", count: 1}, ...BLOCKED]}, PAGE, null],
-  ["threat-blocked", null, null, null, "same:threat;tab:blocked"],
+  ["threat-blocked", null, null, null, "same:threat;tab:blocked;focusrow:0"],
   ["packed", {...BASE, feedback: "counts", blocked: [], counts: {threats: 1, trackers: 24, cname: 3, "fp-trackers": 6}}, PAGE, null],
   ["packed-blocked", null, null, null, "same:packed;tab:blocked"],
   ["badge", {...BASE, feedback: "badge", blocked: []}, PAGE, null],

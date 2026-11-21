@@ -78,7 +78,7 @@ const AUDIT = `(() => {
       if (hasText) sizes.add(cs.fontSize + (cs.fontFamily.includes('mono') ? ' mono' : ''));
       if (hasText && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'visible') clipped.push(el.textContent.trim().slice(0, 50));
       if (el.closest('.sheet > figure > figcaption') || el.matches('.lights i, .bars i, .days i, .dot, .mark, svg *, .switch, .sk')) continue;
-      for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap']) {
+      for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap'].filter((q) => !(q === 'paddingTop' && el.matches('[data-optical]')))) {
         const v = parseFloat(cs[p]); if (!isNaN(v) && !scale.has(Math.abs(Math.round(v))) && Math.abs(v - Math.round(v)) < .01) off.add(p + ':' + v + ' ' + (el.className || el.tagName));
       }
     }
@@ -146,14 +146,14 @@ function extAudit() { return `(() => {
       if (!label) unnamed.push(el.outerHTML.slice(0, 80));
     }
     if (el.matches('.dot, .mark, .switch, .seg, .seg button, .tabs [role=tab], .sheet, figure, figcaption')) continue;
-    for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap']) {
+    for (const p of ['paddingTop','paddingRight','paddingBottom','paddingLeft','marginTop','marginBottom','rowGap','columnGap'].filter((q) => !(q === 'paddingTop' && el.matches('[data-optical]')))) {
       const v = parseFloat(cs[p]); if (!isNaN(v) && !scale.has(Math.abs(Math.round(v))) && Math.abs(v - Math.round(v)) < .01) off.add(p + ':' + v + ' ' + (el.id || el.className || el.tagName));
     }
   }
   const primaries = all.filter((b) => b.matches('.btn.primary') && visible(b)).length;
   const textSizes = [...sizes].filter((s) => !String(s).endsWith('mono'));
   return {clipped, ellipsis, primaries, sizes: [...sizes].sort(), textSizes: textSizes.length, off: [...off].slice(0, 20), unnamed, scrollers,
-    hscroll: document.documentElement.scrollWidth > innerWidth + 1, height: Math.ceil(document.body.getBoundingClientRect().height)};
+    hscroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 || all.some((e) => visible(e) && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && e.getBoundingClientRect().right > document.documentElement.clientWidth + 1 && !e.closest(".sheet")), height: Math.ceil(document.body.getBoundingClientRect().height)};
 })()`; }
 
 async function extension() {
@@ -212,6 +212,12 @@ async function extension() {
       if (scheme === "light") {
         const r = await ev(extAudit());
         r.focused = await ev(`document.activeElement && (document.activeElement.id || document.activeElement.textContent.trim())`);
+        // Decision pages: the headline is the largest type and the hostname the second largest.
+        r.hierarchy = await ev(`(() => { const main = [...document.querySelectorAll('main')].find((m) => !m.hidden); const size = (e) => e ? parseFloat(getComputedStyle(e).fontSize) : 0;
+          const texts = [...main.querySelectorAll('*')].filter((e) => !e.closest('[hidden]') && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()));
+          const sizes = [...new Set(texts.map(size))].sort((a, b) => b - a); const host = main.querySelector('#host .lbl, #scan-host .lbl');
+          return {h1: size(main.querySelector('h1')), host: host ? size(host) : null, top: sizes.slice(0, 3), top3: Math.round(main.querySelector('.kind').getBoundingClientRect().top)}; })()`);
+        if (r.hierarchy.h1 !== r.hierarchy.top[0] || (r.hierarchy.host !== null && r.hierarchy.host !== r.hierarchy.top[1])) r.unnamed.push(`hierarchy: ${JSON.stringify(r.hierarchy)}`);
         judge(`${name}-${w}`, r);
       }
       const h = await ev(`Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)`);

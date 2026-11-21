@@ -60,6 +60,8 @@ try {
   const {targetId} = await cdp("Target.createTarget", {url: `http://publisher.example:${port}/page`});
   const page = (await cdp("Target.attachToTarget", {targetId, flatten: true})).sessionId;
   await waitFor(async () => (await evaluate(page, "document.readyState")) === "complete");
+  // The tab can take a moment to show its URL to the worker when Chrome is busy (the first run after another suite).
+  await waitFor(async () => (await swEval(`chrome.tabs.query({}).then((t) => t.some((x) => (x.url || "").includes("publisher.example")))`)) === true);
   const tabId = await swEval(`chrome.tabs.query({}).then((t) => t.find((x) => (x.url || "").includes("publisher.example")).id)`);
   const popup = `{id: chrome.runtime.id, url: "chrome-extension://" + chrome.runtime.id + "/popup.html"}`;
   const tabUrl = JSON.stringify(`http://publisher.example:${port}/page`);
