@@ -19,7 +19,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["core/selectors.js", "core/picker.js", "content.js"],
+      "js": ["core/selectors.js", "core/picker.js", "core/cosmetic.js", "content.js"],
       "run_at": "document_start",
       "all_frames": false
     }

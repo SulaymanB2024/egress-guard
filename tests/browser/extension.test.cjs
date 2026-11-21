@@ -210,6 +210,18 @@ test("popup offers no one-click Allow for malware hosts or for WebSocket-like ty
   assert.match(text("blocked"), /cdn\.bad\.example\/x\.js/, "the threat request is still listed");
 });
 
+test("popup in a packed build shows counts by list and says it cannot name addresses", async () => {
+  const {text, doc} = await popupWith({...BASE_STATE, feedback: "counts", counts: {trackers: 5, cname: 2}, blocked: []});
+  assert.equal(text("blocked-count"), "7");
+  assert.match(text("breakdown"), /5.*2/s);
+  assert.equal(doc.getElementById("hero-note").hidden, false);
+  assert.match(text("hero-note"), /cannot see which addresses/);
+  const badge = await popupWith({...BASE_STATE, feedback: "badge", blocked: []});
+  assert.match(badge.text("hero-note"), /toolbar badge/);
+  const debug = await popupWith({...BASE_STATE, feedback: "debug", blocked: []});
+  assert.equal(debug.doc.getElementById("hero-note").hidden, true);
+});
+
 test("popup renders blocked vs hidden, rules and exceptions with textContent only", async () => {
   const bg = await background();
   const tabUrl = "https://publisher.example/article";

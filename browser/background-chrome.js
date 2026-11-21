@@ -29,7 +29,15 @@
   }});
   let sources = {};                 // dynamic rule id -> store id
   let allowIds = new Set();         // dynamic rule ids whose action is allow
-  const ready = store.load().then(async () => {
+  // Sites where the built-in ad-slot hiding is switched off (popup). Only validated site names are kept.
+  const GENERIC_KEY = "egressGuardGenericOff";
+  const MAX_GENERIC_OFF = 500;
+  let genericOff = new Set();
+  async function loadGenericOff() {
+    const stored = (await C.storage.local.get(GENERIC_KEY))[GENERIC_KEY];
+    genericOff = new Set((Array.isArray(stored) ? stored : []).map((s) => hosts.siteOf(s)).filter(Boolean).slice(0, MAX_GENERIC_OFF));
+  }
+  const ready = Promise.all([store.load(), loadGenericOff()]).then(async () => {
     for (const msg of store.rejected) console.warn("Egress Guard dropped a stored entry:", msg);
     await sync();
   });
@@ -162,6 +170,33 @@
   async function resetTab(tabId) {
     logs.set(tabId, Promise.resolve({items: []}));
     await C.storage.session.remove(`log:${tabId}`);
+    await C.storage.session.set({[`nav:${tabId}`]: Date.now()});
+  }
+
+  /**
+   * What the popup can honestly show about blocked requests on a tab:
+   *   "debug"  (unpacked builds) every blocked endpoint, from onRuleMatchedDebug;
+   *   "counts" (packed builds) per-list counts from getMatchedRules, which reports rules, never addresses;
+   *   "badge"  when neither is available (or Chrome's getMatchedRules quota is spent): the toolbar badge only.
+   */
+  async function blockedReport(tabId) {
+    const D = C.declarativeNetRequest;
+    if (!Number.isInteger(tabId)) return {feedback: D.onRuleMatchedDebug ? "debug" : "badge", blocked: []};
+    if (D.onRuleMatchedDebug) return {feedback: "debug", blocked: (await tabLog(tabId)).items.map((x) => ({...x}))};
+    if (!D.getMatchedRules) return {feedback: "badge", blocked: []};
+    try {
+      const since = (await C.storage.session.get(`nav:${tabId}`))[`nav:${tabId}`];
+      const {rulesMatchedInfo = []} = await D.getMatchedRules({tabId, ...(Number.isFinite(since) ? {minTimeStamp: since} : {})});
+      const counts = {};
+      for (const info of rulesMatchedInfo) {
+        const source = listOf(info.rule);
+        if (!source || source.list === "params") continue;
+        counts[source.list] = (counts[source.list] || 0) + 1;
+      }
+      return {feedback: "counts", blocked: [], counts};
+    } catch {
+      return {feedback: "badge", blocked: []};
+    }
   }
 
   // ---- events (registered synchronously so they wake the worker) ----------------
@@ -179,7 +214,7 @@
   });
   C.tabs.onRemoved.addListener((tabId) => {
     logs.delete(tabId);
-    C.storage.session.remove(`log:${tabId}`).catch(() => {});
+    C.storage.session.remove([`log:${tabId}`, `nav:${tabId}`]).catch(() => {});
     dropContinues((c) => c.tabId === tabId).catch(() => {});
   });
   C.alarms.onAlarm.addListener(async (alarm) => {
@@ -218,7 +253,7 @@
     switch (message.type) {
       case "page-rules":
         if (!pageHost) return {rules: []};
-        return {site: hosts.siteOf(pageHost), rules: store.activeFor(pageHost).cosmeticRules.map(plain)};
+        return {site: hosts.siteOf(pageHost), rules: store.activeFor(pageHost).cosmeticRules.map(plain), generic: !genericOff.has(hosts.siteOf(pageHost))};
       case "add-cosmetic": {
         if (!pageHost) return {error: "Not a page."};
         const result = await attempt(() => store.addRule({kind: "cosmetic", site: hosts.siteOf(pageHost), selector: message.selector, note: "Added with Block this element"}));
@@ -256,12 +291,12 @@
         if (!host) return {site: null, lists};
         const now = Date.now();
         const active = store.activeFor(host);
-        const log = Number.isInteger(message.tabId) ? await tabLog(message.tabId) : {items: []};
+        const report = await blockedReport(message.tabId);
         return {
-          host, site: hosts.siteOf(host), lists, feedback: Boolean(C.declarativeNetRequest.onRuleMatchedDebug),
+          host, site: hosts.siteOf(host), lists, ...report, generic: !genericOff.has(hosts.siteOf(host)),
           requestRules: active.requestRules.map(plain), cosmeticRules: active.cosmeticRules.map(plain),
           exceptions: active.exceptions.map((e) => ({...e, msLeft: Math.max(0, e.expiresAt - now)})),
-          blocked: log.items.map((x) => ({...x})), types: rulesApi.RESOURCE_TYPES,
+          types: rulesApi.RESOURCE_TYPES,
         };
       }
       case "add-request-rule": {
@@ -272,6 +307,20 @@
         return result;
       }
       case "remove-rule": { const ok = await store.removeRule(message.id); if (ok) await afterChange(); return {ok}; }
+      case "set-generic": {
+        const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
+        if (!site) return {error: "Open a web page first."};
+        if (typeof message.on !== "boolean") return {error: "Bad message."};
+        if (message.on) genericOff.delete(site);
+        else if (genericOff.size < MAX_GENERIC_OFF) genericOff.add(site);
+        else return {error: "Too many sites have ad-slot hiding switched off."};
+        await C.storage.local.set({[GENERIC_KEY]: [...genericOff].sort()});
+        const tabs = await C.tabs.query({url: ["http://*/*", "https://*/*"]});
+        for (const tab of tabs) {
+          if (hosts.siteOf(hosts.hostOfUrl(tab.url) || "") === site) C.tabs.sendMessage(tab.id, {type: "generic", on: message.on}).catch(() => {});
+        }
+        return {ok: true, site, on: message.on};
+      }
       case "add-exception": {
         const host = hosts.hostOfUrl(message.tabUrl);
         if (!host) return {error: "Open a web page first."};

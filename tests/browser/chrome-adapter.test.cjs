@@ -30,7 +30,7 @@ async function worker({stored = fixture, packed = false} = {}) {
   const area = (obj) => ({
     get: async (key) => (typeof key === "string" ? {[key]: obj[key] && JSON.parse(JSON.stringify(obj[key]))} : {...obj}),
     set: async (items) => Object.assign(obj, JSON.parse(JSON.stringify(items))),
-    remove: async (key) => { delete obj[key]; },
+    remove: async (key) => { for (const k of [].concat(key)) delete obj[k]; },
   });
   let dynamicRules = [], sessionRules = [];
   const alarms = new Map();
@@ -234,6 +234,41 @@ test("packed build: the threat check reads only the extension's own ruleset", as
   assert.match((await w.cont("https://news.example/")).error, /not on the malware/);
   assert.equal((await w.cont()).ok, true);
   assert.deepEqual([...new Set(w.fetched)], [`${EXT}rules/threats.json`]);
+});
+
+test("built-in ad-slot hiding is on by default and switches off per site from the popup only", async () => {
+  const w = await worker();
+  assert.equal((await w.page({type: "page-rules"})).generic, true);
+  assert.match((await w.page({type: "set-generic", on: false})).error, /Not allowed/);
+  const off = await w.popup({type: "set-generic", tabId: 1, tabUrl: "https://www.publisher.example/a", on: false});
+  assert.equal(off.ok, true, off.error);
+  assert.equal(off.site, "publisher.example");
+  assert.deepEqual(w.local.egressGuardGenericOff, ["publisher.example"]);
+  assert.ok(w.tabMessages.some((m) => m.msg.type === "generic" && m.msg.on === false), "open tabs on the site are told at once");
+  assert.equal((await w.page({type: "page-rules"})).generic, false);
+  assert.equal((await w.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/a"})).generic, false);
+  assert.ok((await w.popup({type: "set-generic", tabId: 1, tabUrl: "https://publisher.example/a", on: "no"})).error);
+  await w.popup({type: "set-generic", tabId: 1, tabUrl: "https://publisher.example/a", on: true});
+  assert.deepEqual(w.local.egressGuardGenericOff, []);
+});
+
+test("packed build: popup gets per-list counts from getMatchedRules and says it cannot name addresses", async () => {
+  const w = await worker({packed: true});
+  await w.chrome.tabs.onUpdated.fire(1, {status: "loading", url: "https://publisher.example/a"}, {});
+  await settle();
+  const t = w.clock.now;
+  w.matchedInfo.push(
+    {tabId: 1, timeStamp: t, rule: {ruleId: 3, rulesetId: "trackers"}}, {tabId: 1, timeStamp: t, rule: {ruleId: 3, rulesetId: "trackers"}},
+    {tabId: 1, timeStamp: t, rule: {ruleId: 1, rulesetId: "cname"}}, {tabId: 1, timeStamp: t, rule: {ruleId: 2, rulesetId: "params"}},
+    {tabId: 1, timeStamp: t, rule: {ruleId: 100000, rulesetId: "_session"}}, {tabId: 2, timeStamp: t, rule: {ruleId: 3, rulesetId: "trackers"}});
+  const state = await w.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/a"});
+  assert.equal(state.feedback, "counts");
+  assert.deepEqual({...state.counts}, {trackers: 2, cname: 1});
+  assert.equal(state.blocked.length, 0);
+  delete w.chrome.declarativeNetRequest.getMatchedRules;
+  assert.equal((await w.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/a"})).feedback, "badge");
+  const unpacked = await worker();
+  assert.equal((await unpacked.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/a"})).feedback, "debug");
 });
 
 test("blocked log keeps at most 256 characters of a path", async () => {

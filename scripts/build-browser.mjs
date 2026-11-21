@@ -122,7 +122,7 @@ function chromeExtensionId(manifest) {
   return dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 }
 
-const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/dnr.js",
+const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/dnr.js", "core/cosmetic.js",
   "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const CHROME_ONLY = ["warning.html", "warning.css", "warning.js"];
 const CHROME_WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/dnr.js"];
