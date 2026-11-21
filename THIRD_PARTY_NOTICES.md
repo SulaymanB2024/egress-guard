@@ -1,14 +1,18 @@
 # Third-party notices
 
-The application code is MIT licensed. Downloaded feeds retain their own licenses and are not bundled in source or wheel releases.
+The application code is MIT licensed. Downloaded feeds retain their own licenses and are not bundled in source or wheel releases. A locally built Chrome browser companion (`dist-browser/chrome`, never committed) does contain rulesets derived from the feeds below; see the browser companion section.
 
 | Component | Role | License/source |
 | --- | --- | --- |
 | mitmproxy 12.3.1 | Local proxy transport | [MIT](https://github.com/mitmproxy/mitmproxy/blob/main/LICENSE) |
-| HaGeZi DNS Blocklists | Ad/tracker and threat data fetched at runtime | [GPL-3.0](https://github.com/hagezi/dns-blocklists/blob/main/LICENSE) |
-| AdGuard CNAME trackers | Exact alias data fetched at runtime | [MIT](https://github.com/AdguardTeam/cname-trackers/blob/master/LICENSE) |
+| HaGeZi DNS Blocklists | Ad/tracker and threat data fetched at runtime; compiled into a locally built Chrome companion | [GPL-3.0](https://github.com/hagezi/dns-blocklists/blob/main/LICENSE) |
+| AdGuard CNAME trackers | Exact alias data fetched at runtime; compiled into a locally built Chrome companion | [MIT](https://github.com/AdguardTeam/cname-trackers/blob/master/LICENSE) |
 | Thinkst Canarytokens | Optional remote history service | [Project](https://github.com/thinkst/canarytokens), [service terms](https://canarytokens.org/nest/legal) |
 | SponsorBlock community timings | Optional, explicit video hash-prefix lookup and local timing export | Data: [CC BY-NC-SA 4.0](https://github.com/ajayyy/SponsorBlock/wiki/Database-and-API-License), [service terms](https://gist.github.com/ajayyy/9e8100f069348e0bc062641f34d6af12) |
+
+## Browser companion builds
+
+`scripts/build-browser.mjs` compiles the proxy's verified HaGeZi (GPL-3.0) and AdGuard CNAME (MIT) snapshots into Chrome `declarativeNetRequest` rulesets. Both licenses permit this. The repository holds only the compiler and a small hand-written fixture (`tests/browser/fixtures/feeds`), not list data. Each build writes `NOTICE.txt` next to the rulesets with every source URL, license, entry count, publication time and SHA-256. Using a build yourself needs nothing further. Anyone who passes a build on must include that notice, the GPL-3.0 text and the list sources, as GPL-3.0 requires for the HaGeZi-derived rulesets.
 
 Retain upstream attribution and licenses if redistributing downloaded feed caches. Release archives intentionally omit those caches and all device state.
 
