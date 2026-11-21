@@ -3,10 +3,11 @@
 // Headless Chrome, throwaway profile, loopback fixture only (every other name resolves to NOTFOUND). Takes about
 // two minutes because it waits for real alarms. It proves:
 //   1. user rules, a timed exception and a "continue once" survive the worker being stopped and started again,
-//      and are still enforced by Chrome while the worker is stopped;
-//   2. an exception and a continue that expire while the worker is stopped are removed: chrome.alarms wakes the
-//      worker, nobody else does;
-//   3. "continue once" is capped at 10 minutes (stored expiry and the scheduled alarm).
+//      and Chrome continues enforcing the installed DNR policy after that stop;
+//   2. expiry/recovery alarms wake the worker and reconcile scheduled deadlines;
+//      there is no built-in wall-clock TTL in DNR and suspension can delay removal;
+//   3. "continue once" has a ten-minute scheduled deadline, an intent journal and a
+//      navigation-only allow paired with credential removal.
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -23,7 +24,7 @@ const work = fs.mkdtempSync(path.join(root, ".cache", "chrome-lifecycle-"));
 const results = [];
 const check = (name, ok, detail = "") => { results.push({name, ok}); console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`); };
 
-const built = build({out: path.join(work, "dist"), lists: loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true})});
+const built = build({out: path.join(work, "dist"), lists: loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true, allowMissing: true})});
 const hits = [];
 const server = http.createServer((req, res) => {
   const host = (req.headers.host || "").replace(/:\d+$/, "");
@@ -66,6 +67,11 @@ try {
   const popup = `{id: chrome.runtime.id, url: "chrome-extension://" + chrome.runtime.id + "/popup.html"}`;
   const tabUrl = JSON.stringify(`http://publisher.example:${port}/page`);
 
+  // Threat consent has its own real warning tab; it cannot borrow the publisher tab's scope.
+  const warningUrl = `chrome-extension://${id}/warning.html?list=threats#http://malware-fixture.test:${port}/page`;
+  const consentTab = await swEval(`chrome.tabs.create({url: ${JSON.stringify(warningUrl)}, active: false}).then((t) => t.id)`);
+  await waitFor(async () => await swEval(`chrome.tabs.get(${consentTab}).then((t) => t.url === ${JSON.stringify(warningUrl)})`));
+
   // State: a user block rule, a 15-minute exception, a 1-minute exception, a continue for the threat host.
   const setup = await swEval(`(async () => {
     const S = __EGBackground.store, P = ${popup};
@@ -74,13 +80,13 @@ try {
     const long = await __EGBackground.handle({type: "add-exception", tabId: ${tabId}, tabUrl: ${tabUrl}, host: "pixel.tracker-fixture.test", path: "/allowed.gif", resourceType: "image", minutes: 15}, P);
     const short = await __EGBackground.handle({type: "add-exception", tabId: ${tabId}, tabUrl: ${tabUrl}, host: "pixel.tracker-fixture.test", path: "/short.gif", resourceType: "image", minutes: 1}, P);
     const warn = "chrome-extension://" + chrome.runtime.id + "/warning.html?list=threats#http://malware-fixture.test:${port}/page";
-    const cont = await __EGBackground.handle({type: "continue-once", url: "http://malware-fixture.test:${port}/page"}, {id: chrome.runtime.id, url: warn, frameId: 0, tab: {id: ${tabId}, url: warn}});
+    const cont = await __EGBackground.handle({type: "continue-once", url: "http://malware-fixture.test:${port}/page"}, {id: chrome.runtime.id, url: warn, frameId: 0, tab: {id: ${consentTab}, url: warn}});
     const continues = await __EGBackground.continues();
     const alarm = await chrome.alarms.get("eg-expiry");
     return {long: long.ok, short: short.ok, cont: cont.ok, continues, alarm: alarm && alarm.scheduledTime, now: Date.now(),
       dynamic: (await chrome.declarativeNetRequest.getDynamicRules()).length, session: (await chrome.declarativeNetRequest.getSessionRules()).length};
   })()`);
-  check("setup: rule, two exceptions and a continue added", setup.long && setup.short && setup.cont && setup.dynamic === 3 && setup.session === 2, JSON.stringify(setup));
+  check("setup: rule, two exceptions and a continue added", setup.long && setup.short && setup.cont && setup.dynamic === 1 && setup.session === 6, JSON.stringify(setup));
   const capMs = setup.continues[0].expiresAt - setup.now;
   check("continue once: stored expiry is 10 minutes", Math.abs(capMs - 600000) < 5000, `${Math.round(capMs / 1000)} s`);
 
@@ -92,27 +98,29 @@ try {
   const after = await swEval(`(async () => { await __EGBackground.ready; return {
     rules: __EGBackground.store.rules.length, exceptions: __EGBackground.store.exceptions.length, continues: (await __EGBackground.continues()).length,
     dynamic: (await chrome.declarativeNetRequest.getDynamicRules()).length, session: (await chrome.declarativeNetRequest.getSessionRules()).length}; })()`);
-  check("restarted worker: rule, exceptions and continue survive", after.rules >= 1 && after.exceptions === 2 && after.continues === 1 && after.dynamic === 3 && after.session === 2, JSON.stringify(after));
+  check("restarted worker: rule, exceptions and continue survive", after.rules >= 1 && after.exceptions === 2 && after.continues === 1 && after.dynamic === 1 && after.session === 6, JSON.stringify(after));
 
   // 2/3. Make the continue expire in 35 s (as if its 10 minutes were up), stop the worker, and wait past both
   // expiries (the 1-minute exception and the continue) without touching the worker.
-  const due = await swEval(`(async () => {
-    const list = await __EGBackground.continues();
-    const soon = Date.now() + 35000;
-    await chrome.storage.session.set({continues: list.map((c) => ({...c, expiresAt: soon}))});
-    await chrome.alarms.create("eg-expiry", {when: soon});
-    return {soon, exception: Math.min(...__EGBackground.store.exceptions.map((e) => e.expiresAt))};
-  })()`);
   // A timed pause of the site, from the popup, made to end at the same moment (as if its 15 minutes were up).
   const paused = await swEval(`(async () => {
     const r = await __EGBackground.handle({type: "pause-site", tabId: ${tabId}, tabUrl: ${tabUrl}}, ${popup});
     const relax = (await chrome.declarativeNetRequest.getDynamicRules()).some((x) => x.action.type === "allowAllRequests" && x.condition.requestDomains.includes("publisher.example"));
-    await chrome.storage.local.set({egressGuardPauses: {"publisher.example": ${due.soon}}});
     return {ok: r.ok, until: r.until, now: Date.now(), relax};
   })()`);
   check("pause: the popup pauses the site for 15 minutes (Relaxed in place)", paused.ok && paused.relax && Math.abs(paused.until - paused.now - 900000) < 5000, JSON.stringify(paused));
   hits.length = 0;
   check("pause: the user's own block rule still blocks while paused", (await loadImage(page, `http://pixel.tracker-fixture.test:${port}/user-blocked.gif`)) === "error" && !hits.length);
+  // Fixture-only shortening happens after the last controller action, so it cannot
+  // be overwritten by an in-memory copy. Preserve journal schema/phase/epoch.
+  const due = await swEval(`(async () => {
+    const soon = Date.now() + 35000;
+    const record = (await chrome.storage.session.get("egressGuardGrants")).egressGuardGrants;
+    await chrome.storage.session.set({egressGuardGrants: {...record, entries: record.entries.map((entry) => entry.kind === "continue" ? {...entry, expiresAt: soon} : entry)}});
+    await chrome.storage.local.set({egressGuardPauses: {schema: 2, scope: "top-level-psl-v2", items: {"publisher.example": soon}}});
+    await chrome.alarms.create("eg-expiry", {when: soon});
+    return {soon, exception: Math.min(...__EGBackground.store.exceptions.map((e) => e.expiresAt))};
+  })()`);
   check("worker stopped again before the expiries", await stopWorker());
   const deadline = Math.max(due.soon, due.exception) + 20000;
   let wokeAt = null;
@@ -125,19 +133,19 @@ try {
     exceptions: __EGBackground.store.exceptions.map((e) => e.path), continues: (await __EGBackground.continues()).length,
     dynamic: (await chrome.declarativeNetRequest.getDynamicRules()).map((r) => r.priority),
     session: (await chrome.declarativeNetRequest.getSessionRules()).length}; })()`);
-  check("expired exception removed while the worker was asleep; the 15-minute one kept", end.exceptions.join() === "/allowed.gif" && end.dynamic.length === 2, JSON.stringify(end));
-  check("expired continue removed while the worker was asleep", end.continues === 0 && end.session === 0, JSON.stringify(end));
+  check("expired exception removed while the worker was asleep; the 15-minute one kept", end.exceptions.join() === "/allowed.gif" && end.dynamic.length === 1, JSON.stringify(end));
+  check("expired continue removed while the worker was asleep", end.continues === 0 && end.session === 2, JSON.stringify(end));
   const pauseEnd = await swEval(`(async () => { await __EGBackground.ready; return {stored: (await chrome.storage.local.get("egressGuardPauses")).egressGuardPauses || {},
     relax: (await chrome.declarativeNetRequest.getDynamicRules()).some((x) => x.action.type === "allowAllRequests"),
     state: await __EGBackground.handle({type: "popup-state", tabId: ${tabId}, tabUrl: ${tabUrl}}, ${popup})}; })()`);
-  check("pause ended on the alarm while the worker was stopped; the site's own level is back", Object.keys(pauseEnd.stored).length === 0 && !pauseEnd.relax && pauseEnd.state.paused === null && pauseEnd.state.mode === "standard",
+  check("pause ended on the alarm while the worker was stopped; the site's own level is back", Object.keys(pauseEnd.stored.items || {}).length === 0 && !pauseEnd.relax && pauseEnd.state.paused === null && pauseEnd.state.mode === "standard",
     JSON.stringify({stored: pauseEnd.stored, relax: pauseEnd.relax, paused: pauseEnd.state.paused, mode: pauseEnd.state.mode}));
   hits.length = 0;
   check("after expiry Chrome blocks the formerly excepted endpoint again", (await loadImage(page, `http://pixel.tracker-fixture.test:${port}/short.gif`)) === "error" && !hits.length);
 
   // 4. A rebuilt folder (as a daily job would write it) is noticed by the running worker, which only reads its own
   //    file. (runtime.reload() is not used: an unpacked extension that reloaded itself came back disabled here.)
-  const fresh = loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true});
+  const fresh = loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true, allowMissing: true});
   fresh.trackers.names.push("fresh-tracker.test");
   build({out: path.join(work, "dist"), lists: fresh});
   const before = await swEval("__EGBackground.reloadIfRebuilt()");

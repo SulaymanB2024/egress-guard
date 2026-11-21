@@ -129,7 +129,7 @@ test("acceptance: collector is blocked while article, login and video requests a
   }
 });
 
-test("decision order: unknown top-level and navigation allow; allow rules beat block rules; party filters", () => {
+test("decision order: unknown top-level and navigation allow; manual blocks beat ordinary allows; party filters", () => {
   const block = rules.validateRule(blockRule({types: ["beacon", "xmlhttprequest"]}));
   const req = {url: "https://publisher.example/collect", type: "beacon", topUrl: "https://publisher.example/"};
   assert.equal(decide(req, [block], [], NOW).action, "block");
@@ -140,7 +140,7 @@ test("decision order: unknown top-level and navigation allow; allow rules beat b
   assert.equal(decide({...req, topUrl: "https://www.publisher.example/a"}, [block], [], NOW).action, "block", "subdomain top-level is in scope");
   assert.equal(decide({...req, url: "https://cdn.publisher.example/collect"}, [block], [], NOW).action, "allow", "exact host only");
   const allow = rules.validateRule(blockRule({id: "a1", action: "allow"}));
-  assert.equal(decide(req, [block, allow], [], NOW).reason, "allow-rule");
+  assert.equal(decide(req, [block, allow], [], NOW).reason, "block-rule");
   const third = rules.validateRule(blockRule({id: "t1", site: "news.example", host: "tracker.example", path: "/px*", types: ["image"], party: "third"}));
   assert.equal(decide({url: "https://tracker.example/px.gif", type: "image", topUrl: "https://news.example/"}, [third], [], NOW).action, "block");
   const first = rules.validateRule({...blockRule(), id: "f1", party: "first"});
@@ -161,7 +161,8 @@ test("acceptance: an exception permits exactly one endpoint, then expires", asyn
     const {requestRules, exceptions} = store.activeFor("publisher.example");
     return decide({url, type, topUrl}, requestRules, exceptions, clock);
   };
-  assert.equal(run("https://publisher.example/collect").reason, "exception");
+  assert.equal(run("https://publisher.example/collect").reason, "block-rule", "ordinary permissions cannot lift a manual deny");
+  assert.equal(decide({url: "https://publisher.example/collect", type: "beacon", topUrl: "https://publisher.example/"}, [], store.exceptions, clock).reason, "exception");
   assert.equal(run("https://publisher.example/collect", "xmlhttprequest").action, "block", "other type still blocked");
   assert.equal(run("https://publisher.example/metrics").action, "block", "other path still blocked");
   assert.equal(run("https://publisher.example/collect", "beacon", "https://other.example/").action, "allow");
@@ -235,4 +236,54 @@ test("acceptance: hostile rule inputs are rejected", async () => {
   ];
   for (const input of hostile) await assert.rejects(store.addRule(input), rules.RuleError, JSON.stringify(input));
   assert.equal(store.rules.length, 0);
+});
+
+test("complete PSL separates private/US tenants and implements wildcard/exception rules", () => {
+  for (const [left, right] of [["alice.k12.ca.us", "bob.k12.ca.us"], ["alice.uk.com", "bob.uk.com"], ["alice.s3.amazonaws.com", "bob.s3.amazonaws.com"]]) {
+    assert.notEqual(hosts.siteOf(left), hosts.siteOf(right));
+    assert.equal(hosts.isThirdParty(left, right), true);
+  }
+  for (const suffix of ["ca.us", "k12.ca.us", "uk.com", "s3.amazonaws.com"]) assert.equal(hosts.isSuffixLike(suffix), true, suffix);
+  assert.equal(hosts.siteOf("www.city.kawasaki.jp"), "city.kawasaki.jp");
+  assert.equal(hosts.siteOf("a.b.kawasaki.jp"), "a.b.kawasaki.jp");
+  assert.equal(hosts.siteOf("a.ck"), null);
+  assert.equal(hosts.siteOf("b.a.ck"), "b.a.ck");
+  assert.equal(hosts.siteOf("www.ck"), "www.ck");
+  const idn = hosts.hostOfUrl("https://食狮.com.cn/");
+  assert.equal(hosts.siteOf(idn), idn);
+  assert.equal(hosts.inSiteScope("alice.s3.amazonaws.com", "amazonaws.com"), false);
+  assert.equal(hosts.canScopeSite("kawasaki.jp"), false, "wildcard parents cannot become broad DNR permissions");
+  assert.ok(hosts.scopeExclusions("amazonaws.com").includes("s3.amazonaws.com"));
+  const crypto = require("node:crypto");
+  const source = fs.readFileSync(path.join(__dirname, "../../browser/vendor/public_suffix_list.dat"));
+  assert.equal(crypto.createHash("sha256").update(source).digest("hex"), hosts.psl.sha256, "packaged data provenance matches source");
+  assert.equal(hosts.psl.includesPrivate, true);
+  assert.equal(hosts.psl.license, "MPL-2.0");
+});
+
+test("legacy or changed-PSL permission scopes require fresh consent; valid manual denies survive", async () => {
+  const raw = {schema: 1, rules: [blockRule(), blockRule({id: "allow", action: "allow"}), blockRule({id: "broad", site: "ca.us"})],
+    exceptions: [{id: "exc-old", site: "publisher.example", host: "tracker.example", path: "/pixel", type: "image", expiresAt: NOW + 60000}]};
+  const store = await new RuleStore({persist: {load: async () => raw}, now: () => NOW}).load();
+  assert.deepEqual(store.rules.map((r) => r.id), ["r1"]);
+  assert.deepEqual(store.exceptions, []);
+  const changedPSL = {...store.snapshot(), psl: "previous", rules: [blockRule(), blockRule({id: "allow", action: "allow"})], exceptions: raw.exceptions};
+  const after = await new RuleStore({persist: {load: async () => changedPSL}, now: () => NOW}).load();
+  assert.equal(after.rules.length, 1);
+  assert.equal(after.exceptions.length, 0);
+});
+
+test("failed persistence never publishes an unsaved rule or permission mutation", async () => {
+  let broken = true;
+  const persist = {save: async () => { if (broken) throw new Error("storage unavailable"); }};
+  const store = new RuleStore({persist, now: () => NOW});
+  await assert.rejects(store.addRule(blockRule()), /storage/);
+  await assert.rejects(store.addException({site: "publisher.example", host: "tracker.example", path: "/pixel", type: "image", minutes: 5}), /storage/);
+  assert.equal(store.rules.length, 0);
+  assert.equal(store.exceptions.length, 0);
+  broken = false;
+  await store.addRule(blockRule());
+  broken = true;
+  await assert.rejects(store.removeRule("r1"), /storage/);
+  assert.equal(store.rules.length, 1, "failed removal preserves the explicit deny");
 });

@@ -1,42 +1,15 @@
-/* Chrome declarativeNetRequest compiler. Pure: no browser APIs.
+/* Chrome 145+ declarativeNetRequest compiler. No browser APIs.
+ * Top-level permissions use topDomains, not the immediate frame's initiatorDomains.
+ * Chrome falls back to the initiator for requests without an associated top frame;
+ * the adapter therefore installs permissive endpoint rules only in named tabs.
  *
- * Two jobs, one priority ladder:
- *   - compileList(): build-time. Turns verified domain lists into static rulesets.
- *   - compileUserState(): run time. Turns validated user rules and exceptions into dynamic rules.
- *
- * DNR semantics the ladder relies on: the highest-priority matching block/allow/redirect rule decides (at equal
- * priority allow > allowAllRequests > block > redirect); an `allow` lifts only rules of LOWER priority; a modifyHeaders
- * rule applies only when its priority is above every matching allow rule.
- *
- * Priority ladder (higher wins):
- *   1 easylist        EasyList URL filters
- *   2 easylistAllow   EasyList's own exceptions (@@): lift EasyList filters only
- *   3 easyprivacy     EasyPrivacy URL filters (including its path filters that catch first-party trackers)
- *   4 easyprivacyAllow EasyPrivacy's own exceptions: lift EasyPrivacy filters (and, unavoidably on one ladder,
- *                     EasyList's; never the other way round)
- *   5 filterImportant $important filters of either list: no list exception lifts them
- *   6 hand            hand-written fingerprinting / session-replay / first-party tracker filters, third-party beacons
- *   7 mode            Strict and No-scripts blocks, click-to-load holds
- *   8 embed           a clicked-to-load embed (session allow, one tab): lifts Strict, NOT its cookie stripping
- *   9 clean           parameter stripping and link unwrapping (redirects), the Referrer-Policy fix, third-party cookie
- *                     stripping (tracker hosts, opaque redirectors, Strict), the per-site "cleaning off" brake
- *  10 modeHeaders     No-scripts `script-src 'none'` policy (above the brake, so it cannot switch it off)
- *  11 scanner         mail-security link scanners -> the local interstitial (never unwrapped automatically)
- *  12 scannerPass     "Continue through the scanner": one tab, one scanner host, one navigation
- *  13 embedCookies    a clicked-to-load embed "with cookies"
- *  14 relax           "Relaxed" site mode (allowAllRequests): lifts everything above here except the rows below
- *  15 threat          malware/phishing: navigation -> local warning page, everything else blocked
- *  16 continue        "continue once" from the warning page: session `allow` rules for one tab and one host. Never
- *                     allowAllRequests, which would lift every lower-priority rule (other threat hosts included).
- *  17 list            ad/tracker and CNAME-cloaked tracker host lists
- *  18 surrogate       known tracker scripts answered by an inert bundled stub instead of a block
- *  19 user block      endpoint rules added in the popup
- *  20 user allow      endpoint allow rules
- *  21 exception       timed exceptions; beat every list and rule above
- *  22 gpc             Sec-GPC: 1 on every request (modifyHeaders; above every allow so nothing switches it off)
- * No list exception reaches cookie stripping, parameter stripping, unwrapping, the hand-written filters or the other
- * list's blocks. "continue" sits below "list" on purpose: continuing to a flagged site does not unblock its trackers.
- * Nothing a filter list or a site mode can allow reaches the threat list: their allow rules sit below it. */
+ * Priority is an explicit security boundary. Manual denies > threat navigation grant
+ * > threats > ordinary endpoint grants > lists. Ordinary allows have a paired,
+ * higher-priority sanitation rule: allowing a resource never grants cookies.
+ * Embed-with-cookies stays below tracker lists; it only lifts Strict and baseline
+ * header cleaning. A warning-page Continue permits navigation only, not resources.
+ * DNR modifyHeaders applies only above the winning allow. Never merge these tiers.
+ */
 (function (root) {
   "use strict";
   const isNode = typeof module !== "undefined" && module.exports;
@@ -45,8 +18,9 @@
   const params = isNode ? require("./params.js") : root.EGParams;
 
   const PRIORITY = Object.freeze({easylist: 1, easylistAllow: 2, easyprivacy: 3, easyprivacyAllow: 4, filterImportant: 5, hand: 6,
-    mode: 7, embed: 8, clean: 9, modeHeaders: 10, scanner: 11, scannerPass: 12, embedCookies: 13, relax: 14, threat: 15, continue: 16,
-    list: 17, surrogate: 18, userBlock: 19, userAllow: 20, exception: 21, gpc: 22});
+    mode: 7, embed: 8, clean: 9, scanner: 11, scannerPass: 12, embedCookies: 13, relax: 14,
+    list: 17, surrogate: 18, userAllow: 20, exception: 21, grantHeaders: 22, threat: 30, continue: 31,
+    continueHeaders: 32, userBlock: 40, modeHeaders: 45, gpc: 50});
   // Each URL filter list's own block / exception pair.
   const FILTER_PRIORITY = Object.freeze({easylist: {block: PRIORITY.easylist, allow: PRIORITY.easylistAllow},
     easyprivacy: {block: PRIORITY.easyprivacy, allow: PRIORITY.easyprivacyAllow}});
@@ -109,7 +83,7 @@
   /** Glob path ("*" = any run of characters) -> anchored URL regex for one exact host. */
   function endpointRegex(host, pathPattern) {
     const path = pathPattern.split("*").map(escapeRegex).join("[^?#]*");
-    return `^https?://${escapeRegex(host)}(?::[0-9]+)?${path}(?:[?#].*)?$`;
+    return `^https?://${escapeRegex(host)}\\.?(?::[0-9]+)?${path}(?:[?#].*)?$`;
   }
 
   /** Drop any domain whose parent domain is also listed: DNR requestDomains already covers subdomains. */
@@ -280,58 +254,84 @@
    *            third-party Cookie / Set-Cookie removed; the Referer removed from third-party frames; embeds held.
    *   noscript every script the site's pages request is blocked and a `script-src 'none'` policy is added to them.
    */
-  function compileModes(modes, {firstId = MODE_BASE} = {}) {
+  const topScope = (site) => {
+    const excluded = hosts.scopeExclusions(site);
+    return {topDomains: [site], ...(excluded.length ? {excludedTopDomains: excluded} : {})};
+  };
+  function compileModes(modes, {firstId = MODE_BASE, topSites = []} = {}) {
     const sites = (modes && modes.sites) || {};
     const allowHosts = (modes && modes.allowHosts) || {};
     const defaultMode = modes && modes.defaultMode === "strict" ? "strict" : "standard";
     const by = {relaxed: [], standard: [], strict: [], noscript: []};
-    for (const [site, mode] of Object.entries(sites)) if (by[mode] && hosts.siteOf(site) === site) by[mode].push(site);
+    for (const [site, mode] of Object.entries(sites)) if (by[mode] && hosts.siteOf(site) === site && hosts.canScopeSite(site)) by[mode].push(site);
     for (const k of Object.keys(by)) by[k].sort();
     const rules = [];
     const kinds = {};
     let id = firstId;
     const add = (kind, priority, action, condition) => { kinds[id] = kind; rules.push({id: id++, priority, action, condition}); };
-    if (by.relaxed.length) add(null, PRIORITY.relax, {type: "allowAllRequests"}, {requestDomains: by.relaxed, resourceTypes: ["main_frame"]});
+    for (const site of by.relaxed) {
+      const excluded = hosts.scopeExclusions(site);
+      add(null, PRIORITY.relax, {type: "allowAllRequests"}, {requestDomains: [site], ...(excluded.length ? {excludedRequestDomains: excluded} : {}), resourceTypes: ["main_frame"]});
+    }
     // "Clean links and cookies" off for a site: navigations to it keep their parameters and are not unwrapped. One
     // main-frame allow at the cleaning tier; lists do not block navigations, so it lifts nothing else. Third-party
     // cookie stripping on its pages stays: an allow for the site's subresources at that tier would also lift every URL
     // filter below it. Relaxed is the level that lifts cookie stripping.
-    const cleanOff = ((modes && modes.cleanOff) || []).filter((s) => hosts.siteOf(s) === s).sort();
-    if (cleanOff.length) add(null, PRIORITY.clean, {type: "allow"}, {requestDomains: cleanOff, resourceTypes: ["main_frame"]});
+    const cleanOff = ((modes && modes.cleanOff) || []).filter((s) => hosts.siteOf(s) === s && hosts.canScopeSite(s)).sort();
+    for (const site of cleanOff) {
+      const excluded = hosts.scopeExclusions(site);
+      add(null, PRIORITY.clean, {type: "allow"}, {requestDomains: [site], ...(excluded.length ? {excludedRequestDomains: excluded} : {}), resourceTypes: ["main_frame"]});
+    }
 
     // Strict: one set for the sites switched to Strict, one for "everything else" when Strict is the default.
     const strictSets = [];
     // Under a Strict default, a site with hosts you allowed (and no level of its own) gets its own Strict rules, so
     // that its allowances apply there and nowhere else.
     const strictSites = defaultMode === "strict"
-      ? [...new Set([...by.strict, ...Object.keys(allowHosts).filter((s) => hosts.siteOf(s) === s && !sites[s])])].sort()
+      ? [...new Set([...by.strict, ...Object.keys(allowHosts), ...topSites].filter((s) => hosts.siteOf(s) === s && hosts.canScopeSite(s) && (!sites[s] || sites[s] === "strict")))].sort()
       : by.strict;
-    if (strictSites.length) strictSets.push({initiatorDomains: strictSites});
+    if (strictSites.length) strictSets.push({topDomains: strictSites});
     if (defaultMode === "strict") {
-      const excluded = [...by.relaxed, ...by.standard, ...strictSites, ...by.noscript, ...FUNCTIONAL_HOSTS.filter((h) => hosts.siteOf(h) === h)];
-      strictSets.push({excludedInitiatorDomains: [...new Set(excluded)].sort()});
+      const excluded = [...by.relaxed, ...by.standard, ...strictSites, ...by.noscript];
+      // For an unobserved site the declarative backstop still compares the initiator.
+      // Named top sites below close nested-frame gaps; the adapter adds them on navigation.
+      strictSets.push({...(excluded.length ? {excludedTopDomains: [...new Set(excluded)].sort()} : {}), domainType: "thirdParty"});
     }
-    for (const scope of [...strictSets, ...(by.noscript.length ? [{initiatorDomains: by.noscript, noscript: true}] : [])]) {
+    for (const scope of [...strictSets, ...(by.noscript.length ? [{topDomains: by.noscript, noscript: true}] : [])]) {
       const {noscript, ...who} = scope;
       // Hosts the user allowed under Strict apply only to that site, so per-site sets get their own exclusions.
-      const perSite = who.initiatorDomains ? who.initiatorDomains.map((s) => ({initiatorDomains: [s], extra: (allowHosts[s] || []).filter((h) => hosts.normalizeHost(h))}))
+      const perSite = who.topDomains ? who.topDomains.map((s) => ({...topScope(s), extra: (allowHosts[s] || []).filter((h) => hosts.normalizeHost(h))}))
         : [{...who, extra: []}];
       for (const {extra, ...scopeWho} of perSite) {
-        const excludedRequestDomains = [...new Set([...FUNCTIONAL_HOSTS, ...extra])].sort();
+        const sameSite = scopeWho.topDomains || [];
+        const excludedRequestDomains = [...new Set([...sameSite, ...FUNCTIONAL_HOSTS, ...extra])].sort();
         add(noscript ? "noscript" : "strict", PRIORITY.mode, {type: "block"},
-          {...scopeWho, domainType: "thirdParty", resourceTypes: ["script", "sub_frame", "font", "object"], excludedRequestDomains});
+          {...scopeWho, resourceTypes: ["script", "sub_frame", "font", "object"], excludedRequestDomains});
         // Header changes sit at the cleaning tier, above a clicked-to-load embed's allow: a loaded embed still gets no
         // cookies unless the user chose "with cookies".
         add(null, PRIORITY.clean, {type: "modifyHeaders", requestHeaders: [{header: "cookie", operation: "remove"}], responseHeaders: [{header: "set-cookie", operation: "remove"}]},
-          {...scopeWho, domainType: "thirdParty", excludedRequestDomains, resourceTypes: ["sub_frame", "stylesheet", "script", "image", "font", "object", "xmlhttprequest", "ping", "media", "other"]});
+          {...scopeWho, excludedRequestDomains: [...new Set([...sameSite, ...FUNCTIONAL_HOSTS])].sort(), resourceTypes: [...SUBRESOURCE_TYPES]});
         add(null, PRIORITY.clean, {type: "modifyHeaders", requestHeaders: [{header: "referer", operation: "remove"}]},
-          {...scopeWho, domainType: "thirdParty", excludedRequestDomains: [...FUNCTIONAL_HOSTS, "youtube.com", "youtube-nocookie.com"].sort(), resourceTypes: ["sub_frame"]});
+          {...scopeWho, excludedRequestDomains: [...sameSite, ...FUNCTIONAL_HOSTS, "youtube.com", "youtube-nocookie.com"].sort(), resourceTypes: ["sub_frame"]});
+        // A same-site request-domain exclusion otherwise also exempts independently
+        // hosted tenants below a private PSL suffix (amazonaws.com -> s3.amazonaws.com).
+        const nested = sameSite.flatMap((site) => hosts.scopeExclusions(site));
+        if (nested.length) {
+          add(noscript ? "noscript" : "strict", PRIORITY.mode, {type: "block"},
+            {...scopeWho, requestDomains: nested, excludedRequestDomains: [...new Set([...FUNCTIONAL_HOSTS, ...extra])].sort(), resourceTypes: ["script", "sub_frame", "font", "object"]});
+          add(null, PRIORITY.clean, {type: "modifyHeaders", requestHeaders: [{header: "cookie", operation: "remove"}], responseHeaders: [{header: "set-cookie", operation: "remove"}]},
+            {...scopeWho, requestDomains: nested, excludedRequestDomains: [...FUNCTIONAL_HOSTS], resourceTypes: [...SUBRESOURCE_TYPES]});
+          add(null, PRIORITY.clean, {type: "modifyHeaders", requestHeaders: [{header: "referer", operation: "remove"}]},
+            {...scopeWho, requestDomains: nested, excludedRequestDomains: [...FUNCTIONAL_HOSTS, "youtube.com", "youtube-nocookie.com"], resourceTypes: ["sub_frame"]});
+        }
       }
     }
-    if (by.noscript.length) {
-      add("noscript", PRIORITY.mode, {type: "block"}, {initiatorDomains: by.noscript, resourceTypes: ["script"]});
-      add(null, PRIORITY.modeHeaders, {type: "modifyHeaders", responseHeaders: [{header: "content-security-policy", operation: "append", value: "script-src 'none'"}]},
-        {requestDomains: by.noscript, resourceTypes: ["main_frame", "sub_frame"]});
+    for (const site of by.noscript) {
+      const scope = topScope(site), excluded = hosts.scopeExclusions(site);
+      add("noscript", PRIORITY.mode, {type: "block"}, {...scope, resourceTypes: ["script"]});
+      const noScriptHeaders = {type: "modifyHeaders", responseHeaders: [{header: "content-security-policy", operation: "append", value: "script-src 'none'"}]};
+      add(null, PRIORITY.modeHeaders, noScriptHeaders, {requestDomains: [site], ...(excluded.length ? {excludedRequestDomains: excluded} : {}), resourceTypes: ["main_frame"]});
+      add(null, PRIORITY.modeHeaders, noScriptHeaders, {...scope, resourceTypes: ["sub_frame"]});
     }
     return {rules, kinds};
   }
@@ -341,11 +341,11 @@
    * stripping (or the tracker-host cookie stripping): the embed loads without cookies. `withCookies` puts it above the
    * stripping too, for embeds that need a sign-in.
    */
-  function embedRule(id, embedId, tabId, {withCookies = false} = {}) {
+  function embedRule(id, embedId, tabId, {withCookies = false, topSite = null} = {}) {
     const embed = EMBEDS.find((e) => e.id === embedId);
     if (!embed || !Number.isInteger(tabId) || tabId < 0 || !Number.isInteger(id) || id < 1) throw new Error("embed needs a provider and a tab");
     return {id, priority: withCookies ? PRIORITY.embedCookies : PRIORITY.embed, action: {type: "allow"},
-      condition: {requestDomains: [...embed.domains], tabIds: [tabId], resourceTypes: ["sub_frame", "script", "stylesheet", "image", "font", "xmlhttprequest", "media"]}};
+      condition: {requestDomains: [...embed.domains], ...(topSite ? {topDomains: [topSite]} : {}), tabIds: [tabId], resourceTypes: ["sub_frame", "script", "stylesheet", "image", "font", "xmlhttprequest", "media"]}};
   }
 
   /**
@@ -391,17 +391,33 @@
    * Dynamic rules for the user's request rules and live exceptions.
    * Returns {rules, sources}: `sources` maps each DNR id to the store id it came from (for the popup log).
    */
-  function compileUserState(rules, exceptions, now, {firstId = 1} = {}) {
+  function compileUserState(rules, exceptions, now, {firstId = 1, tabIdsBySite = null} = {}) {
     const out = [];
     const sources = {};
     let id = firstId;
-    const push = (sourceId, priority, actionType, site, host, path, types, party, map) => {
+    const push = (sourceId, priority, actionType, site, host, path, types, party, map, sourceTabId) => {
       const condition = {regexFilter: endpointRegex(host, path), isUrlFilterCaseSensitive: true, requestDomains: [host],
-        initiatorDomains: [site], resourceTypes: chromeTypes(types, map)};
-      if (party === "first") condition.domainType = "firstParty";
-      if (party === "third") condition.domainType = "thirdParty";
+        topDomains: [site], resourceTypes: chromeTypes(types, map)};
+      const excludedTop = hosts.scopeExclusions(site);
+      if (excludedTop.length) condition.excludedTopDomains = excludedTop;
+      // Destination is exact and site is known, so party is evaluated against the top
+      // site's PSL boundary. domainType would compare the iframe initiator instead.
+      const third = hosts.isThirdParty(host, site);
+      if ((party === "first" && third) || (party === "third" && !third)) return;
+      if (actionType === "allow" && tabIdsBySite) {
+        const ids = [...new Set(Object.entries(tabIdsBySite).filter(([top]) => hosts.withinScope(top, site) && hosts.siteOf(top) === hosts.siteOf(site)).flatMap(([, tabs]) => tabs))].filter((x) => Number.isInteger(x) && x >= 0);
+        const scopedIds = sourceTabId === undefined ? ids : ids.filter((id) => id === sourceTabId);
+        if (!scopedIds.length) return; // No background/service-worker-only permissions.
+        condition.tabIds = scopedIds.sort((a, b) => a - b);
+      } else if (actionType === "allow" && sourceTabId !== undefined) condition.tabIds = [sourceTabId];
       sources[id] = sourceId;
       out.push({id: id++, priority, action: {type: actionType}, condition});
+      if (actionType === "allow") {
+        sources[id] = sourceId;
+        out.push({id: id++, priority: PRIORITY.grantHeaders,
+          action: {type: "modifyHeaders", requestHeaders: [{header: "cookie", operation: "remove"}, {header: "referer", operation: "remove"}],
+            responseHeaders: [{header: "set-cookie", operation: "remove"}]}, condition: {...condition}});
+      }
     };
     for (const rule of rules) {
       if (rule.kind !== "request" || !live(rule, now)) continue;
@@ -410,24 +426,23 @@
     }
     for (const exc of exceptions) {
       if (!live(exc, now)) continue;
-      push(exc.id, PRIORITY.exception, "allow", exc.site, exc.host, exc.path, [exc.type], undefined, EXCEPTION_TYPE_MAP);
+      push(exc.id, PRIORITY.exception, "allow", exc.site, exc.host, exc.path, [exc.type], undefined, EXCEPTION_TYPE_MAP, exc.tabId);
     }
     return {rules: out, sources};
   }
 
-  /**
-   * Session rules for "continue once" (ids `id` and `id + 1`), below the tracker lists: in one tab, the navigation to
-   * one host, and requests to that host made by that host itself. Plain `allow`, so other threat-listed hosts the page
-   * pulls in stay blocked.
-   */
+  /** Explicit threat consent is exact-host/tab navigation only. All subresources
+   * remain blocked by their ordinary policy. Navigation is always cookieless. */
   function continueRules(id, host, tabId) {
     const name = hosts.normalizeHost(host);
     if (!name || !Number.isInteger(tabId) || tabId < 0 || !Number.isInteger(id) || id < 1) throw new Error("continue needs a host and a tab");
+    const condition = {regexFilter: `^https?://${escapeRegex(name)}\\.?(?::[0-9]+)?(?:/|$)`, isUrlFilterCaseSensitive: false,
+      requestDomains: [name], resourceTypes: ["main_frame"], tabIds: [tabId]};
     return [
-      {id, priority: PRIORITY.continue, action: {type: "allow"},
-        condition: {requestDomains: [name], resourceTypes: ["main_frame"], tabIds: [tabId]}},
-      {id: id + 1, priority: PRIORITY.continue, action: {type: "allow"},
-        condition: {requestDomains: [name], initiatorDomains: [name], resourceTypes: [...SUBRESOURCE_TYPES], tabIds: [tabId]}},
+      {id, priority: PRIORITY.continue, action: {type: "allow"}, condition},
+      {id: id + 1, priority: PRIORITY.continueHeaders, action: {type: "modifyHeaders",
+        requestHeaders: [{header: "cookie", operation: "remove"}, {header: "referer", operation: "remove"}],
+        responseHeaders: [{header: "set-cookie", operation: "remove"}]}, condition: {...condition}},
     ];
   }
 

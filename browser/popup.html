@@ -37,6 +37,10 @@
     <div id="rebuilt" class="callout" data-state="reduced" role="status" hidden>
       <p><strong class="state-text">Newer lists have been built.</strong> Reload Egress Guard in chrome://extensions to use them.</p>
     </div>
+    <div id="policy-issue" class="callout" data-state="reduced" role="status" hidden>
+      <p id="policy-note"></p>
+      <button type="button" class="btn" id="policy-retry">Retry policy update</button>
+    </div>
     <div id="paused" class="callout" data-state="reduced" hidden>
       <p id="paused-text">Paused on this site</p>
       <button type="button" class="btn primary" id="resume">Resume</button>
@@ -101,6 +105,7 @@
     <h2>On this page</h2>
     <ul class="list tools">
       <li><button type="button" class="row tool" id="pick"><span class="main"><span class="line1">Block an element…</span></span><span class="trail" aria-hidden="true">›</span></button></li>
+      <li id="semantic-item" hidden><button type="button" class="row tool" id="semantic-review"><span class="main"><span class="line1">Review sponsored cards…</span><span class="line2">Optional on-device analysis · Experimental</span></span><span class="trail" aria-hidden="true">›</span></button></li>
       <li id="generic-item" hidden><button type="button" class="row tool" id="generic" aria-describedby="generic-note"><span class="main"><span class="line1" id="generic-label">Show hidden ad slots</span><span class="line2" id="generic-note"></span></span><span class="trail" aria-hidden="true">›</span></button></li>
       <li><button type="button" class="row tool" id="restore" aria-describedby="hidden"><span class="main"><span class="line1" id="restore-label">Restore everything hidden here</span><span class="line2" id="hidden"></span></span><span class="trail" aria-hidden="true">›</span></button></li>
       <li id="clean-item" hidden><button type="button" class="row tool" id="clean-toggle" aria-pressed="false" aria-describedby="clean-note"><span class="main"><span class="line1" id="clean-label">Stop cleaning on this site</span><span class="line2" id="clean-note"></span></span><span class="trail" aria-hidden="true">›</span></button></li>
@@ -117,11 +122,17 @@
   </section>
   <section class="group provenance">
     <h2>Block lists <span class="num">Updated</span></h2>
+    <p id="coverage-note" class="note t-caption muted" hidden></p>
     <ul id="lists" class="list"></ul>
     <details class="disclosure" id="sources" hidden>
       <summary>List files and hashes</summary>
       <ul id="hashes" class="hashes"></ul>
     </details>
+  </section>
+  <section class="group" id="native-group" hidden>
+    <h2>Local proxy</h2>
+    <p id="native-note" class="note t-caption muted" role="status">Check the installed proxy’s policy and logging receipts. This does not prove that this browser uses the proxy.</p>
+    <button type="button" class="btn" id="native-check">Check local proxy</button>
   </section>
 </section>
 </main>

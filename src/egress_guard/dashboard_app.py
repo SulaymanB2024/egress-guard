@@ -52,7 +52,6 @@ class Application:
             if self._policy is None or stamp != self._stamp:
                 self._policy = Policy(load_config(self.config_path), self.state)
                 self._stamp = stamp
-            self._policy.reload_controls()
             return self._policy
 
     def status(self):
@@ -81,6 +80,8 @@ class Application:
                         {"name": "Applied policy", "state": applied["state"], "detail": applied["detail"]}],
             "policy": {key: applied[key] for key in ("saved_revision", "applied_revision", "applied", "pending",
                                                      "degraded")},
+            "logging": {"saved": config["logging"],
+                        "runtime": health.get("policy", {}).get("logging") if isinstance(health.get("policy"), dict) else None},
             "filters": [{"name": item["name"],
                          "state": "active" if item["status"] == "current" and policy.coverage.get(item["id"]) == "verified"
                          else "degraded",
@@ -150,7 +151,7 @@ class Application:
     def domain(self, host):
         host = self._host(host)
         policy = self.policy()
-        decision = policy.decision(host)
+        decision = policy.explain(host)
         manual = self._manual_rules()
         # Only hosts the user has explicitly exempted (or opted into via a preset) are protected.
         return {**decision, "host": host, "reason": decision.get("source", "unknown"),

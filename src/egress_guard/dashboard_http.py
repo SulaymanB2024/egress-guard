@@ -57,15 +57,16 @@ def private_write(path: Path, data: bytes) -> None:
             os.unlink(temporary)
 
 
-def installation_token(state: Path = STATE) -> str:
+def installation_token(state: Path = STATE, *, create: bool = True) -> str:
     if not supports_private_identity():
         raise RuntimeError("Private dashboard identity is unavailable on this platform; an ACL-verified Windows backend is required")
-    state.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if create:
+        state.mkdir(parents=True, mode=0o700, exist_ok=True)
     info = state.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise RuntimeError("The protection state directory must be private to this user")
     path = state / "dashboard-token"
-    if not path.exists():
+    if create and not path.exists():
         value = secrets.token_urlsafe(32)
         # Exclusive creation avoids replacing a token another local process just made.
         try:

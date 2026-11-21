@@ -27,7 +27,7 @@ class ServiceRecoveryTests(unittest.TestCase):
         self.jobs = [("org.egressguard.test." + name, action) for name, action in
                      (("proxy", "run"), ("dashboard", "dashboard"), ("feeds", "refresh"))]
         for item in (patch.object(services, "_macos"), patch.object(services, "initialize"),
-                     patch.object(services, "load_config", return_value={"proxy": {"port": 8080}}),
+                     patch.object(services, "load_config", return_value={"proxy": {"port": 8080, "dashboard_port": 8765}}),
                      patch.object(services, "data_dir", return_value=self.state),
                      patch.object(services, "config_path", return_value=self.configuration),
                      patch.object(services, "jobs", return_value=self.jobs),
@@ -43,6 +43,9 @@ class ServiceRecoveryTests(unittest.TestCase):
         self.health = patch.object(services, "proxy_health", return_value={"ready": True})
         self.health_call = self.health.start()
         self.addCleanup(self.health.stop)
+        dashboard = patch.object(services, "dashboard_health", return_value={"ready": True})
+        self.dashboard_health_call = dashboard.start()
+        self.addCleanup(dashboard.stop)
         for name, value in (("READY_TIMEOUT_SECONDS", 0.05), ("READY_POLL_SECONDS", 0.01)):
             item = patch.object(services, name, value)
             item.start()
@@ -208,6 +211,24 @@ class ServiceRecoveryTests(unittest.TestCase):
         self.assertEqual(self.loaded, set())
         self.assertEqual(list(self.directory.iterdir()), [])
         self.assertGreater(self.health_call.call_count, 1)
+
+    def test_existing_unhealthy_jobs_are_reported_without_unloading_them(self):
+        for index in range(3):
+            self.target(index).write_bytes(self.definition(index))
+        self.loaded = {label for label, _ in self.jobs}
+        self.health_call.return_value = {"ready": False}
+        with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+            services.start()
+        self.assertEqual(self.loaded, {label for label, _ in self.jobs})
+        self.assertEqual(len(list(self.directory.iterdir())), 3)
+        self.assertTrue(all(call.args[0][1] == "print" for call in self.native_call.call_args_list))
+
+    def test_dashboard_identity_is_required_before_start_succeeds(self):
+        self.dashboard_health_call.return_value = {"ready": False}
+        with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+            services.start()
+        self.assertEqual(self.loaded, set())
+        self.assertEqual(list(self.directory.iterdir()), [])
 
     def test_start_with_ready_worker_succeeds_and_keeps_jobs(self):
         self.health_call.side_effect = [{"ready": False}, {"ready": True}]

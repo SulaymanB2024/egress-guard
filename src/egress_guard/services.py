@@ -11,7 +11,7 @@ import tempfile
 import time
 
 from .config import config_path, initialize, load_config
-from .health import proxy_health
+from .health import dashboard_health, proxy_health
 from .paths import data_dir, private_dir
 from .policy import Policy
 
@@ -96,12 +96,14 @@ def _prepare_error_log():
     return str(path)
 
 
-def _wait_for_ready(port, timeout=None, interval=None, sleep=time.sleep, clock=time.monotonic):
+def _wait_for_ready(port, timeout=None, interval=None, sleep=time.sleep, clock=time.monotonic,
+                    dashboard_port=None):
     timeout = READY_TIMEOUT_SECONDS if timeout is None else timeout
     interval = READY_POLL_SECONDS if interval is None else interval
     deadline = clock() + timeout
     while True:
-        if proxy_health(port, data_dir()).get("ready"):
+        if (proxy_health(port, data_dir()).get("ready")
+                and (dashboard_port is None or dashboard_health(dashboard_port, data_dir()).get("ready"))):
             return True
         if clock() >= deadline:
             return False
@@ -143,7 +145,8 @@ def _start():
     if directory.is_symlink():
         raise ValueError("LaunchAgents must be a regular directory")
     error_log = _prepare_error_log()
-    port = load_config()["proxy"]["port"]
+    proxy = load_config()["proxy"]
+    port = proxy["port"]
     plan = []
     for label, action in jobs():
         target = directory / f"{label}.plist"
@@ -172,8 +175,9 @@ def _start():
                 # A timed-out bootstrap may already have loaded its job.
                 attempted.append((label, action, target, definition))
                 subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(target)], capture_output=True, check=True, timeout=10)
-        if any(action == "run" for _, action, *_ in attempted) and not _wait_for_ready(port):
-            raise RuntimeError(f"The proxy worker did not become ready; setup was rolled back. See {error_log} for worker errors.")
+        if not _wait_for_ready(port, dashboard_port=proxy["dashboard_port"]):
+            raise RuntimeError("The proxy or dashboard did not become ready; new setup changes were rolled back "
+                               f"and existing jobs were preserved. See {error_log} for worker errors.")
     except BaseException:
         preserved = set()
         for label, action, target, definition in reversed(attempted):

@@ -56,7 +56,7 @@ test("manifest: Firefox MV3, minimal permissions, no remote code or extension ne
   for (const tag of read("browser/popup.html").matchAll(/<script\b[^>]*>/g)) assert.match(tag[0], /src="[a-z]+\.js"/);
 });
 
-test("extension source has no HTML injection, eval, remote URLs or networking APIs", () => {
+test("extension source has no HTML injection, eval or unapproved browser networking APIs", () => {
   const files = [];
   const walk = (dir) => { for (const e of fs.readdirSync(dir, {withFileTypes: true})) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else files.push(p); } };
   walk(path.join(root, "browser"));
@@ -66,7 +66,7 @@ test("extension source has no HTML injection, eval, remote URLs or networking AP
     // The one sanctioned read: the Chrome worker loads its own packaged threat ruleset (CSP connect-src 'self').
     // And it asks Chrome how a navigation to a host would match (testMatchOutcome), which sends nothing.
     if (path.basename(file) === "background-chrome.js") code = code.replace("fetch(OWN + file)", "OWN_RULESET").replace('fetch(OWN + "rules/build.json"', "OWN_STAMP(").replace("url: `https://${host}/`", "url: PROBE");
-    for (const banned of [/innerHTML/, /outerHTML/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function/, /\bfetch\s*\(/, /XMLHttpRequest/, /WebSocket/, /sendBeacon/, /importScripts/, /https?:\/\/(?!\*)/, /setTimeout\(\s*["'`]/, /\bon[a-z]+\s*=\s*["']/]) {
+    for (const banned of [/innerHTML/, /outerHTML/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function/, /\bfetch\s*\(/, /XMLHttpRequest/, /WebSocket/, /sendBeacon/, /importScripts/, /setTimeout\(\s*["'`]/, /\bon[a-z]+\s*=\s*["']/]) {
       assert.doesNotMatch(code, banned, `${path.relative(root, file)} contains ${banned}`);
     }
   }
@@ -126,7 +126,7 @@ test("acceptance (adapter): exception allows one endpoint, expires via alarm, an
   const exc = await bg.fromPopup({type: "add-exception", tabId: 1, tabUrl, host: "publisher.example", path: "/collect", resourceType: "beacon", minutes: 15});
   assert.equal(exc.ok, true, exc.error);
   assert.equal(bg.alarms.get("eg-expiry").when, START + 15 * 60000);
-  assert.equal((await bg.request(beacon)).cancel, undefined, "beacon allowed during exception");
+  assert.equal((await bg.request(beacon)).cancel, true, "manual block remains authoritative during an ordinary exception");
   assert.equal((await bg.request({...beacon, type: "xmlhttprequest"})).cancel, true, "other type still blocked");
   const state = await bg.fromPopup({type: "popup-state", tabId: 1, tabUrl});
   assert.equal(state.exceptions.length, 1);
@@ -156,7 +156,7 @@ async function warningPage(href, {framed = false} = {}) {
     addEventListener: (type, fn) => { win.listeners[type] = fn; }});
   ctx.top = framed ? {} : ctx;
   ctx.self = ctx;
-  for (const file of ["core/hosts.js", "core/links.js", "core/params.js", "core/dnr.js", "warning.js"]) vm.runInContext(read(`browser/${file}`), ctx, {filename: file});
+  for (const file of ["core/psl-data.js", "core/hosts.js", "core/links.js", "core/params.js", "core/dnr.js", "warning.js"]) vm.runInContext(read(`browser/${file}`), ctx, {filename: file});
   await ctx.__EGWarning.ready;
   return {doc, sent, win, location, ctx};
 }

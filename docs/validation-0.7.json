@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "date": "2026-11-21",
+  "reviewed_base": "be1cb768059fba995d0470ca6f700fbfbd48639a",
+  "version": "0.7.0",
+  "tests": {
+    "python": {
+      "command": "PYTHONPATH=src python -B -m unittest discover -s tests -v",
+      "passed": 264,
+      "failed": 0,
+      "skipped": 0,
+      "includes_real_loopback_proxy": true
+    },
+    "node": {
+      "command": "node --test tests/browser/*.test.cjs",
+      "passed": 196,
+      "failed": 0,
+      "skipped": 0,
+      "environment": "controlled worker and DOM models; no native Chrome execution"
+    }
+  },
+  "runtime": {
+    "python": "3.12.14",
+    "node": "24.22.3",
+    "mitmproxy": "12.3.1",
+    "platform": "Linux"
+  },
+  "psl": {
+    "rules": 10470,
+    "version": "2026-11-20_10-39-09_UTC",
+    "sha256": "f3df783daf6bdf4c4d71759bc8a4b39f2d228a567078560a00e11f70df0703f4",
+    "regeneration_matches": true
+  },
+  "current_filter_compile": {
+    "easylist_version": "202611211610",
+    "easyprivacy_version": "202611211610",
+    "scoped_hides": 9043,
+    "scoped_exceptions": 324,
+    "static_rules": 13825,
+    "regex_rules": 56,
+    "domain_feeds_included": false,
+    "complete_coverage": false,
+    "chrome_indexing_qualified": false
+  },
+  "package_checks": {
+    "fresh_wheel_target": true,
+    "private_initialization": true,
+    "default_history": "none",
+    "empty_cache_start_refused": true,
+    "empty_cache_lookup_indeterminate": true,
+    "native_host_packaged": true,
+    "dashboard_assets_packaged": true,
+    "pip_check": "passed"
+  },
+  "dependency_review": {
+    "status": "advisories_found",
+    "locked_package_versions": 51,
+    "transport_latest_release_checked": "v12.3.1",
+    "matches": [
+      {
+        "name": "tornado",
+        "version": "6.5.10",
+        "advisories": [
+          "GHSA-5cjw-f85j-cv6r",
+          "GHSA-pcg2-g6cj-q92c",
+          "GHSA-pw9p-v7r6-gx4p",
+          "GHSA-r4j5-9xpp-3985"
+        ]
+      }
+    ]
+  },
+  "target_qualification": {
+    "chromium": "blocked: process-singleton socket denied with EPERM before browser startup",
+    "actual_model_inference": false,
+    "installed_browser_native_host": false,
+    "macos_service_lifecycle": "mocked only",
+    "system_proxy_activation": false
+  },
+  "material_limits": [
+    "Scheduled grant expiry is not a hard browser-enforced TTL.",
+    "Default Strict has a first-request reconciliation gap on unseen top-level sites.",
+    "Cosmetic hiding does not prove network request prevention.",
+    "Sensitive-page detection is heuristic; local-model classification has not been benchmarked.",
+    "Native receipts do not prove browser-profile identity, routing or device-wide coverage."
+  ]
+}

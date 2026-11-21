@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const dnr = require("../../browser/core/dnr.js");
 const rules = require("../../browser/core/rules.js");
+const hosts = require("../../browser/core/hosts.js");
 const {pathMatches} = require("../../browser/core/decide.js");
 
 const WARN = "chrome-extension://danbhmcinakkkkbobacafgidgkfibfmg/warning.html";
@@ -17,6 +18,12 @@ function matches(rule, req) {
   const covers = (list, name) => list.some((d) => name === d || name.endsWith(`.${d}`));
   if (c.resourceTypes && !c.resourceTypes.includes(req.type)) return false;
   if (c.requestDomains && !covers(c.requestDomains, host)) return false;
+  if (c.excludedRequestDomains && covers(c.excludedRequestDomains, host)) return false;
+  const top = req.top || req.initiator; // Chrome fallback when no associated top frame exists.
+  if (c.topDomains && !(top && covers(c.topDomains, top))) return false;
+  if (c.excludedTopDomains && top && covers(c.excludedTopDomains, top)) return false;
+  if (c.domainType === "thirdParty" && req.initiator && !hosts.isThirdParty(host, req.initiator)) return false;
+  if (c.domainType === "firstParty" && (!req.initiator || hosts.isThirdParty(host, req.initiator))) return false;
   if (c.initiatorDomains && !(req.initiator && covers(c.initiatorDomains, req.initiator))) return false;
   if (c.tabIds && !c.tabIds.includes(req.tabId)) return false;
   if (c.regexFilter && !new RegExp(c.regexFilter, c.isUrlFilterCaseSensitive ? "" : "i").test(req.url)) return false;
@@ -30,7 +37,7 @@ function matches(rule, req) {
  */
 const RANK = {allow: 3, allowAllRequests: 3, block: 2, redirect: 1};
 function best(all, req) {
-  return all.filter((r) => matches(r, req)).sort((a, b) => b.priority - a.priority || RANK[b.action.type] - RANK[a.action.type])[0] || null;
+  return all.filter((r) => r.action.type !== "modifyHeaders" && matches(r, req)).sort((a, b) => b.priority - a.priority || RANK[b.action.type] - RANK[a.action.type])[0] || null;
 }
 function outcome(all, req) {
   const hit = best(all, req);
@@ -41,12 +48,12 @@ function outcome(all, req) {
   return hit ? hit.action.type : "none";
 }
 
-test("priority ladder: exceptions > user rules > lists > continue-once > threats > Relaxed > cleaning > site modes > hand filters > list filters", () => {
+test("priority ladder preserves threat/manual denies and independent credential consent", () => {
   const p = dnr.PRIORITY;
-  assert.ok(p.exception > p.userAllow && p.userAllow > p.userBlock && p.userBlock > p.list && p.list > p.continue && p.continue > p.threat && p.threat > p.relax);
+  assert.ok(p.userBlock > p.continueHeaders && p.continueHeaders > p.continue && p.continue > p.threat && p.threat > p.grantHeaders && p.grantHeaders > p.exception && p.exception > p.userAllow && p.userAllow > p.list);
   assert.ok(p.gpc > p.exception, "no allow rule can switch Sec-GPC off");
   assert.ok(p.surrogate > p.list && p.surrogate < p.userBlock, "a stub beats the list block, your own block beats the stub");
-  assert.ok(p.relax > p.embedCookies && p.embedCookies > p.scannerPass && p.scannerPass > p.scanner && p.scanner > p.modeHeaders && p.modeHeaders > p.clean,
+  assert.ok(p.relax > p.embedCookies && p.embedCookies > p.scannerPass && p.scannerPass > p.scanner && p.scanner > p.clean && p.modeHeaders > p.userBlock,
     "Relaxed lifts cleaning; a scanner pass lifts only the scanner redirect and cleaning");
   assert.ok(p.clean > p.embed && p.embed > p.mode && p.mode > p.hand, "a loaded embed lifts Strict's blocks, not its cookie stripping");
   assert.ok(p.hand > p.filterImportant && p.filterImportant > p.easyprivacyAllow && p.easyprivacyAllow > p.easyprivacy && p.easyprivacy > p.easylistAllow && p.easylistAllow > p.easylist,
@@ -121,24 +128,24 @@ function exception(overrides) {
 }
 
 test("user rules compile to scoped, case-sensitive dynamic rules with mapped types", () => {
-  const {rules: out, sources} = dnr.compileUserState([userRule(), userRule({id: "r2", action: "allow", path: "/ok", party: "third"}),
+  const {rules: out, sources} = dnr.compileUserState([userRule(), userRule({id: "r2", action: "allow", host: "tracker.example", path: "/ok", party: "third"}),
     rules.validateRule({id: "h1", kind: "cosmetic", site: "publisher.example", selector: "div.ad"})], [], NOW);
-  assert.equal(out.length, 2, "cosmetic rules are not network rules");
+  assert.equal(out.length, 3, "cosmetic rules are not network rules; allows include a sanitation pair");
   const [block, allow] = out;
   assert.equal(block.action.type, "block");
   assert.equal(block.priority, dnr.PRIORITY.userBlock);
   assert.deepEqual(block.condition.resourceTypes, ["ping", "xmlhttprequest"], "beacon maps to Chrome's ping");
-  assert.deepEqual(block.condition.initiatorDomains, ["publisher.example"]);
+  assert.deepEqual(block.condition.topDomains, ["publisher.example"]);
   assert.equal(block.condition.isUrlFilterCaseSensitive, true);
   assert.equal(allow.action.type, "allow");
   assert.equal(allow.priority, dnr.PRIORITY.userAllow);
-  assert.equal(allow.condition.domainType, "thirdParty");
-  assert.deepEqual(sources, {1: "r1", 2: "r2"});
+  assert.equal(allow.condition.domainType, undefined, "party comparison is against the known top site, not the nested initiator");
+  assert.deepEqual(sources, {1: "r1", 2: "r2", 3: "r2"});
   assert.equal(dnr.compileUserState([userRule({expiresAt: NOW - 1})], [], NOW).rules.length, 0, "expired rules dropped");
   assert.equal(dnr.compileUserState([], [exception({expiresAt: NOW})], NOW).rules.length, 0, "expired exceptions dropped");
 });
 
-test("acceptance: an exception beats the tracker list and threat list, only for its endpoint, site and type", () => {
+test("acceptance: an exception lifts tracker lists for its endpoint/site/type but cannot override a threat", () => {
   const lists = dnr.compileList("trackers", ["tracker.test"]).rules.map((r) => ({...r, id: 1000 + r.id}));
   const threats = dnr.compileList("threats", ["bad.example"], {warningUrl: WARN}).rules.map((r) => ({...r, id: 2000 + r.id}));
   const {rules: user} = dnr.compileUserState([userRule()], [exception(), exception({id: "e2", host: "cdn.bad.example", path: "/lib.js", type: "script"})], NOW);
@@ -148,7 +155,7 @@ test("acceptance: an exception beats the tracker list and threat list, only for 
   assert.equal(outcome(all, req("https://pixel.tracker.test/p.gif", "script")), "block", "other type");
   assert.equal(outcome(all, req("https://pixel.tracker.test/q.gif")), "block", "other path");
   assert.equal(outcome(all, req("https://pixel.tracker.test/p.gif", "image", "other.example")), "block", "other site");
-  assert.equal(outcome(all, req("https://cdn.bad.example/lib.js", "script")), "allow", "threat subresource exception");
+  assert.equal(outcome(all, req("https://cdn.bad.example/lib.js", "script")), "block", "threats always outrank ordinary exceptions");
   assert.equal(outcome(all, req("https://publisher.example/collect", "ping")), "block", "user rule");
   assert.equal(outcome(all, req("https://publisher.example/article", "main_frame", null)), "none");
 });
@@ -167,21 +174,22 @@ test("continue-once allows the flagged site in one tab, not its trackers, not ot
   const cont = dnr.continueRules(100000, "bad.example", 7);
   assert.deepEqual(cont.map((r) => r.id), [100000, 100001]);
   for (const rule of cont) {
-    assert.equal(rule.priority, dnr.PRIORITY.continue);
-    assert.equal(rule.action.type, "allow", "never allowAllRequests");
+    assert.ok(["allow", "modifyHeaders"].includes(rule.action.type), "navigation allow plus sanitation, never allowAllRequests");
+    assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]);
     assert.deepEqual(rule.condition.tabIds, [7]);
   }
   const all = [...threats, ...trackers, ...cont];
   const frame = {url: "https://bad.example/", type: "main_frame", tabId: 7};
   assert.equal(outcome(all, frame), "allow");
   assert.equal(outcome(all, {...frame, tabId: 8}), "redirect", "other tabs still warned");
-  assert.equal(outcome(all, {url: "https://bad.example/app.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "allow", "its own assets load");
-  assert.equal(outcome(all, {url: "https://cdn.bad.example/app.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "allow", "and its subdomains'");
+  assert.equal(outcome(all, {url: "https://bad.example/app.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "block", "own resources keep their threat block");
+  assert.equal(outcome(all, {url: "https://cdn.bad.example/app.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "block", "subdomain resources keep their threat block");
   assert.equal(outcome(all, {url: "https://other-bad.example/x.js", type: "script", initiator: "bad.example", tabId: 7, frame}), "block", "other threat hosts stay blocked");
   assert.equal(outcome(all, {url: "https://other-bad.example/", type: "sub_frame", initiator: "bad.example", tabId: 7, frame}), "block");
   assert.equal(outcome(all, {url: "https://pixel.tracker.test/p.gif", type: "image", initiator: "bad.example", tabId: 7, frame}), "block", "trackers stay blocked");
   assert.equal(outcome(all, {url: "https://bad.example/app.js", type: "script", initiator: "news.example", tabId: 7}), "block", "other sites cannot load it");
-  assert.ok(dnr.PRIORITY.threat < dnr.PRIORITY.continue && dnr.PRIORITY.list > dnr.PRIORITY.continue);
+  assert.equal(outcome(all, {...frame, url: "https://login.bad.example/"}), "redirect", "permission is exact-host, not all descendant hosts");
+  assert.ok(dnr.PRIORITY.threat < dnr.PRIORITY.continue && dnr.PRIORITY.continue < dnr.PRIORITY.userBlock);
   assert.throws(() => dnr.continueRules(1, "127.0.0.1", 7));
   assert.throws(() => dnr.continueRules(1, "bad.example", -1));
 });
@@ -238,4 +246,49 @@ test("tracking parameter stripping: exact names, navigations only, only when one
 
 test("extension id derivation matches Chrome's documented a-p mapping", () => {
   assert.equal(dnr.extensionIdFromHex("0123456789abcdef0123456789abcdef00"), "abcdefghijklmnopabcdefghijklmnop");
+});
+
+test("topDomains binds manual rules to the outer page even across foreign iframe initiators", () => {
+  const all = dnr.compileUserState([userRule()], [], NOW).rules;
+  const request = {url: "https://publisher.example/collect", type: "ping", top: "publisher.example", initiator: "foreign-frame.example"};
+  assert.equal(outcome(all, request), "block");
+  assert.equal(outcome(all, {...request, top: "other.example", initiator: "publisher.example"}), "none");
+});
+
+test("ordinary endpoint grants are tab-bound, remain cookieless and never lift explicit denies", () => {
+  const exc = exception({tabId: 1});
+  const permit = dnr.compileUserState([], [exc], NOW, {tabIdsBySite: {"publisher.example": [1, 2], "other.example": [2]}}).rules;
+  assert.equal(permit.length, 2);
+  const req = {url: "https://pixel.tracker.test/p.gif", type: "image", top: "publisher.example", initiator: "foreign-frame.example", tabId: 1};
+  assert.equal(outcome(permit, req), "allow");
+  assert.equal(outcome(permit, {...req, tabId: -1, top: undefined, initiator: "publisher.example"}), "none", "background workers receive no tab-scoped permission");
+  assert.equal(outcome(permit, {...req, tabId: 2}), "none");
+  const allow = best(permit, req);
+  const sanitation = permit.filter((r) => r.action.type === "modifyHeaders" && r.priority > allow.priority && matches(r, req));
+  assert.ok(sanitation.some((r) => r.action.requestHeaders.some((h) => h.header === "cookie" && h.operation === "remove")));
+  assert.ok(sanitation.some((r) => r.action.responseHeaders.some((h) => h.header === "set-cookie" && h.operation === "remove")));
+  const manual = dnr.compileUserState([userRule({host: exc.host, path: exc.path, types: [exc.type]})], [], NOW).rules;
+  assert.equal(outcome([...permit, ...manual], req), "block");
+  assert.deepEqual(dnr.compileUserState([], [exc], NOW, {tabIdsBySite: {}}).rules, []);
+});
+
+test("Strict uses top-site party boundaries, including separately hosted tenants below a parent domain", () => {
+  const strict = dnr.compileModes({sites: {"publisher.example": "strict"}, allowHosts: {"publisher.example": ["cdn.vendor.example"]}}).rules;
+  const nested = {url: "https://frame.vendor.example/worker.js", type: "script", top: "publisher.example", initiator: "frame.vendor.example"};
+  assert.equal(outcome(strict, nested), "block", "iframe cannot make cross-top requests first-party by initiating them itself");
+  assert.equal(outcome(strict, {...nested, top: "unrelated.example"}), "none");
+  const allowed = {...nested, url: "https://cdn.vendor.example/worker.js"};
+  assert.equal(outcome(strict, allowed), "none", "explicit Strict resource permission works");
+  assert.ok(strict.some((r) => r.action.type === "modifyHeaders" && matches(r, allowed) && r.action.requestHeaders.some((h) => h.header === "cookie")), "Strict resource permission retains cookie stripping");
+  const parent = dnr.compileModes({sites: {"amazonaws.com": "strict"}}).rules;
+  const tenant = {url: "https://alice.s3.amazonaws.com/app.js", type: "script", top: "amazonaws.com", initiator: "alice.s3.amazonaws.com"};
+  assert.equal(outcome(parent, tenant), "block", "nested private tenants are third-party to their hosting company's own site");
+  assert.equal(outcome(parent, {...tenant, top: "alice.s3.amazonaws.com"}), "none", "parent's scope does not cover independently hosted tenant pages");
+  assert.ok(parent.some((r) => r.action.type === "modifyHeaders" && matches(r, tenant) && r.action.requestHeaders.some((h) => h.header === "cookie")));
+});
+
+test("default Strict closes nested-frame gaps for observed top sites and exposes its unobserved-site backstop limit", () => {
+  const req = {url: "https://frame.vendor.example/app.js", type: "script", top: "new.example", initiator: "frame.vendor.example"};
+  assert.equal(outcome(dnr.compileModes({defaultMode: "strict"}, {topSites: ["new.example"]}).rules, req), "block");
+  assert.equal(outcome(dnr.compileModes({defaultMode: "strict"}).rules, req), "none", "the generic backstop cannot compare arbitrary top/target sites before reconciliation");
 });

@@ -2,7 +2,7 @@
 
 ## Supported release
 
-Version 0.6.x is an alpha. Fixes will target the latest published 0.6.x release; 0.5.x and earlier are no longer supported. Review release notes before upgrading; the application does not execute downloaded application updates automatically.
+Version 0.7.x is the current alpha development line. Fixes target this line; consult the release page for published artifacts and the qualification record before upgrading. The application does not execute downloaded application updates automatically.
 
 ## Report a vulnerability
 
@@ -12,6 +12,10 @@ Use [GitHub private vulnerability reporting](https://github.com/SulaymanB2024/eg
 
 - The dashboard must remain authenticated, loopback-only, protected from cross-site requests and DNS rebinding, and unable to execute arbitrary commands.
 - Threat-feed and manual security rules must remain enforced during ad-filter pauses and tracker exceptions.
+- Browser policy receipts must distinguish saved intent from rules read back as applied. Ordinary repair grants must not override threat/manual-deny rules or restore tracking headers. A threat warning's separate deliberate Continue is exact-host, tab-bound and navigation-only.
+- A local model may return bounded labels for current page candidates. It must not generate executable selectors, arbitrary browser actions, network exceptions or native commands. Page text is untrusted data, and no cloud inference fallback is permitted.
+- Native messaging accepts only exact-origin, bounded read-only receipt requests. It must not expose history, keys or paths, initialize missing identity state, or imply that a browser/profile is routed through the proxy.
+- Fresh configurations keep no domain history. Applied logging status requires writer acknowledgment; changing history mode must discard outstanding old-generation records.
 - Feed downloads must have fixed trusted origins, HTTPS verification, response limits and validation before replacement. A failed update must preserve the last good cache.
 - Native settings require explicit service selection and administrator authorization. Root must not execute user-writable project code. Restore must not overwrite newer foreign settings.
 - Private state and management credentials must not enter source archives, wheels, screenshots, HTTP logs or public diagnostics.

@@ -1,6 +1,7 @@
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -108,6 +109,67 @@ class LedgerTests(unittest.TestCase):
         self.assertNotIn("secret-id", repr(self.rows("SELECT * FROM meta")))
         activity = read_activity(self.path)
         self.assertEqual((activity["history"], activity["events"]), ("none", []))
+
+    def test_live_none_discards_queued_and_already_dequeued_rows_before_receipt(self):
+        ledger = self.ledger()
+        self.assertTrue(wait_for(ledger.ready))
+        ledger.record("committed.test", "allowed", "no-match", "http")
+        self.assertTrue(wait_for(lambda: self.rows("SELECT host FROM events") == [("committed.test",)]))
+        entered, dequeued, release = threading.Event(), threading.Event(), threading.Event()
+        original = ledger._take_batch
+
+        def held_batch():
+            entered.set()
+            batch = original()
+            if batch and not dequeued.is_set():
+                dequeued.set()
+                release.wait(3)
+            return batch
+
+        with patch.object(ledger, "_take_batch", side_effect=held_batch):
+            self.assertTrue(entered.wait(2))
+            ledger.record("dequeued-secret.test", "allowed", "no-match", "http")
+            self.assertTrue(dequeued.wait(2))
+            try:
+                ledger.record("queued-secret.test", "blocked", "tracker-feed", "connect")
+                self.assertFalse(ledger.reconfigure(history="none", timeout=0))
+                self.assertFalse(ledger.status()["applied"])
+                self.assertTrue(ledger.record("during-transition.test", "allowed", "no-match", "http"))
+            finally:
+                release.set()
+            self.assertTrue(ledger.reconfigure(history="none"))
+        self.assertTrue(ledger.status()["applied"])
+        self.assertEqual(ledger.status()["history"], "none")
+        ledger.record("after-receipt.test", "blocked", "tracker-feed", "connect")
+        ledger.close()
+        self.assertEqual(self.rows("SELECT host FROM events"), [("committed.test",)])
+        self.assertEqual(self.meta()["history"], "none")
+
+    def test_live_aggregate_then_full_applies_retention_and_queue_bounds(self):
+        ledger = self.ledger()
+        self.assertTrue(wait_for(ledger.ready))
+        self.assertTrue(ledger.reconfigure(history="aggregate", retention_days=2, max_queue=100))
+        ledger.record("private-allowed.test", "allowed", "no-match", "http")
+        ledger.record("blocked.test", "blocked", "tracker-feed", "connect")
+        self.assertTrue(wait_for(lambda: len(self.rows("SELECT * FROM daily")) == 2))
+        self.assertEqual(self.rows("SELECT host FROM daily ORDER BY host"), [("",), ("blocked.test",)])
+        self.assertEqual(self.meta()["retention_days"], "2")
+        self.assertEqual(ledger.status()["max_queue"], 100)
+        self.assertTrue(ledger.reconfigure(history="full"))
+        ledger.record("new-full.test", "allowed", "no-match", "http")
+        ledger.close()
+        self.assertEqual(self.rows("SELECT host FROM events"), [("new-full.test",)])
+
+    def test_failed_mode_commit_never_acknowledges_or_resumes_history(self):
+        ledger = self.ledger()
+        self.assertTrue(wait_for(ledger.ready))
+        with patch.object(ledger, "_configure", side_effect=sqlite3.OperationalError("fixture")):
+            self.assertFalse(ledger.reconfigure(history="none", timeout=0.2))
+            self.assertFalse(ledger.status()["applied"])
+            ledger.record("must-not-persist.test", "allowed", "no-match", "http")
+        self.assertTrue(ledger.reconfigure(history="none"))
+        ledger.close()
+        self.assertEqual(self.rows("SELECT host FROM events"), [])
 
     def test_full_mode_is_unchanged_and_rejects_unknown_mode(self):
         with self.assertRaises(ValueError):

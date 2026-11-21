@@ -42,7 +42,29 @@
     return selectors.slice(0, MAX_SELECTORS).map((s) => `${s}{display:none!important}`).join("\n");
   }
 
-  const api = Object.freeze({GENERIC_SELECTORS, MAX_SELECTORS, stylesheet});
+  // Build-time data cannot supply executable code or broaden an invalid host scope.
+  const domain = (h) => typeof h === "string" && h.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(h);
+  const covers = (host, domains) => domains.some((d) => host === d || host.endsWith(`.${d}`));
+  function scopedRules(host, data = root.EGCosmeticData, limit = 200) {
+    const validation = root.EGSelectors || (typeof require === "function" ? require("./selectors.js") : null);
+    if (!validation || !data || data.schema !== 1 || !Array.isArray(data.rules) || !Array.isArray(data.exceptions)) return [];
+    const h = String(host || "").toLowerCase().replace(/\.$/, "");
+    if (!domain(h)) return [];
+    const valid = (r, exception) => r && Array.isArray(r.include) && Array.isArray(r.exclude) &&
+      (exception || r.include.length > 0) && r.include.length + r.exclude.length <= 200 &&
+      r.include.every(domain) && r.exclude.every(domain) && typeof r.selector === "string" && validation.validateSelector(r.selector).ok;
+    const applies = (r) => (!r.include.length || covers(h, r.include.map((v) => v.toLowerCase()))) && !covers(h, r.exclude.map((v) => v.toLowerCase()));
+    const excepted = new Set(data.exceptions.filter((r) => valid(r, true) && applies(r)).map((r) => r.selector));
+    const seen = new Set(), out = [];
+    for (const r of data.rules) {
+      if (!valid(r, false) || !applies(r) || excepted.has(r.selector) || seen.has(r.selector)) continue;
+      seen.add(r.selector);
+      out.push({id: `scoped-${out.length}`, kind: "cosmetic", selector: r.selector, source: "scoped"});
+      if (out.length >= Math.max(1, Math.min(limit, 200))) break;
+    }
+    return out;
+  }
+  const api = Object.freeze({GENERIC_SELECTORS, MAX_SELECTORS, stylesheet, scopedRules});
   if (isNode) module.exports = api;
   else root.EGCosmeticList = api;
 })(globalThis);

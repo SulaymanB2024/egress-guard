@@ -25,7 +25,7 @@
   const PATH_CHARS = /^\/[A-Za-z0-9\-._~%!&',;=:@/*]*$/;
   const REQUEST_FIELDS = new Set(["id", "kind", "site", "host", "path", "types", "action", "party", "expiresAt", "createdAt", "note"]);
   const COSMETIC_FIELDS = new Set(["id", "kind", "site", "selector", "expiresAt", "createdAt", "note"]);
-  const EXCEPTION_FIELDS = new Set(["id", "site", "host", "path", "type", "expiresAt", "createdAt"]);
+  const EXCEPTION_FIELDS = new Set(["id", "site", "host", "path", "type", "expiresAt", "createdAt", "tabId"]);
 
   class RuleError extends Error {}
   const fail = (message) => { throw new RuleError(message); };
@@ -46,6 +46,7 @@
     const host = hosts.normalizeHost(value);
     if (!host) fail(`${label} must be a valid hostname (no IP addresses, ports, paths or wildcards).`);
     if (hosts.isSuffixLike(host)) fail(`${label} "${host}" looks like a public suffix; name one site.`);
+    if (!hosts.canScopeSite(host)) fail(`${label} is a wildcard registry parent and cannot be scoped safely; choose a hosted site.`);
     return host;
   }
 
@@ -123,7 +124,8 @@
     if (input.expiresAt === undefined) fail("Exceptions must expire.");
     const expiresAt = checkExpiry(input.expiresAt, now);
     if (now !== undefined && expiresAt - now > MAX_EXCEPTION_MINUTES * 60000) fail("Exceptions may last at most 24 hours.");
-    return Object.freeze({id, site, host, path, type: input.type, expiresAt, ...(Number.isSafeInteger(input.createdAt) ? {createdAt: input.createdAt} : {})});
+    if (input.tabId !== undefined && (!Number.isSafeInteger(input.tabId) || input.tabId < 0 || input.tabId > 2147483647)) fail("tabId must identify one browser tab.");
+    return Object.freeze({id, site, host, path, type: input.type, expiresAt, ...(input.tabId !== undefined ? {tabId: input.tabId} : {}), ...(Number.isSafeInteger(input.createdAt) ? {createdAt: input.createdAt} : {})});
   }
 
   /** Non-throwing wrapper. */

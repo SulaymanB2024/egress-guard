@@ -32,6 +32,13 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual((self.state / "config.toml").stat().st_mode & 0o777, 0o600)
         self.assertEqual(set(path.name for path in self.state.iterdir()), {"config.toml"})
 
+    def test_new_config_disables_history_without_overriding_explicit_existing_choices(self):
+        self.assertEqual(load_config()["logging"]["history"], "none")
+        for mode in ("full", "aggregate"):
+            (self.state / "config.toml").write_text('[logging]\nhistory = "' + mode + '"\n')
+            initialize()
+            self.assertEqual(load_config()["logging"]["history"], mode)
+
     def test_invalid_ports_unknown_settings_and_domain_urls_fail(self):
         for value in ('[proxy]\nport=22', '[proxy]\nbind="0.0.0.0"', '[block]\nhosts=["https://example.com/path"]'):
             (self.state / "config.toml").write_text(value)
@@ -64,7 +71,7 @@ class ConfigurationTests(unittest.TestCase):
         application.action({"action": "pause", "minutes": 5})
         self.assertGreater(json.loads((self.state / "filter-controls.json").read_text())["tracker_pause_until"], 0)
         application.action({"action": "unblock", "host": "tracking.example"})
-        self.assertEqual(application.domain("tracking.example")["decision"], "allowed")
+        self.assertEqual(application.domain("tracking.example")["decision"], "indeterminate")
 
     def test_dashboard_sees_same_size_replacement_with_preserved_mtime(self):
         application = Application(self.state, self.state / "config.toml")
@@ -114,6 +121,14 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(result["policy_ready"])
         self.assertEqual(set(result["coverage"].values()), {"missing"})
         self.assertRegex(result["revision"], "^[0-9a-f]{64}$")
+
+    def test_dashboard_lookup_does_not_claim_allow_with_missing_feeds(self):
+        application = Application(self.state, self.state / "config.toml")
+        result = application.domain("unlisted.example")
+        self.assertEqual(result["decision"], "indeterminate")
+        self.assertFalse(result["policy_ready"])
+        application.action({"action": "block", "host": "blocked.example"})
+        self.assertEqual(application.domain("blocked.example")["decision"], "blocked")
 
     def test_read_only_dashboard_does_not_expose_registration_secrets(self):
         application = Application(self.state, self.state / "config.toml")

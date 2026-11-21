@@ -72,7 +72,7 @@ test("a missing threat feed is fatal unless explicitly allowed; links, non-files
     const link = path.join(dir, "blocklists/hagezi-threat-intel.txt");
     fs.symlinkSync(real, link);
     assert.throws(() => readSnapshot(link), /regular file/);
-    assert.throws(() => loadLists(dir, {allowSmall: true}), /regular file/);
+    assert.throws(() => loadLists(dir, {allowSmall: true, allowMissing: true}), /regular file/);
     assert.throws(() => readSnapshot(path.join(dir, "blocklists")), /regular file/);
     const big = path.join(dir, "big.txt");
     fs.writeFileSync(big, "");
@@ -86,7 +86,7 @@ test("a list too large for one Chrome ruleset file is split, and the manifest an
   assert.deepEqual(splitRules([]), [[]]);
   const out = tmp();
   try {
-    const lists = loadLists(FEEDS, {allowSmall: true});
+    const lists = loadLists(FEEDS, {allowSmall: true, allowMissing: true});
     lists.threats.names = Array.from({length: 30}, (_, i) => `bad${i}.example`);
     const summary = build({out, lists, chunk: 4, maxRulesetBytes: 600});
     assert.ok(summary.lists.threats.files > 1, JSON.stringify(summary.lists.threats));
@@ -120,11 +120,11 @@ test("threat list merges URLhaus, Phishing Army and HaGeZi; IP literals are kept
     snap("hagezi-threat-intel-full.txt", ["malware-fixture.test", "full-only.example"]);
     assert.throws(() => readSnapshot(path.join(dir, "blocklists/urlhaus-filter.txt")), /invalid hostname/, "IPs only where the proxy allows them");
     const notes = [];
-    const lists = loadLists(dir, {allowSmall: true, log: (m) => notes.push(m)});
+    const lists = loadLists(dir, {allowSmall: true, allowMissing: true, log: (m) => notes.push(m)});
     assert.deepEqual([...new Set(lists.threats.names)].sort(), ["full-only.example", "login-phish.example", "malware-fixture.test", "malware-host.example", "phish.example"]);
     assert.deepEqual(lists.threats.sources.map((s) => s.id), ["urlhaus-filter", "phishing-army", "hagezi-threat-intel-full"]);
     assert.ok(notes.some((n) => /2 IP addresses not used/.test(n)));
-    const medium = loadLists(dir, {allowSmall: true, threatTier: "medium"});
+    const medium = loadLists(dir, {allowSmall: true, allowMissing: true, threatTier: "medium"});
     assert.ok(!medium.threats.names.includes("full-only.example"));
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
@@ -134,7 +134,7 @@ test("build emits Chrome and Firefox from shared sources; Chrome gets rulesets, 
   const out = tmp();
   try {
     const notes = [];
-    const lists = loadLists(FEEDS, {allowSmall: true, log: (m) => notes.push(m)});
+    const lists = loadLists(FEEDS, {allowSmall: true, allowMissing: true, log: (m) => notes.push(m)});
     assert.deepEqual(notes, [
       "missing urlhaus-filter.txt: threats list will not include URLhaus malware hosts (malware-filter)",
       "missing phishing-army.txt: threats list will not include Phishing Army",
@@ -180,36 +180,38 @@ test("build emits Chrome and Firefox from shared sources; Chrome gets rulesets, 
 });
 
 test("URL filter lists: downloaded once a day into the build's own cache, verified, hash-recorded; tampering and wrong files refused", async () => {
-  const {loadFilters, compileFilterRulesets, FILTER_LISTS, build} = await load();
+  const {loadFilters, readCachedFilter, compileFilterRulesets, FILTER_LISTS, build} = await load();
   const dir = tmp();
   const body = (title) => `[Adblock Plus 2.0]\n! Version: 202611210000\n! Title: ${title}\n! Licence: https://easylist.to/pages/licence.html\n` +
     Array.from({length: 20001}, (_, i) => `||t${i}.example^`).join("\n") + "\n/g/collect?\n@@||ok.example/g/collect?\n||ads.example^\n";
   const domains = Array.from({length: 6000}, (_, i) => `c${i}.click.example`).concat(["mkt_vis.example"]).join("\n") + "\n";
   const textFor = (url) => { const spec = FILTER_LISTS.find((f) => f.url === url); return spec.kind === "domains" ? domains : body(spec.name); };
-  const reply = (url, text) => ({ok: true, status: 200, url, headers: {get: () => null}, arrayBuffer: async () => Buffer.from(text)});
+  const reply = (url, text) => { const result = new Response(text); Object.defineProperty(result, "url", {value: url}); return result; };
   let calls = 0;
   const fetchImpl = async (url) => { calls++; return reply(url, textFor(url)); };
   try {
     const first = await loadFilters(dir, {fetchImpl});
     assert.equal(calls, FILTER_LISTS.length);
     assert.deepEqual(Object.keys(first).sort(), FILTER_LISTS.map((f) => f.id).sort());
-    const meta = JSON.parse(fs.readFileSync(path.join(dir, "easyprivacy.json"), "utf8"));
-    assert.equal(meta.sha256, require("node:crypto").createHash("sha256").update(fs.readFileSync(path.join(dir, "easyprivacy.txt"))).digest("hex"));
+    const cached = readCachedFilter(dir, FILTER_LISTS.find(spec => spec.id === "easyprivacy"));
+    const meta = cached.meta;
+    assert.equal(meta.sha256, require("node:crypto").createHash("sha256").update(cached.body).digest("hex"));
     assert.equal(meta.version, "202611210000");
     await loadFilters(dir, {fetchImpl});
     assert.equal(calls, FILTER_LISTS.length, "a fresh cache is not downloaded again");
     await loadFilters(dir, {fetchImpl, now: Date.now() / 1000 + 2 * 86400});
     assert.equal(calls, 2 * FILTER_LISTS.length, "a day-old cache is refreshed");
     // Tampering with the cached body is refused; offline, nothing replaces it.
-    fs.appendFileSync(path.join(dir, "easylist.txt"), "@@||evil-allow.example^\n");
+    fs.appendFileSync(path.join(dir, "easylist.snapshot"), "@@||evil-allow.example^\n");
     const logs = [];
-    const offline = await loadFilters(dir, {offline: true, log: (m) => logs.push(m)});
+    await assert.rejects(loadFilters(dir, {offline: true}), /Required filter EasyList/);
+    const offline = await loadFilters(dir, {offline: true, allowMissing: true, log: (m) => logs.push(m)});
     assert.ok(!offline.easylist && logs.some((m) => /SHA-256/.test(m)));
     // A wrong file (no header, wrong title, licence line gone) is never cached.
     for (const text of ["<html>not a list</html>", body("Something"), body("EasyList").replace(/! Licence:.*\n/, "")]) {
       const bad = tmp();
-      const got = await loadFilters(bad, {fetchImpl: async (url) => reply(url, url.endsWith("/easylist.txt") ? text : textFor(url)), log: () => {}});
-      assert.ok(!got.easylist && !fs.existsSync(path.join(bad, "easylist.txt")));
+      const got = await loadFilters(bad, {allowMissing: true, fetchImpl: async (url) => reply(url, url.endsWith("/easylist.txt") ? text : textFor(url)), log: () => {}});
+      assert.ok(!got.easylist && !fs.existsSync(path.join(bad, "easylist.snapshot")));
       fs.rmSync(bad, {recursive: true, force: true});
     }
     // Placement: path filters on any host -> fp-trackers, exceptions -> filter-allow, host-only -> trackerDomains.
@@ -230,28 +232,29 @@ test("URL filter lists: downloaded once a day into the build's own cache, verifi
 });
 
 test("unpinned lists: a fresh copy whose size, entries or exceptions moved by more than the cap fails the build until accepted", async () => {
-  const {loadFilters, FILTER_LISTS, LIST_CHANGE_FACTOR} = await load();
+  const {loadFilters, readCachedFilter, FILTER_LISTS, LIST_CHANGE_FACTOR} = await load();
   const dir = tmp();
   const body = (title, exceptions) => `[Adblock Plus 2.0]\n! Version: 202611210000\n! Title: ${title}\n! Licence: https://easylist.to/pages/licence.html\n` +
     Array.from({length: 20001}, (_, i) => `||t${i}.example^`).join("\n") + "\n" + Array.from({length: exceptions}, (_, i) => `@@||ok${i}.example/x`).join("\n") + "\n";
   const domains = (n) => Array.from({length: n}, (_, i) => `c${i}.click.example`).join("\n") + "\n";
   let exceptions = 100, names = 6000;
   const textFor = (url) => { const spec = FILTER_LISTS.find((f) => f.url === url); return spec.kind === "domains" ? domains(names) : body(spec.name, spec.id === "easylist" ? exceptions : 100); };
-  const fetchImpl = async (url) => ({ok: true, status: 200, url, headers: {get: () => null}, arrayBuffer: async () => Buffer.from(textFor(url))});
+  const fetchImpl = async (url) => { const result = new Response(textFor(url)); Object.defineProperty(result, "url", {value: url}); return result; };
   const day = Date.now() / 1000 + 2 * 86400;
   try {
     await loadFilters(dir, {fetchImpl});
-    const meta = JSON.parse(fs.readFileSync(path.join(dir, "easylist.json"), "utf8"));
+    const spec = FILTER_LISTS.find(item => item.id === "easylist");
+    const meta = readCachedFilter(dir, spec).meta;
     assert.equal(meta.exceptions, 100, "the counts are recorded beside the hash");
     assert.ok(meta.entries > 20000 && meta.bytes > 0);
     // Exceptions tripled overnight: refused, and the cached copy is kept as it was.
     exceptions = 100 * (LIST_CHANGE_FACTOR + 1);
     await assert.rejects(loadFilters(dir, {fetchImpl, now: day}), /EasyList: exceptions changed from 100 to 300.*--accept-list-change easylist/);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "easylist.json"), "utf8")).sha256, meta.sha256);
+    assert.equal(readCachedFilter(dir, spec).meta.sha256, meta.sha256);
     // Accepted on purpose: cached, and the new counts become the reference.
     const accepted = await loadFilters(dir, {fetchImpl, now: day, acceptChange: ["easylist"]});
     assert.ok(accepted.easylist);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "easylist.json"), "utf8")).exceptions, 300);
+    assert.equal(readCachedFilter(dir, spec).meta.exceptions, 300);
     // The click-through domain list has the same cap (it feeds cookie stripping on navigations).
     names = 6000 * 3;
     await assert.rejects(loadFilters(dir, {fetchImpl, now: day + 3 * 86400}), /AdGuard disguised click-throughs: (bytes|entries) changed/);

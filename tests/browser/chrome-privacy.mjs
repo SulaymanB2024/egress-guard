@@ -41,7 +41,7 @@ if (argv.includes("--real-filters")) {
   if (real.easyprivacy) filters.easyprivacy = {...real.easyprivacy, text: `${real.easyprivacy.text}\n${FIXTURE_FILTERS.split("\n").slice(3).join("\n")}`};
   if (real.easylist) filters.easylist = real.easylist;
 }
-const lists = loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true});
+const lists = loadLists(path.join(here, "fixtures/feeds"), {allowSmall: true, allowMissing: true});
 const built = build({out: path.join(work, "dist"), lists, filters});
 const ext = path.join(work, "dist", "chrome");
 console.log(`built: ${built.staticRules} static rules (${Object.entries(built.rulesets).map(([k, v]) => `${k} ${v}`).join(", ")})`);

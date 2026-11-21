@@ -41,11 +41,9 @@ def normalize_host(value: object) -> str | None:
     if not isinstance(value, str) or len(value) > 254:
         return None
     if "%" not in value:
-        try:
-            address = value[1:-1] if value.startswith("[") and value.endswith("]") else value
-            return ipaddress.ip_address(address).compressed
-        except ValueError:
-            pass
+        address = value[1:-1] if value.startswith("[") and value.endswith("]") else value
+        if (normalized := ip_literal(address)) is not None:
+            return normalized
     return dns_name(value)
 
 
@@ -120,7 +118,8 @@ def _expiry_valid(value: object, now: float) -> bool:
 
 def watched_paths(config_path: Path, state: Path) -> tuple[Path, ...]:
     """Every file whose contents can change a host decision's policy revision."""
-    return (config_path, state / "block.txt", state / "allow.txt", *(feed.path(state) for feed in ALL_FEEDS))
+    return (config_path, state / "block.txt", state / "allow.txt", state / "filter-controls.json",
+            state / "tracker-exceptions.json", *(feed.path(state) for feed in ALL_FEEDS))
 
 
 def policy_stamp(config_path: Path, state: Path) -> tuple:
@@ -141,6 +140,8 @@ def policy_stamp(config_path: Path, state: Path) -> tuple:
 class Policy:
     def __init__(self, config: dict, state: Path, previous: Policy | None = None) -> None:
         self.state = state
+        self.logging = dict(config.get("logging", {}))
+        self.proxy = dict(config.get("proxy", {}))
         block = config.get("block", {})
         self.feeds = selected_feeds(config)
         # Each enabled feed is validated on its own. An unusable snapshot keeps the
@@ -185,15 +186,12 @@ class Policy:
         for preset in block.get("exemption_presets", []):
             self.dashboard_hosts.update(EXEMPTION_PRESETS.get(preset, ()))
         self.block_plaintext_credentials = config.get("risk", {}).get("block_plaintext_credentials", True)
-        material = {
+        self._material = {
             "config": config,
             "manual": sorted(self.manual),
             "allow": sorted(self.allow),
             "feeds": {feed.id: getattr(self.components.get(feed.id), "sha256", None) for feed in self.feeds},
         }
-        self.revision = hashlib.sha256(
-            json.dumps(material, sort_keys=True, separators=(",", ":"), default=str).encode()
-        ).hexdigest()
         self.reload_controls()
 
     @staticmethod
@@ -225,18 +223,38 @@ class Policy:
                 "coverage": dict(self.coverage)}
 
     def reload_controls(self) -> None:
-        self.controls = _read_controls(self.state / "filter-controls.json")
-        self.exceptions = _read_controls(self.state / "tracker-exceptions.json")
+        # Include bounded, effective controls in the same receipt as feed and local
+        # rules. The runtime constructs a new Policy; it never mutates a live grant.
+        def timestamp(value):
+            # Bounds reject NaN/infinity and huge integers without float conversion.
+            return type(value) in (int, float) and 0 <= value < 2 ** 53
+
+        pause = _read_controls(self.state / "filter-controls.json").get("tracker_pause_until")
+        self.controls = {"tracker_pause_until": pause} if timestamp(pause) else {}
+        self.exceptions = {host: expiry for host, expiry in
+                           _read_controls(self.state / "tracker-exceptions.json").items()
+                           if dns_name(host) == host and timestamp(expiry)}
+        material = {**self._material, "controls": self.controls, "exceptions": self.exceptions}
+        self.revision = hashlib.sha256(
+            json.dumps(material, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        ).hexdigest()
 
     def _ip_source(self, address: str) -> tuple[str, str | None]:
         # IP literals never match a DNS suffix, only IP entries listed by an IP-capable feed.
+        parsed = ipaddress.ip_address(address)
+        equivalents = (address,)
+        if isinstance(parsed, ipaddress.IPv4Address):
+            number = int(parsed)
+            # Python releases have emitted both dotted and hexadecimal mapped text.
+            equivalents += ("::ffff:" + address, f"::ffff:{number >> 16:x}:{number & 0xffff:x}")
         for feed, names in self.ip_threats:
-            if address in names:
+            # Older verified snapshots may contain compressed mapped-IPv6 spellings.
+            if any(candidate in names for candidate in equivalents):
                 return feed.source, address
         if self.block_encrypted_dns and address in DOH_RESOLVER_IPS:
             return "doh-feed", address
         # A public address skips every hostname rule; label it so the activity shows that.
-        return ("ip-literal", address) if ipaddress.ip_address(address).is_global else ("no-match", None)
+        return ("ip-literal", address) if parsed.is_global else ("no-match", None)
 
     def _source(self, host: str, port: int | None) -> tuple[str, str | None]:
         if dns_name(host) is None:
@@ -297,7 +315,7 @@ class Policy:
             "source": source,
             "category": CATEGORIES[source],
             "matched_domain": match,
-            "can_allow": source in ALLOWABLE,
+            "can_allow": source in ALLOWABLE and dns_name(normalized) is not None,
         }
 
     def explain(self, host: str, port: int | None = None) -> dict:
@@ -317,9 +335,11 @@ class PolicyRuntime:
     """
 
     def __init__(self, load: Callable[[Policy | None], Policy], observe: Callable[[], tuple], *,
+                 apply: Callable[[Policy], None] | None = None,
                  clock: Callable[[], float] = time.monotonic, base_delay: float = 1.0,
                  max_delay: float = 60.0) -> None:
         self._load = load
+        self._apply = apply
         self._observe = observe
         self._clock = clock
         self._base_delay = base_delay
@@ -360,6 +380,12 @@ class PolicyRuntime:
         current = self.policy
         if not candidate.enforceable() and current is not None and current.enforceable():
             self._defer("replacement policy lacks verified threat or tracker data")
+            return False
+        try:
+            if self._apply is not None:
+                self._apply(candidate)
+        except (OSError, ValueError) as error:
+            self._defer((str(error) or "runtime settings could not be applied")[:160])
             return False
         self.policy = candidate
         self.applied = stamp

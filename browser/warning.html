@@ -26,11 +26,12 @@
     <button id="reveal" class="btn quiet" type="button" aria-expanded="false" aria-controls="confirm">Continue anyway…</button>
   </div>
   <div id="confirm" class="confirm" hidden>
-    <p>Opens this site once, in this tab, for up to <span id="minutes">10</span> minutes. Ads and trackers stay blocked.</p>
+    <p>Allows navigation to this exact host in this tab, with removal scheduled after <span id="minutes">10</span> minutes. Cookies are removed. Subresources, ads and trackers keep their normal blocks, so parts of the page may not work. Browser suspension can delay removal.</p>
     <button id="continue" class="btn" type="button">Open this site once</button>
   </div>
   <p id="error" class="inline-error" role="alert" hidden></p>
 </main>
+<script src="core/psl-data.js"></script>
 <script src="core/hosts.js"></script>
 <script src="core/links.js"></script>
 <script src="core/params.js"></script>

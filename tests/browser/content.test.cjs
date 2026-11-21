@@ -147,7 +147,7 @@ test("picker candidates never propose class-only selectors", () => {
   const base = {tag: "article", id: "", classes: ["card", "teaser"], attrs: [], ancestry: [{tag: "article", id: "", index: 2}, {tag: "section", id: "feed", index: 1}]};
   assert.deepEqual(picker.candidates(base), ["#feed > article:nth-of-type(2)"]);
   assert.deepEqual(picker.candidates({...base, attrs: [{name: "data-ad-slot", value: "feed-2"}]}).slice(0, 2),
-    ["article.card.teaser[data-ad-slot]", 'article.card.teaser[data-ad-slot="feed-2"]']);
+    ['article.card.teaser[data-ad-slot="feed-2"]', "article.card.teaser[data-ad-slot]"]);
   const hostile = picker.candidates({...base, ancestry: [], attrs: [{name: "data-x", value: '"><img src=x onerror=alert(1)>'}, {name: "onclick", value: "x"}]});
   assert.deepEqual(hostile, ["article.card.teaser[data-x]"]);
   assert.deepEqual(picker.candidates({tag: "div", id: "", classes: [], attrs: [], ancestry: []}), []);
@@ -165,7 +165,7 @@ test("acceptance: 'Block this element' creates a validated site rule only on a t
   // A real click on the sponsored card's heading proposes a selector that matches only sponsored cards.
   userClick(p.$("card-sponsored").children[0]);
   assert.equal(button(panel, "Create rule").hidden, false);
-  assert.match(allText(panel), /article\.card\.teaser\[data-ad-slot\]/);
+  assert.match(allText(panel), /#card-sponsored/);
   scriptClick(button(panel, "Create rule"));
   await settle();
   assert.equal(p.store.rules.length, 0, "scripted Create is ignored");
@@ -173,7 +173,7 @@ test("acceptance: 'Block this element' creates a validated site rule only on a t
   await settle();
   assert.equal(p.store.rules.length, 1);
   assert.equal(p.store.rules[0].site, "publisher.example");
-  assert.equal(p.store.rules[0].selector, "article.card.teaser[data-ad-slot]");
+  assert.equal(p.store.rules[0].selector, "#card-sponsored");
   assert.equal(p.hidden("card-sponsored"), true);
   for (const id of ["card-organic-1", "card-organic-2"]) assert.equal(p.hidden(id), false);
   assert.equal(p.ui("egress-guard-picker").length, 0, "picker closes");

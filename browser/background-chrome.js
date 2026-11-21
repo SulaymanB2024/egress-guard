@@ -35,7 +35,7 @@
   let genericOff = new Set();
   async function loadGenericOff() {
     const stored = (await C.storage.local.get(GENERIC_KEY))[GENERIC_KEY];
-    genericOff = new Set((Array.isArray(stored) ? stored : []).map((s) => hosts.siteOf(s)).filter(Boolean).slice(0, MAX_GENERIC_OFF));
+    genericOff = new Set((Array.isArray(stored) ? stored : []).filter((s) => hosts.siteOf(s) === s).slice(0, MAX_GENERIC_OFF));
   }
   // Site modes (Relaxed / Standard / Strict / No scripts) and the hosts allowed under Strict, per site. Validated on
   // load and on every change; compiled into dynamic rules by dnr.compileModes.
@@ -48,21 +48,37 @@
     // "Always open scanned links directly": off unless the user switched it on.
     out.scannedDirect = Boolean(value && value.scannedDirect === true);
     const off = value && Array.isArray(value.cleanOff) ? value.cleanOff : [];
-    out.cleanOff = [...new Set(off.filter((s) => hosts.siteOf(s) === s))].slice(0, MAX_MODE_SITES).sort();
+    out.cleanOff = [...new Set(off.filter((s) => hosts.siteOf(s) === s && hosts.canScopeSite(s)))].slice(0, MAX_MODE_SITES).sort();
     const sites = value && typeof value.sites === "object" && value.sites ? value.sites : {};
     for (const [site, mode] of Object.entries(sites).slice(0, MAX_MODE_SITES)) {
-      if (hosts.siteOf(site) === site && dnr.SITE_MODES.includes(mode)) out.sites[site] = mode;
+      if (hosts.siteOf(site) === site && hosts.canScopeSite(site) && dnr.SITE_MODES.includes(mode)) out.sites[site] = mode;
     }
     const allow = value && typeof value.allowHosts === "object" && value.allowHosts ? value.allowHosts : {};
     for (const [site, list] of Object.entries(allow).slice(0, MAX_MODE_SITES)) {
-      if (hosts.siteOf(site) !== site || !Array.isArray(list)) continue;
-      const names = [...new Set(list.map((h) => hosts.normalizeHost(h)).filter(Boolean))].slice(0, MAX_ALLOWED_HOSTS).sort();
+      if (hosts.siteOf(site) !== site || !hosts.canScopeSite(site) || !Array.isArray(list)) continue;
+      const names = [...new Set(list.map((h) => hosts.normalizeHost(h)).filter((h) => h && !hosts.isSuffixLike(h)))].slice(0, MAX_ALLOWED_HOSTS).sort();
       if (names.length) out.allowHosts[site] = names;
     }
     return out;
   }
-  async function loadModes() { modes = cleanModes((await C.storage.local.get(MODES_KEY))[MODES_KEY]); }
-  async function saveModes() { await C.storage.local.set({[MODES_KEY]: modes}); }
+  let savedModes = JSON.parse(JSON.stringify(modes));
+  async function loadModes() {
+    const raw = (await C.storage.local.get(MODES_KEY))[MODES_KEY];
+    modes = cleanModes(raw);
+    if (raw && (raw.schema !== 2 || raw.scope !== "top-level-psl-v2" || raw.psl !== hosts.psl.sha256)) {
+      modes.sites = Object.fromEntries(Object.entries(modes.sites).filter(([, mode]) => mode === "strict" || mode === "noscript"));
+      modes.allowHosts = {}; modes.cleanOff = [];
+      policy.warnings.push("Legacy relaxed modes, cleaning exemptions and host permissions were revoked for the PSL/top-level scope migration.");
+    }
+    savedModes = clone(modes);
+  }
+  async function saveModes() {
+    const next = cleanModes(modes);
+    try {
+      await C.storage.local.set({[MODES_KEY]: {...next, schema: 2, scope: "top-level-psl-v2", psl: hosts.psl.sha256}});
+      modes = next; savedModes = clone(next);
+    } catch (error) { modes = clone(savedModes); noteError(error); throw error; }
+  }
 
   // ---- timed per-site pause (popup only) ------------------------------------------------------------------------
   // Pause: for PAUSE_MINUTES the site (registrable domain) runs at Relaxed, with no element hiding and no link or
@@ -72,22 +88,31 @@
   // or end it; a running pause cannot be extended. Stored in storage.local as {site: expiresAt}.
   const PAUSE_KEY = "egressGuardPauses";
   const PAUSE_MINUTES = 15, MAX_PAUSES = 50;
-  let pauses = {};
+  let pauses = {}, savedPauses = {};
   /** Load stored pauses, dropping anything malformed or expired. Returns the sites whose pause ended while asleep. */
   async function loadPauses() {
     const stored = (await C.storage.local.get(PAUSE_KEY))[PAUSE_KEY];
     const now = Date.now();
     const ended = [];
     pauses = {};
-    for (const [site, until] of Object.entries(stored && typeof stored === "object" ? stored : {}).slice(0, MAX_PAUSES)) {
-      if (hosts.siteOf(site) !== site || !Number.isFinite(until) || until > now + PAUSE_MINUTES * 60000) continue;
+    const entries = stored && stored.schema === 2 && stored.scope === "top-level-psl-v2" && stored.items && typeof stored.items === "object" ? stored.items : {};
+    for (const [site, until] of Object.entries(entries).slice(0, MAX_PAUSES)) {
+      if (hosts.siteOf(site) !== site || !hosts.canScopeSite(site) || !Number.isFinite(until) || until > now + PAUSE_MINUTES * 60000) continue;
       if (until > now) pauses[site] = until; else ended.push(site);
     }
-    if (ended.length) await savePauses();
+    savedPauses = clone(pauses);
     return ended;
   }
-  async function savePauses() { await C.storage.local.set({[PAUSE_KEY]: pauses}); }
-  const pausedUntil = (site) => (site && pauses[site] > Date.now() ? pauses[site] : null);
+  async function savePauses() {
+    try {
+      await C.storage.local.set({[PAUSE_KEY]: {schema: 2, scope: "top-level-psl-v2", items: pauses}});
+      savedPauses = clone(pauses);
+    } catch (error) { pauses = clone(savedPauses); noteError(error); throw error; }
+  }
+  const requestedPausedUntil = (site) => (site && pauses[site] > Date.now() ? pauses[site] : null);
+  // Applied pauses stay visible until the actual allow is removed, even if its
+  // scheduled deadline passed while Chrome slept or rejected a rule update.
+  const pausedUntil = (site) => (site && applied && applied.pauses[site]) || null;
   /** End pauses whose time has come; returns their sites. */
   async function endPauses(now = Date.now()) {
     const ended = Object.keys(pauses).filter((site) => pauses[site] <= now);
@@ -97,14 +122,14 @@
   }
   /** The saved modes with every running pause laid over them: Relaxed, and cleaning off. */
   function effectiveModes() {
-    const live = Object.keys(pauses).filter((site) => pausedUntil(site));
+    const live = Object.keys(pauses).filter((site) => requestedPausedUntil(site));
     if (!live.length) return modes;
     return {...modes, sites: {...modes.sites, ...Object.fromEntries(live.map((site) => [site, "relaxed"]))},
       cleanOff: [...new Set([...modes.cleanOff, ...live])].sort()};
   }
   const savedModeFor = (site) => (site && modes.sites[site]) || modes.defaultMode;
-  const modeFor = (site) => (pausedUntil(site) ? "relaxed" : savedModeFor(site));
-  const cleaningOn = (site) => !(site && (modes.cleanOff.includes(site) || pausedUntil(site)));
+  const modeFor = (site) => applied ? ((site && applied.effectiveModes.sites[site]) || applied.effectiveModes.defaultMode) : "unknown";
+  const cleaningOn = (site) => !(site && applied && applied.effectiveModes.cleanOff.includes(site));
 
   // ---- retired: experimental fingerprint noise ----------------------------------------------------------------
   // Removed in 0.3.1: keyed by the frame's own site, it gave third-party frames a stable cross-site value, and its key
@@ -117,18 +142,13 @@
 
   // ---- click-to-load embeds: a session allow for one provider in one tab, ended when the tab navigates ----------
   const EMBED_BASE = 300000;
-  function loadEmbed(embedId, tabId, withCookies = false) {
-    return serial(async () => {
-      const list = (await C.storage.session.get("embeds")).embeds || [];
-      const prior = list.find((e) => e.tabId === tabId && e.embed === embedId);
-      if (prior && (prior.withCookies || !withCookies)) return prior;
-      const used = new Set(list.map((e) => e.id));
-      let id = prior ? prior.id : EMBED_BASE;
-      while (!prior && used.has(id)) id++;
-      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [id], addRules: [dnr.embedRule(id, embedId, tabId, {withCookies})]});
-      const entry = {id, tabId, embed: embedId, withCookies};
-      await C.storage.session.set({embeds: [...list.filter((e) => e !== prior), entry]});
-      return entry;
+  function loadEmbed(embedId, tabId, withCookies = false, site = null) {
+    return changeGrantsNow((list) => {
+      const prior = list.find((e) => e.kind === "embed" && e.tabId === tabId && e.embed === embedId && e.site === site && e.expiresAt > Date.now());
+      if (prior && (prior.withCookies || !withCookies)) return list;
+      const kept = list.filter((e) => e !== prior);
+      return [...kept, {kind: "embed", id: prior ? prior.id : nextGrantId(kept, EMBED_BASE), tabId, embed: embedId,
+        withCookies, site, createdAt: Date.now(), expiresAt: Date.now() + EMBED_MS}];
     });
   }
 
@@ -136,27 +156,12 @@
   const PASS_BASE = 200000;
   const PASS_MS = 60000;
   function addScannerPass(host, tabId) {
-    return serial(async () => {
-      const list = (await C.storage.session.get("passes")).passes || [];
-      const kept = list.filter((p) => !(p.tabId === tabId));
-      const used = new Set(kept.map((p) => p.id));
-      let id = PASS_BASE;
-      while (used.has(id)) id++;
-      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [...list.filter((p) => p.tabId === tabId).map((p) => p.id), id], addRules: [dnr.scannerPassRule(id, host, tabId)]});
-      const entry = {id, tabId, host, expiresAt: Date.now() + PASS_MS};
-      await C.storage.session.set({passes: [...kept, entry]});
-      return entry;
+    return changeGrantsNow((list) => {
+      const kept = list.filter((e) => !(e.kind === "pass" && e.tabId === tabId));
+      return [...kept, {kind: "pass", id: nextGrantId(kept, PASS_BASE), tabId, host, createdAt: Date.now(), expiresAt: Date.now() + PASS_MS}];
     });
   }
-  function dropPasses(test) {
-    return serial(async () => {
-      const list = (await C.storage.session.get("passes")).passes || [];
-      const gone = list.filter(test);
-      if (!gone.length) return;
-      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.map((p) => p.id)});
-      await C.storage.session.set({passes: list.filter((p) => !gone.includes(p))});
-    });
-  }
+  function dropPasses(test) { return changeGrants((list) => list.filter((e) => e.kind !== "pass" || !test(e))); }
 
   // ---- No scripts / Strict: a site's service workers could serve cached pages and scripts that no rule sees ------
   // Switching a site to No scripts or Strict unregisters its service workers and clears its Cache Storage for the
@@ -175,15 +180,7 @@
     await C.browsingData.remove({origins: list}, {serviceWorkers: true, cacheStorage: true});
     return {ok: true, origins: list};
   }
-  function dropEmbeds(tabId) {
-    return serial(async () => {
-      const list = (await C.storage.session.get("embeds")).embeds || [];
-      const gone = list.filter((e) => e.tabId === tabId);
-      if (!gone.length) return;
-      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.map((e) => e.id)});
-      await C.storage.session.set({embeds: list.filter((e) => e.tabId !== tabId)});
-    });
-  }
+  function dropEmbeds(tabId) { return changeGrants((list) => list.filter((e) => e.kind !== "embed" || e.tabId !== tabId)); }
 
   // ---- link and cookie cleaning counts (per tab for links, per site for cookies; session storage) ----------
   const counts = {links: new Map(), cookies: new Map()};
@@ -256,76 +253,367 @@
     C.contextMenus.onClicked.addListener((info) => { if (info.menuItemId === MENU) copyClean(info.linkUrl, info.frameUrl || info.pageUrl).catch(() => {}); });
   }
 
+  // ---- reconciled browser policy -----------------------------------------------------------
+  // A saved preference is intent. Only read-back from DNR makes it an applied receipt.
+  // Dynamic and session updates are individually atomic, not a transaction together.
+  // Revoke session permissions first, install denies, then add journaled permissions.
+  const CONTROLLER_KEY = "egressGuardController";
+  const GRANT_KEY = "egressGuardGrants";
+  const RECOVERY_ALARM = "eg-reconcile";
+  const ENDPOINT_BASE = 400000;
+  const PERSISTENT_ALLOW_BASE = 600000;
+  const MAX_GRANTS = 500;
+  const EMBED_MS = 60 * 60000;
+  const EPOCH = `${C.runtime.getManifest ? C.runtime.getManifest().version : "0.7"}:${LISTS.build || "source"}:${hosts.psl.sha256}`;
+  let loaded = false, restoredSessions = false;
   let endedWhileAsleep = [];
-  const ready = Promise.all([store.load(), loadGenericOff(), loadModes(), loadPauses().then((ended) => { endedWhileAsleep = ended; }), retireNoise().catch(() => {})]).then(async () => {
-    for (const msg of store.rejected) console.warn("Egress Guard dropped a stored entry:", msg);
-    await sync();
-    // A pause that ended while the worker was not running: tell that site's open pages to hide and clean again.
-    for (const site of endedWhileAsleep) broadcastSite(site).catch(() => {});
-  });
-
-  // ---- dynamic rules --------------------------------------------------------------
+  let grants = [], journal = null, savedReceipt = null, applied = null;
+  let endpointIds = {};
+  let lastWall = Date.now();
+  const knownTabs = new Map();
+  const policy = {state: "pending", desiredRevision: null, savedRevision: null, appliedRevision: null,
+    error: null, grantsPending: false, expirySemantics: "scheduled", warnings: [], topPartyCoverage: "scoped"};
   let syncing = Promise.resolve();
-  function sync() {
-    syncing = syncing.catch(() => {}).then(async () => {
-      store.pruneSync();
-      const compiled = dnr.compileUserState(store.rules, store.exceptions, Date.now());
-      const siteModes = dnr.compileModes(effectiveModes());
-      const existing = await C.declarativeNetRequest.getDynamicRules();
-      await C.declarativeNetRequest.updateDynamicRules({removeRuleIds: existing.map((r) => r.id), addRules: [...compiled.rules, ...siteModes.rules]});
-      sources = compiled.sources;
-      modeKinds = siteModes.kinds;
-      allowIds = new Set(compiled.rules.filter((r) => r.action.type !== "block").map((r) => r.id));
-      await schedule();
-    });
-    return syncing;
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const canonical = (v) => JSON.stringify(v, function (key, value) {
+    if (value && typeof value === "object" && !Array.isArray(value)) return Object.fromEntries(Object.keys(value).sort().map((k) => [k, value[k]]));
+    return value;
+  });
+  const sameRules = (a, b) => canonical([...a].sort((x, y) => x.id - y.id)) === canonical([...b].sort((x, y) => x.id - y.id));
+  async function digest(value) {
+    const bytes = Uint8Array.from(unescape(encodeURIComponent(canonical(value))), (c) => c.charCodeAt(0));
+    return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
   }
-
-  async function schedule() {
-    await C.alarms.clear(ALARM);
-    const passes = (await C.storage.session.get("passes")).passes || [];
-    const times = [store.nextExpiry(), ...(await continues()).map((c) => c.expiresAt), ...passes.map((x) => x.expiresAt), ...Object.values(pauses)].filter((t) => t !== null && t !== undefined);
-    if (times.length) C.alarms.create(ALARM, {when: Math.max(Math.min(...times), Date.now() + 1000)});
-  }
-
-  // ---- "continue once" session rules --------------------------------------------
-  async function continues() { return (await C.storage.session.get("continues")).continues || []; }
-  async function saveContinues(list) { await C.storage.session.set({continues: list}); }
-  const ruleIds = (c) => [c.id, c.id + 1];       // each continue is two session rules (dnr.continueRules)
-
-  // Read-modify-write of the continue list is serialised, so two clicks never pick the same rule id.
-  let continuing = Promise.resolve();
+  const noteError = (error) => { policy.state = "degraded"; policy.error = String(error && error.message || error); };
   function serial(fn) {
-    const run = continuing.catch(() => {}).then(fn);
-    continuing = run;
+    const run = syncing.catch(() => {}).then(fn);
+    syncing = run;
     return run;
   }
 
-  function addContinue(host, tabId) {
-    return serial(async () => {
-      const list = await continues();
-      const replaced = list.filter((c) => c.host === host && c.tabId === tabId);
-      const kept = list.filter((c) => !replaced.includes(c));
-      const used = new Set(kept.flatMap(ruleIds));
-      let id = CONTINUE_BASE;
-      while (used.has(id) || used.has(id + 1)) id += 2;
-      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [...replaced.flatMap(ruleIds), id, id + 1], addRules: dnr.continueRules(id, host, tabId)});
-      const entry = {id, host, tabId, expiresAt: Date.now() + CONTINUE_MINUTES * 60000};
-      await saveContinues([...kept, entry]);
-      await schedule();
-      return entry;
-    });
+  async function loadState() {
+    await Promise.all([store.load(), loadGenericOff(), loadModes(), loadPauses().then((ended) => { endedWhileAsleep = ended; }), retireNoise().catch(() => {})]);
+    const [session, local] = await Promise.all([C.storage.session.get(GRANT_KEY), C.storage.local.get(CONTROLLER_KEY)]);
+    journal = session[GRANT_KEY]; savedReceipt = local[CONTROLLER_KEY];
+    if (savedReceipt && savedReceipt.schema === 2 && Number.isFinite(savedReceipt.observedAt)) lastWall = Math.max(savedReceipt.observedAt, Number(savedReceipt.clockHighWater) || 0);
+    for (const msg of store.rejected) if (!policy.warnings.includes(msg)) policy.warnings.push(msg);
+    if (savedReceipt && savedReceipt.epoch !== EPOCH) {
+      store.exceptions = []; pauses = {};
+      policy.warnings.push("Temporary permissions were revoked after an extension or policy-bundle update.");
+    }
+    // Complete the conservative migration before any newly compiled permissions.
+    await Promise.all([store.save(), saveModes(), savePauses()]);
+    loaded = true;
   }
 
-  function dropContinues(test) {
-    return serial(async () => {
-      const list = await continues();
-      const gone = list.filter(test);
-      if (!gone.length) return;
-      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.flatMap(ruleIds)});
-      await saveContinues(list.filter((c) => !gone.includes(c)));
+  function rulesForGrant(entry) {
+    if (entry.kind === "continue") return dnr.continueRules(entry.id, entry.host, entry.tabId);
+    if (entry.kind === "pass") return [dnr.scannerPassRule(entry.id, entry.host, entry.tabId)];
+    if (entry.kind === "embed") return [dnr.embedRule(entry.id, entry.embed, entry.tabId, {withCookies: entry.withCookies, topSite: entry.site})];
+    throw new Error("Unknown permission kind.");
+  }
+
+  function validGrant(entry, now) {
+    if (!entry || typeof entry !== "object" || !Number.isInteger(entry.id) || !Number.isInteger(entry.tabId) || entry.tabId < 0 ||
+        !Number.isFinite(entry.createdAt) || !Number.isFinite(entry.expiresAt) || entry.createdAt > now || entry.expiresAt <= now) return false;
+    const limits = {continue: CONTINUE_MINUTES * 60000, pass: PASS_MS, embed: EMBED_MS};
+    if (!limits[entry.kind] || entry.expiresAt - entry.createdAt > limits[entry.kind] || entry.expiresAt <= entry.createdAt) return false;
+    const ranges = {continue: [CONTINUE_BASE, PASS_BASE], pass: [PASS_BASE, EMBED_BASE], embed: [EMBED_BASE, ENDPOINT_BASE]};
+    if (entry.id < ranges[entry.kind][0] || entry.id + 1 >= ranges[entry.kind][1]) return false;
+    if (entry.kind === "embed" && (hosts.siteOf(entry.site) !== entry.site || typeof entry.withCookies !== "boolean")) return false;
+    if (entry.kind !== "embed" && hosts.normalizeHost(entry.host) !== entry.host) return false;
+    try { rulesForGrant(entry); return true; } catch { return false; }
+  }
+
+  async function eligibleGrant(entry, tabs, now) {
+    if (!validGrant(entry, now)) return false;
+    const tab = tabs.find((t) => t.id === entry.tabId);
+    if (!tab) return false;
+    const host = hosts.hostOfUrl(tab.url || "");
+    if (entry.kind === "embed") {
+      if (hosts.siteOf(host) !== entry.site) return false;
+      // Any provider that has become a listed threat loses ordinary load/cookie grants.
+      for (const name of dnr.EMBEDS.find((e) => e.id === entry.embed).domains) if (await isThreat(name)) return false;
+    } else if (entry.kind === "pass") {
+      if (await isThreat(entry.host)) return false;
+      // A pass is consumed at the first committed web navigation. Only the interstitial may keep it.
+      if (!String(tab.url || "").startsWith(OWN + "unwrap.html")) return false;
+    } else {
+      if (host !== entry.host) {
+        const target = String(tab.url || "").startsWith(OWN + "warning.html") && dnr.parseWarning(tab.url);
+        if (!target || target.host !== entry.host) return false;
+      }
+      if (!(await isThreat(entry.host))) return false;
+    }
+    return true;
+  }
+
+  async function readTabs() {
+    const tabs = await C.tabs.query({});
+    // A trusted sender can be more recent than tabs.query during navigation. It is
+    // never restored across worker lifetimes; removal/navigation events clear it.
+    for (const [id, tab] of knownTabs) if (!tabs.some((t) => t.id === id)) tabs.push(tab);
+    return tabs;
+  }
+
+  function checkQuota(dynamicRules, sessionRules) {
+    const D = C.declarativeNetRequest;
+    const unsafe = dynamicRules.filter((r) => !["block", "allow", "allowAllRequests", "upgradeScheme"].includes(r.action.type)).length;
+    if (dynamicRules.length > (D.MAX_NUMBER_OF_DYNAMIC_RULES || 30000) || unsafe > (D.MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES || 5000)) throw new Error("Policy exceeds Chrome's dynamic-rule capacity. Reduce site overrides; the previous applied rules remain active.");
+    if (sessionRules.length > (D.MAX_NUMBER_OF_SESSION_RULES || 5000)) throw new Error("Policy exceeds Chrome's session-rule capacity. Revoke an unused permission first.");
+    for (const list of [dynamicRules, sessionRules]) if (list.filter((r) => r.condition.regexFilter).length > (D.MAX_NUMBER_OF_REGEX_RULES || 1000)) throw new Error("Policy exceeds Chrome's regular-expression rule capacity.");
+  }
+
+  async function revokeSessionOnFailure() {
+    // A rejected metadata write must never leave a successful, untracked allow.
+    grants = []; endpointIds = {};
+    const hadEndpoints = store.exceptions.length > 0;
+    store.exceptions = [];
+    policy.sessionRevision = null; policy.appliedRevision = null;
+    if (applied) delete applied.sessionDigest;
+    try {
+      const current = await C.declarativeNetRequest.getSessionRules();
+      if (current.length) await C.declarativeNetRequest.updateSessionRules({removeRuleIds: current.map((r) => r.id)});
+      policy.grantsPending = (await C.declarativeNetRequest.getSessionRules()).length > 0;
+    } catch { policy.grantsPending = true; }
+    if (hadEndpoints) await store.save().catch(() => {});
+  }
+
+  function eligibleEndpoint(exc, tabs) {
+    if (!Number.isInteger(exc.tabId) || exc.tabId < 0) return false;
+    const tab = tabs.find((t) => t.id === exc.tabId);
+    const top = tab && hosts.hostOfUrl(tab.url || "");
+    return Boolean(top && hosts.inSiteScope(top, exc.site));
+  }
+
+  async function saveEndpointRevocations(kept) {
+    if (kept.length === store.exceptions.length) return;
+    store.exceptions = kept;
+    await store.save().catch((error) => { policy.warnings.push(`Local endpoint deletion failed: ${String(error.message || error)}. Consult the policy receipt for browser revocation status.`); });
+  }
+
+  async function revalidatePermissions(now, rollback, tabs) {
+    const keepRules = [], keepExceptions = [];
+    for (const rule of store.rules) {
+      if (rule.expiresAt !== undefined && rule.expiresAt <= now) continue;
+      if (rule.action === "allow" && (rollback || await isThreat(rule.host))) continue;
+      keepRules.push(rule);
+    }
+    for (const exc of store.exceptions) {
+      if (!eligibleEndpoint(exc, tabs) || rollback || exc.expiresAt <= now || (exc.createdAt !== undefined && exc.createdAt > now) || await isThreat(exc.host)) continue;
+      keepExceptions.push(exc);
+    }
+    if (keepRules.length !== store.rules.length || keepExceptions.length !== store.exceptions.length) {
+      // Revocation takes effect even if persistence fails. Startup revalidates again.
+      store.rules = keepRules; store.exceptions = keepExceptions;
+      await store.save().catch((error) => { policy.warnings.push(`Revocations could not be saved: ${String(error.message || error)}`); });
+    }
+    const nextModes = clone(modes);
+    let changed = false;
+    for (const [site, names] of Object.entries(nextModes.allowHosts)) {
+      const keep = [];
+      for (const name of names) if (!(await isThreat(name))) keep.push(name);
+      if (keep.length !== names.length) { changed = true; if (keep.length) nextModes.allowHosts[site] = keep; else delete nextModes.allowHosts[site]; }
+    }
+    if (changed) {
+      modes = nextModes;
+      await saveModes().catch((error) => { modes = nextModes; policy.warnings.push(`Threat reclassification could not be saved: ${String(error.message || error)}`); });
+    }
+    if (rollback) {
+      grants = []; pauses = {};
+      policy.warnings.push("The system clock moved backwards; temporary permissions were revoked.");
+      await savePauses().catch(() => { pauses = {}; });
+    }
+    let expiredPause = false;
+    for (const [site, until] of Object.entries(pauses)) if (until <= now) { delete pauses[site]; expiredPause = true; }
+    if (expiredPause) {
+      const desired = clone(pauses);
+      await savePauses().catch((error) => { pauses = desired; policy.warnings.push(`Expired pauses could not be saved: ${String(error.message || error)}`); });
+    }
+  }
+
+  async function reconcile() {
+    const D = C.declarativeNetRequest;
+    const now = Date.now(), rollback = now < lastWall - 1000;
+    lastWall = Math.max(lastWall, now);
+    policy.state = "pending"; policy.error = null;
+    const [tabs, currentDynamic, currentSession] = await Promise.all([readTabs(), D.getDynamicRules(), D.getSessionRules()]);
+    if (!applied && savedReceipt && savedReceipt.schema === 2 && savedReceipt.epoch === EPOCH &&
+        savedReceipt.dynamicDigest === await digest(currentDynamic)) applied = savedReceipt;
+    await revalidatePermissions(now, rollback, tabs);
+    const validJournal = journal && journal.schema === 2 && journal.epoch === EPOCH && journal.phase === "applied" && !rollback &&
+      Number.isFinite(journal.observedAt) && journal.observedAt <= now + 1000;
+    if (!restoredSessions) {
+      grants = []; endpointIds = {};
+      const restored = [], usedEndpointIds = new Set();
+      const groups = validJournal && Array.isArray(journal.endpoints) ? journal.endpoints : [];
+      for (const exc of store.exceptions) {
+        const group = groups.find((g) => g && g.id === exc.id && canonical(g.exception) === canonical(exc));
+        if (!group || !Number.isInteger(group.ruleId) || group.ruleId < ENDPOINT_BASE || group.ruleId + 1 >= dnr.MODE_BASE ||
+            group.ruleId % 2 !== 0 || usedEndpointIds.has(group.ruleId) || usedEndpointIds.has(group.ruleId + 1)) continue;
+        const expected = dnr.compileUserState([], [exc], now, {firstId: group.ruleId}).rules;
+        if (expected.length !== 2 || !expected.every((r) => currentSession.some((actual) => canonical(actual) === canonical(r)))) continue;
+        restored.push(exc); endpointIds[exc.id] = group.ruleId;
+        usedEndpointIds.add(group.ruleId); usedEndpointIds.add(group.ruleId + 1);
+      }
+      // No journal (fresh browser session), an interrupted intent, a missing rule
+      // or a missing sanitation pair all require a fresh explicit repair action.
+      await saveEndpointRevocations(restored);
+      if (validJournal && Array.isArray(journal.entries)) {
+        const ids = new Set();
+        for (const entry of journal.entries.slice(0, MAX_GRANTS)) {
+          if (!(await eligibleGrant(entry, tabs, now))) continue;
+          const wanted = rulesForGrant(entry);
+          if (wanted.some((r) => ids.has(r.id))) continue;
+          // Never resurrect a missing/revoked grant from stale metadata. In-flight
+          // intents and partially installed groups are discarded on worker restart.
+          if (!wanted.every((r) => currentSession.some((actual) => canonical(actual) === canonical(r)))) continue;
+          grants.push(entry); wanted.forEach((r) => ids.add(r.id));
+        }
+      }
+      restoredSessions = true;
+    } else {
+      const keep = [];
+      for (const entry of grants) if (await eligibleGrant(entry, tabs, now)) keep.push(entry);
+      grants = keep;
+    }
+    const tabIdsBySite = {};
+    for (const tab of tabs) {
+      const host = hosts.hostOfUrl(tab.url || "");
+      if (host && Number.isInteger(tab.id) && tab.id >= 0) (tabIdsBySite[host] ||= []).push(tab.id);
+    }
+    const topSites = [...new Set(Object.keys(tabIdsBySite).map((h) => hosts.siteOf(h)).filter(Boolean))].sort();
+    const compiled = dnr.compileUserState(store.rules.filter((r) => r.action !== "allow"), [], now);
+    const persistent = dnr.compileUserState(store.rules.filter((r) => r.action === "allow"), [], now, {firstId: PERSISTENT_ALLOW_BASE, tabIdsBySite});
+    endpointIds = Object.fromEntries(store.exceptions.filter((exc) => Number.isInteger(endpointIds[exc.id])).map((exc) => [exc.id, endpointIds[exc.id]]));
+    const usedEndpoints = new Set(Object.values(endpointIds).flatMap((id) => [id, id + 1]));
+    const endpointRules = [], endpointGroups = [];
+    for (const exc of store.exceptions) {
+      if (!endpointIds[exc.id]) {
+        let id = ENDPOINT_BASE;
+        while (usedEndpoints.has(id) || usedEndpoints.has(id + 1)) id += 2;
+        endpointIds[exc.id] = id; usedEndpoints.add(id); usedEndpoints.add(id + 1);
+      }
+      const ruleId = endpointIds[exc.id];
+      const pair = dnr.compileUserState([], [exc], now, {firstId: ruleId, tabIdsBySite}).rules;
+      if (pair.length !== 2) throw new Error("The source tab no longer matches the endpoint permission.");
+      endpointRules.push(...pair);
+      endpointGroups.push({id: exc.id, ruleId, exception: clone(exc)});
+    }
+    const requestedModes = clone(effectiveModes());
+    const siteModes = dnr.compileModes(requestedModes, {topSites});
+    const wantedDynamic = [...compiled.rules, ...siteModes.rules];
+    const wantedSession = [...grants.flatMap(rulesForGrant), ...persistent.rules, ...endpointRules];
+    const snapshot = {schema: 2, epoch: EPOCH, modes: clone(modes), effectiveModes: requestedModes, pauses: clone(pauses), rules: store.snapshot(), topSites};
+    const revision = await digest({...snapshot, grants, dynamic: wantedDynamic, session: wantedSession});
+    policy.desiredRevision = revision;
+    policy.topPartyCoverage = modes.defaultMode === "strict" ? "current-tabs-with-initiator-backstop" : "explicit-top-sites";
+    checkQuota(wantedDynamic, wantedSession);
+
+    // Revocations precede permission additions and dynamic changes. Unknown rules,
+    // including rules from older extension versions, are removed unconditionally.
+    const remove = currentSession.filter((old) => !wantedSession.some((r) => canonical(r) === canonical(old))).map((r) => r.id);
+    if (remove.length) await D.updateSessionRules({removeRuleIds: remove});
+    if (!sameRules(currentDynamic, wantedDynamic)) await D.updateDynamicRules({removeRuleIds: currentDynamic.map((r) => r.id), addRules: wantedDynamic});
+    const checkedDynamic = await D.getDynamicRules();
+    if (!sameRules(checkedDynamic, wantedDynamic)) throw new Error("Chrome did not confirm the requested dynamic policy.");
+    // Dynamic modes are independently confirmed even if a later session/storage step fails.
+    applied = {...snapshot, revision, dynamicDigest: await digest(checkedDynamic), observedAt: now, clockHighWater: lastWall};
+    policy.dynamicRevision = revision; policy.appliedRevision = null;
+    sources = compiled.sources; modeKinds = siteModes.kinds;
+    allowIds = new Set(compiled.rules.filter((r) => r.action.type !== "block").map((r) => r.id));
+
+    const intent = {schema: 2, epoch: EPOCH, phase: "intent", revision, observedAt: now, entries: clone(grants), endpoints: endpointGroups};
+    await C.storage.session.set({[GRANT_KEY]: intent});
+    policy.savedRevision = revision;
+    const beforeAdd = await D.getSessionRules();
+    if (!sameRules(beforeAdd, wantedSession)) await D.updateSessionRules({removeRuleIds: beforeAdd.map((r) => r.id), addRules: wantedSession});
+    const checkedSession = await D.getSessionRules();
+    if (!sameRules(checkedSession, wantedSession)) throw new Error("Chrome did not confirm the requested session permissions.");
+    journal = {...intent, phase: "applied"};
+    await C.storage.session.set({[GRANT_KEY]: journal});
+    await C.storage.session.remove(["continues", "passes", "embeds"]); // superseded, never trusted for restoration
+    applied = {...applied, sessionDigest: await digest(checkedSession)};
+    await C.storage.local.set({[CONTROLLER_KEY]: applied});
+    policy.appliedRevision = revision; policy.sessionRevision = revision; policy.state = "applied"; policy.error = null; policy.grantsPending = false;
+    policy.warnings = [...new Set(policy.warnings)].slice(-20);
+    await schedule();
+  }
+
+  async function apply() {
+    try {
+      if (!loaded) await loadState();
+      await reconcile();
+      for (const site of endedWhileAsleep.splice(0)) await broadcastSite(site);
+    } catch (error) {
+      noteError(error);
+      await revokeSessionOnFailure();
+      // If even loading preferences failed, strip legacy permissive dynamic rules;
+      // retain blocks/headers. No unknown stored permission is trusted by default.
+      if (!loaded) {
+        try {
+          const current = await C.declarativeNetRequest.getDynamicRules();
+          const permissive = current.filter((r) => ["allow", "allowAllRequests"].includes(r.action.type));
+          if (permissive.length) await C.declarativeNetRequest.updateDynamicRules({removeRuleIds: permissive.map((r) => r.id)});
+        } catch { policy.grantsPending = true; }
+      }
+      await C.alarms.create(RECOVERY_ALARM, {delayInMinutes: 1, periodInMinutes: 1});
+      throw error;
+    }
+  }
+  function sync() { return serial(apply); }
+  // Initialization never permanently poisons the message handlers. A recovery
+  // alarm and the popup's Retry run the same idempotent reconciliation again.
+  const ready = sync().catch(() => undefined);
+
+  async function schedule() {
+    await C.alarms.clear(ALARM);
+    const now = Date.now();
+    const times = [...store.rules, ...store.exceptions, ...grants].map((x) => x.expiresAt)
+      .concat(Object.values(pauses)).filter((t) => Number.isFinite(t) && t > now);
+    if (times.length) await C.alarms.create(ALARM, {when: Math.max(Math.min(...times), now + 1000)});
+    await C.alarms.create(RECOVERY_ALARM, {delayInMinutes: 1, periodInMinutes: 1});
+  }
+
+  async function continues() { return grants.filter((entry) => entry.kind === "continue").map(clone); }
+  const ruleIds = (entry) => rulesForGrant(entry).map((r) => r.id);
+  async function changeGrantsNow(change) {
+      if (!loaded) await loadState();
+      const before = grants.map(clone);
+      const next = change(before);
+      const requested = next.filter((entry) => !before.some((old) => canonical(old) === canonical(entry)));
+      if (next.length > MAX_GRANTS) throw new Error("Too many active temporary permissions.");
+      grants = next;
+      await apply();
+      if (requested.some((entry) => !grants.some((actual) => canonical(actual) === canonical(entry)))) {
+        throw new Error("The permission was refused: its tab changed, its deadline passed, or the provider is now a threat. Reload the page and review the request.");
+      }
+  }
+  function changeGrants(change) { return serial(() => changeGrantsNow(change)); }
+  async function dropEndpointsNow(test) {
+    const kept = store.exceptions.filter((exc) => !test(exc));
+    const changed = kept.length !== store.exceptions.length;
+    if (!changed) return false;
+    await saveEndpointRevocations(kept);
+    await apply();
+    return true;
+  }
+  function dropEndpoints(test) { return serial(() => dropEndpointsNow(test)); }
+
+  const nextGrantId = (list, base, width = 1) => {
+    const used = new Set(list.flatMap(ruleIds));
+    let id = base;
+    while (Array.from({length: width}, (_, i) => id + i).some((n) => used.has(n))) id += width;
+    return id;
+  };
+  function addContinue(host, tabId) {
+    return changeGrantsNow((list) => {
+      const kept = list.filter((e) => !(e.kind === "continue" && e.tabId === tabId));
+      return [...kept, {kind: "continue", id: nextGrantId(kept, CONTINUE_BASE, 2), host, tabId,
+        createdAt: Date.now(), expiresAt: Date.now() + CONTINUE_MINUTES * 60000}];
     });
   }
+  function dropContinues(test) { return changeGrants((list) => list.filter((e) => e.kind !== "continue" || !test(e))); }
 
   // ---- is a host on the bundled malware and phishing list? ---------------------------------
   // Unpacked builds ask Chrome itself (testMatchOutcome). Packed builds lack that API, so the worker reads its own
@@ -448,18 +736,27 @@
   if (C.action && C.action.setBadgeBackgroundColor) C.action.setBadgeBackgroundColor({color: "#19382e"}).catch(() => {});
 
   C.tabs.onUpdated.addListener((tabId, info, tab) => {
+    if (typeof info.url === "string") {
+      knownTabs.set(tabId, {id: tabId, url: info.url});
+      const top = hosts.hostOfUrl(info.url);
+      dropEndpoints((exc) => exc.tabId === tabId && !(top && hosts.inSiteScope(top, exc.site))).catch(() => {});
+    }
+    else if (tab && typeof tab.url === "string") knownTabs.set(tabId, {id: tabId, url: tab.url});
     if (info.status === "loading") resetTab(tabId, (tab && tab.url) || info.url).catch(() => {});
     // A loaded embed is for that page only.
     if (info.status === "loading") dropEmbeds(tabId).catch(() => {});
     if (typeof info.url === "string" && !info.url.startsWith(OWN)) {
       // A "continue once" exception ends when the tab leaves the host it was granted for.
       const host = hosts.hostOfUrl(info.url);
-      dropContinues((c) => c.tabId === tabId && !(host && hosts.withinScope(host, c.host))).catch(() => {});
+      dropContinues((c) => c.tabId === tabId && host !== c.host).catch(() => {});
       // A scanner pass is for one navigation: once the tab commits any web address (the scanner itself, normally), it is used.
       dropPasses((x) => x.tabId === tabId).catch(() => {});
     }
+    if (typeof info.url === "string" || info.status === "loading") sync().catch(() => {});
   });
   C.tabs.onRemoved.addListener((tabId) => {
+    knownTabs.delete(tabId);
+    dropEndpoints((exc) => exc.tabId === tabId).catch(() => {});
     logs.delete(tabId);
     carried.delete(tabId);
     counts.links.delete(tabId);
@@ -491,16 +788,14 @@
 
   C.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name === REFRESH_ALARM) { await reloadIfRebuilt(); return; }
-    if (alarm.name !== ALARM) return;
+    if (alarm.name !== ALARM && alarm.name !== RECOVERY_ALARM) return;
     await ready;
-    const now = Date.now();
-    await dropContinues((c) => c.expiresAt <= now);
-    await dropPasses((x) => x.expiresAt <= now);
-    const ended = await endPauses(now);
-    const pruned = await store.prune();
-    if (pruned || ended.length) await sync(); else await schedule();
-    if (pruned) await broadcast();
-    for (const site of ended) await broadcastSite(site);
+    const before = applied ? Object.keys(applied.pauses) : [];
+    await sync().catch(() => {});
+    if (policy.state === "applied") {
+      for (const site of before) if (!pausedUntil(site)) await broadcastSite(site);
+      await broadcast();
+    }
   });
 
   // ---- messaging -------------------------------------------------------------------
@@ -546,10 +841,12 @@
     return Object.entries(LISTS.lists || {}).map(([id, meta]) => ({id, ...meta}));
   }
 
-  async function handle(message, sender) {
+  async function handleMessage(message, sender) {
     await ready;
     if (!message || typeof message !== "object") return {error: "Bad message."};
     if (sender.id !== C.runtime.id) return {error: "Unknown sender."};
+    if ((!loaded || !restoredSessions) && message.type !== "popup-state" && message.type !== "retry-policy") await apply();
+    if (sender.tab && Number.isInteger(sender.tab.id) && sender.frameId === 0 && typeof sender.url === "string") knownTabs.set(sender.tab.id, {id: sender.tab.id, url: sender.url});
     const pageHost = senderTopHost(sender);
     switch (message.type) {
       case "page-rules":
@@ -564,7 +861,7 @@
       }
       case "undo-cosmetic": {
         const rule = store.rules.find((r) => r.id === message.id);
-        if (!pageHost || !rule || rule.kind !== "cosmetic" || !hosts.withinScope(pageHost, rule.site)) return {error: "No such rule."};
+        if (!pageHost || !rule || rule.kind !== "cosmetic" || !hosts.inSiteScope(pageHost, rule.site)) return {error: "No such rule."};
         await store.removeRule(rule.id); await afterChange();
         return {ok: true};
       }
@@ -573,10 +870,16 @@
         const mode = modeFor(hosts.siteOf(pageHost));
         return {clean: cleaningOn(hosts.siteOf(pageHost)), mode, embeds: mode === "strict" || mode === "noscript" ? dnr.EMBEDS.map((e) => ({id: e.id, name: e.name, domains: [...e.domains]})) : []};
       }
+      case "cosmetic-style": {
+        if (!pageHost || typeof message.on !== "boolean" || !C.scripting || !root.EGCosmeticList) return {error: "Cosmetic stylesheet is unavailable."};
+        const details = {target: {tabId: sender.tab.id, frameIds: [0]}, css: root.EGCosmeticList.stylesheet(), origin: "USER"};
+        if (message.on) await C.scripting.insertCSS(details); else await C.scripting.removeCSS(details);
+        return {ok: true, on: message.on};
+      }
       case "load-embed": {
         if (!pageHost || !sender.tab || !Number.isInteger(sender.tab.id)) return {error: "Not a page."};
         if (!dnr.EMBEDS.some((e) => e.id === message.embed)) return {error: "Bad message."};
-        await loadEmbed(message.embed, sender.tab.id, message.cookies === true);
+        await loadEmbed(message.embed, sender.tab.id, message.cookies === true, hosts.siteOf(pageHost));
         return {ok: true};
       }
       case "unwrap-config": {
@@ -637,35 +940,41 @@
     }
     if (!fromPopup(sender)) return {error: "Not allowed from a page."};
     switch (message.type) {
+      case "retry-policy": {
+        await apply(); await broadcast();
+        return {ok: true, policy: {...policy}, coverage: LISTS.coverage || {complete: false, missing: ["build metadata"]}};
+      }
       case "popup-state": {
         const host = hosts.hostOfUrl(message.tabUrl);
         const lists = listsSummary();
-        if (!host) return {site: null, lists};
+        if (!host) return {site: null, lists, policy: {...policy}, coverage: LISTS.coverage || {complete: false, missing: ["build metadata"]}};
         const now = Date.now();
         const active = store.activeFor(host);
         const report = await blockedReport(message.tabId);
         return {
           host, site: hosts.siteOf(host), lists, ...report, generic: !genericOff.has(hosts.siteOf(host)),
-          rebuilt: Boolean((await C.storage.session.get("rebuilt")).rebuilt),
+          rebuilt: Boolean((await C.storage.session.get("rebuilt").catch(() => ({}))).rebuilt),
           requestRules: active.requestRules.map(plain), cosmeticRules: active.cosmeticRules.map(plain),
-          exceptions: active.exceptions.map((e) => ({...e, msLeft: Math.max(0, e.expiresAt - now)})),
+          exceptions: active.exceptions.filter((e) => e.tabId === message.tabId).map((e) => ({...e, msLeft: Math.max(0, e.expiresAt - now)})),
           types: rulesApi.RESOURCE_TYPES,
           categories: Object.fromEntries(Object.entries(dnr.CATEGORIES).filter(([, v]) => v.label).map(([k, v]) => [k, v.label])),
-          mode: modeFor(hosts.siteOf(host)), siteMode: modes.sites[hosts.siteOf(host)] || null, defaultMode: modes.defaultMode,
+          policy: {...policy}, coverage: LISTS.coverage || {complete: false, missing: ["build metadata"]},
+          mode: modeFor(hosts.siteOf(host)), siteMode: applied ? applied.modes.sites[hosts.siteOf(host)] || null : null, defaultMode: applied ? applied.modes.defaultMode : "unknown",
+          requestedMode: savedModeFor(hosts.siteOf(host)), requestedDefaultMode: modes.defaultMode,
           paused: pausedUntil(hosts.siteOf(host)), resumeMode: savedModeFor(hosts.siteOf(host)),
-          strictAllowed: [...(modes.allowHosts[hosts.siteOf(host)] || [])],
+          strictAllowed: [...(applied && applied.modes.allowHosts[hosts.siteOf(host)] || [])],
           scannedDirect: modes.scannedDirect,
-          cleaning: {on: !modes.cleanOff.includes(hosts.siteOf(host)), links: await countsReady.then(() => counts.links.get(message.tabId) || 0),
+          cleaning: {on: cleaningOn(hosts.siteOf(host)), links: await countsReady.then(() => counts.links.get(message.tabId) || 0),
             cookies: counts.cookies.get(hosts.siteOf(host)) || 0},
         };
       }
       case "set-clean": {
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
-        if (!site || typeof message.on !== "boolean") return {error: "Bad message."};
+        if (!site || !hosts.canScopeSite(site) || typeof message.on !== "boolean") return {error: "Bad message."};
         const off = new Set(modes.cleanOff);
         if (message.on) off.delete(site); else if (off.size < MAX_MODE_SITES) off.add(site); else return {error: "Too many sites."};
         modes.cleanOff = [...off].sort();
-        await saveModes(); await sync();
+        await saveModes(); await apply();
         const tabs = await C.tabs.query({url: ["http://*/*", "https://*/*"]});
         for (const t of tabs) if (hosts.siteOf(hosts.hostOfUrl(t.url) || "") === site) C.tabs.sendMessage(t.id, {type: "clean-enabled", on: message.on}).catch(() => {});
         return {ok: true, on: message.on};
@@ -673,10 +982,10 @@
       case "copy-clean": return copyClean(message.url, message.tabUrl);
       case "pause-site": case "resume-site": {
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
-        if (!site) return {error: "Open a web page first."};
+        if (!site || !hosts.canScopeSite(site)) return {error: "Open a web page with a safely scoped registrable site first."};
         if (message.type === "pause-site") {
           // Fixed length; a running pause is not extended (Resume, then Pause again, starts a new one).
-          if (pausedUntil(site)) return {error: "This site is already paused.", until: pausedUntil(site)};
+          if (requestedPausedUntil(site)) return {error: "This site is already paused.", until: requestedPausedUntil(site)};
           await endPauses();
           if (Object.keys(pauses).length >= MAX_PAUSES) return {error: "Too many sites are paused."};
           pauses[site] = Date.now() + PAUSE_MINUTES * 60000;
@@ -684,23 +993,23 @@
           if (!(site in pauses)) return {ok: true, site, until: null};
           delete pauses[site];
         }
-        await savePauses(); await sync(); await broadcastSite(site);
+        await savePauses(); await apply(); await broadcastSite(site);
         return {ok: true, site, until: pausedUntil(site)};
       }
       case "set-scanned-direct": {
         if (typeof message.on !== "boolean") return {error: "Bad message."};
         modes.scannedDirect = message.on;
-        await saveModes();
+        await saveModes(); await apply();
         return {ok: true, on: modes.scannedDirect};
       }
       case "set-mode": {
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
-        if (!site) return {error: "Open a web page first."};
+        if (!site || !hosts.canScopeSite(site)) return {error: "Open a web page with a safely scoped registrable site first."};
         if (message.mode !== "default" && !dnr.SITE_MODES.includes(message.mode)) return {error: "Bad message."};
         if (message.mode === "default") delete modes.sites[site];
         else if (Object.keys(modes.sites).length >= MAX_MODE_SITES && !modes.sites[site]) return {error: "Too many sites have their own mode."};
         else modes.sites[site] = message.mode;
-        await saveModes(); await sync();
+        await saveModes(); await apply();
         // Rules cannot see what a service worker answers from its cache: clear the site's workers and caches.
         const mode = modeFor(site);
         const cleared = mode === "noscript" || mode === "strict" ? await clearWorkers(site).catch(() => ({ok: false, origins: []})) : null;
@@ -709,19 +1018,20 @@
       case "set-default-mode": {
         if (message.mode !== "standard" && message.mode !== "strict") return {error: "Bad message."};
         modes.defaultMode = message.mode;
-        await saveModes(); await sync();
+        await saveModes(); await apply();
         return {ok: true, defaultMode: modes.defaultMode};
       }
       case "strict-allow": case "strict-unallow": {
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
         const target = hosts.normalizeHost(message.host);
-        if (!site || !target) return {error: "Bad message."};
+        if (!site || !hosts.canScopeSite(site) || !target || hosts.isSuffixLike(target)) return {error: "Choose a hostname below a public suffix."};
+        if (message.type === "strict-allow" && !modes.allowHosts[site] && Object.keys(modes.allowHosts).length >= MAX_MODE_SITES) return {error: "Too many sites have allowed hosts."};
         if (message.type === "strict-allow" && await isThreat(target)) return {error: "This host is on the malware and phishing list; it cannot be allowed from here."};
         const list = new Set(modes.allowHosts[site] || []);
         if (message.type === "strict-allow") { if (list.size >= MAX_ALLOWED_HOSTS) return {error: "Too many allowed hosts for this site."}; list.add(target); }
         else list.delete(target);
         if (list.size) modes.allowHosts[site] = [...list].sort(); else delete modes.allowHosts[site];
-        await saveModes(); await sync();
+        await saveModes(); await apply();
         return {ok: true};
       }
       case "add-request-rule": {
@@ -734,12 +1044,14 @@
       case "remove-rule": { const ok = await store.removeRule(message.id); if (ok) await afterChange(); return {ok}; }
       case "set-generic": {
         const site = hosts.siteOf(hosts.hostOfUrl(message.tabUrl) || "");
-        if (!site) return {error: "Open a web page first."};
+        if (!site || !hosts.canScopeSite(site)) return {error: "Open a web page with a safely scoped registrable site first."};
         if (typeof message.on !== "boolean") return {error: "Bad message."};
-        if (message.on) genericOff.delete(site);
-        else if (genericOff.size < MAX_GENERIC_OFF) genericOff.add(site);
+        const next = new Set(genericOff);
+        if (message.on) next.delete(site);
+        else if (next.size < MAX_GENERIC_OFF) next.add(site);
         else return {error: "Too many sites have ad-slot hiding switched off."};
-        await C.storage.local.set({[GENERIC_KEY]: [...genericOff].sort()});
+        await C.storage.local.set({[GENERIC_KEY]: [...next].sort()});
+        genericOff = next;
         const tabs = await C.tabs.query({url: ["http://*/*", "https://*/*"]});
         for (const tab of tabs) {
           if (hosts.siteOf(hosts.hostOfUrl(tab.url) || "") === site) C.tabs.sendMessage(tab.id, {type: "generic", on: message.on}).catch(() => {});
@@ -749,17 +1061,35 @@
       case "add-exception": {
         const host = hosts.hostOfUrl(message.tabUrl);
         if (!host) return {error: "Open a web page first."};
+        if (!Number.isInteger(message.tabId) || message.tabId < 0) return {error: "An endpoint repair needs its source tab."};
+        const source = (await readTabs()).find((tab) => tab.id === message.tabId);
+        if (!source || !hosts.inSiteScope(hosts.hostOfUrl(source.url || ""), hosts.siteOf(host))) return {error: "The source tab changed. Reload the popup before allowing this resource."};
         if (message.resourceType === "main_frame") return {error: "Navigations are allowed with Continue on the warning page."};
         const target = hosts.normalizeHost(message.host);
         if (target && await isThreat(target)) return {error: "This host is on the malware and phishing list; it cannot be allowed from here."};
+        const site = hosts.siteOf(host);
+        const manual = store.rules.find((r) => r.kind === "request" && r.action === "block" && r.host === target && hosts.inSiteScope(host, r.site) &&
+          r.types.some((type) => (dnr.TYPE_MAP[type] || []).some((mapped) => (dnr.EXCEPTION_TYPE_MAP[message.resourceType] || []).includes(mapped))) &&
+          new RegExp(dnr.endpointRegex(r.host, r.path)).test(`https://${target}${message.path}`) &&
+          (r.party === "any" || !r.party || (r.party === "third") === hosts.isThirdParty(target, site)));
+        if (manual) return {error: "Your manual block still denies this endpoint. Remove that block explicitly before allowing the resource."};
         const minutes = Math.min(message.minutes, EXCEPTION_MINUTES_MAX);
-        const result = await attempt(() => store.addException({site: hosts.siteOf(host), host: message.host, path: message.path, type: message.resourceType, minutes}));
-        if (!result.error) await afterChange();
+        const result = await attempt(() => store.addException({site: hosts.siteOf(host), host: message.host, path: message.path, type: message.resourceType, minutes, tabId: message.tabId}));
+        if (!result.error) {
+          await afterChange();
+          if (!store.exceptions.some((exc) => exc.id === result.value.id)) return {error: "The source tab changed or the permission was revoked before it could be applied."};
+        }
         return result;
       }
-      case "remove-exception": { const ok = await store.removeException(message.id); if (ok) await afterChange(); return {ok}; }
+      case "remove-exception": { const ok = await dropEndpointsNow((exc) => exc.id === message.id); if (ok) await broadcast(); return {ok}; }
       default: return {error: "Unknown message."};
     }
+  }
+
+  function handle(message, sender) {
+    // One queue owns all intent mutations and reconciliation. An event cannot
+    // publish a half-saved message preference or overwrite a simultaneous edit.
+    return serial(() => handleMessage(message, sender));
   }
 
   async function attempt(fn) {
@@ -769,12 +1099,12 @@
     }
   }
 
-  async function afterChange() { await sync(); await broadcast(); }
+  async function afterChange() { await apply(); await broadcast(); }
 
   // Chrome's onMessage needs sendResponse + `return true` for async replies.
   C.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handle(message, sender).then(sendResponse, (error) => sendResponse({error: String(error && error.message || error)}));
     return true;
   });
-  root.__EGBackground = Object.freeze({store, ready, handle, sync, onMatched, tabLog, continues, reloadIfRebuilt, onCookie, copyClean, cleanLink, counts, get sources() { return sources; }, get pauses() { return {...pauses}; }});
+  root.__EGBackground = Object.freeze({store, ready, handle, sync, onMatched, tabLog, continues, reloadIfRebuilt, onCookie, copyClean, cleanLink, counts, get sources() { return sources; }, get pauses() { return {...pauses}; }, get policy() { return {...policy}; }, get grants() { return grants.map(clone); }});
 })(globalThis);

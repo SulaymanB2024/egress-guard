@@ -6,7 +6,8 @@
 // Lists come from the proxy's verified feed cache (DIR/blocklists/*.txt|*.exact, the files
 // `egress-guard` writes after downloading and validating each feed). Each snapshot is checked again
 // here: SHA-256 of the body against its header, entry count, hostname syntax and the proxy's minimum
-// size. Nothing is downloaded by this script and nothing is fetched by the extension at run time.
+// size. URL-filter downloads happen only at build time; --offline uses verified caches.
+// The extension itself never downloads filters or executable code.
 // Plain Node, no dependencies. Output is gitignored.
 import fs from "node:fs";
 import os from "node:os";
@@ -20,6 +21,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "browser");
 const dnr = require(path.join(SRC, "core/dnr.js"));
 const abp = require(path.join(ROOT, "scripts/lib/abp-dnr.cjs"));
+const cosmetics = require(path.join(ROOT, "scripts/lib/cosmetic-compiler.cjs"));
 
 // Mirrors src/egress_guard/feeds.py (tests/browser/build.test.cjs checks they stay in sync).
 const HAGEZI = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/";
@@ -54,8 +56,8 @@ export function feedSpecs(tier, threatTier = "full") {
   const hagezi = (key, extra = {}) => ({...THREAT_TIERS[key], file: `${THREAT_TIERS[key].id}.txt`, license: HAGEZI_LICENSE, hagezi: true, ...extra});
   return {
     threats: [
-      {...URLHAUS, file: `${URLHAUS.id}.txt`, optional: true},
-      {...PHISHING_ARMY, file: `${PHISHING_ARMY.id}.txt`, optional: true},
+      {...URLHAUS, file: `${URLHAUS.id}.txt`},
+      {...PHISHING_ARMY, file: `${PHISHING_ARMY.id}.txt`},
       threatTier === "full" ? hagezi("full", {fallback: hagezi("medium")}) : hagezi("medium"),
     ],
     trackers: [{id: `hagezi-${tier}`, file: `hagezi-${tier}.txt`, name: t.name, url: HAGEZI + `${tier}-onlydomains.txt`,
@@ -68,8 +70,9 @@ export function feedSpecs(tier, threatTier = "full") {
 
 // ---- URL filter lists (EasyPrivacy, EasyList) ------------------------------------------------------------------
 // Not proxy feeds (the proxy matches host names only), so the build keeps its own cache: <data>/browser-filters/
-// <id>.txt (the body exactly as downloaded) and <id>.json (source, SHA-256, size, fetch time, list version). The
-// build downloads a list only when its cached copy is missing or older than FILTER_MAX_AGE; --offline never does.
+// <id>.snapshot atomically contains a bounded metadata line plus the exact downloaded body. Legacy .txt/.json
+// pairs are read only when no snapshot exists. The build downloads a list only when its cached copy is missing
+// or older than FILTER_MAX_AGE; --offline never does.
 // The extension itself never fetches anything.
 const EASYLIST_LICENSE = {name: "GPL-3.0 or CC BY-SA 3.0 (dual licensed)", url: "https://easylist.to/pages/licence.html"};
 export const FILTER_LISTS = Object.freeze([
@@ -84,7 +87,7 @@ export const FILTER_LISTS = Object.freeze([
 const FILTER_MAX_AGE = 24 * 3600;
 const MAX_FILTER_BYTES = 16 * 1024 * 1024;
 // An upstream list is unpinned: a fresh copy whose size, entry count or exception count moved by more than this factor
-// since the last accepted copy (recorded beside its hash in <id>.json) fails the build until someone has looked at it
+// since the last accepted copy (recorded beside its hash in snapshot metadata) fails the build until someone has looked at it
 // (`--accept-list-change ID`).
 export const LIST_CHANGE_FACTOR = 2;
 // Exceptions and $important filters not anchored to a host are dropped and counted (scripts/lib/abp-dnr.cjs). A few are
@@ -138,25 +141,82 @@ export function checkFilterBody(spec, body) {
   return {...head, filters};
 }
 
-function readCachedFilter(dir, spec) {
-  const bodyFile = path.join(dir, `${spec.id}.txt`), metaFile = path.join(dir, `${spec.id}.json`);
-  for (const f of [bodyFile, metaFile]) if (!fs.lstatSync(f).isFile()) throw new Error(`${path.basename(f)} is not a regular file`);
-  const body = fs.readFileSync(bodyFile);
-  const meta = JSON.parse(fs.readFileSync(metaFile, "utf8"));
+function readBoundedFile(file, limit) {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > limit) throw new Error(`${path.basename(file)} is not a bounded regular file`);
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const buffer = Buffer.alloc(Math.min(65536, limit + 1 - total));
+      const count = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (!count) return Buffer.concat(chunks, total);
+      total += count;
+      if (total > limit) throw new Error("Cached file exceeded its size limit while reading.");
+      chunks.push(buffer.subarray(0, count));
+    }
+  } finally { fs.closeSync(fd); }
+}
+
+export const FILTER_CACHE_MAGIC = "# egress-guard-browser-filter-v1 ";
+export const MAX_FILTER_META_BYTES = 65536;
+
+function verifyCachedFilter(spec, body, meta) {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error(`${spec.id} cache metadata is invalid`);
   const digest = crypto.createHash("sha256").update(body).digest("hex");
-  if (digest !== meta.sha256) throw new Error(`${spec.id}.txt SHA-256 does not match ${spec.id}.json`);
-  if (meta.url !== spec.url) throw new Error(`${spec.id}.json names a different source`);
+  if (digest !== meta.sha256) throw new Error(`${spec.id} cache body SHA-256 does not match its metadata`);
+  if (meta.url !== spec.url || meta.id !== undefined && meta.id !== spec.id) throw new Error(`${spec.id} cache names a different source`);
   checkFilterBody(spec, body);
-  return {body, meta};
+  const counts = listCounts(spec, body);
+  for (const key of ["bytes", "entries", "exceptions"]) {
+    if (meta[key] !== undefined && meta[key] !== counts[key]) throw new Error(`${spec.id} cached ${key} does not match its body`);
+  }
+  // Legacy caches may predate recorded counts; always derive the comparison
+  // baseline from the same verified body instead of trusting absent metadata.
+  return {body, meta: {...meta, ...counts}};
+}
+
+export function readCachedFilter(dir, spec) {
+  const snapshot = path.join(dir, `${spec.id}.snapshot`);
+  let exists = true;
+  try { fs.lstatSync(snapshot); } catch (error) { if (error.code === "ENOENT") exists = false; else throw error; }
+  if (exists) {
+    const raw = readBoundedFile(snapshot, Buffer.byteLength(FILTER_CACHE_MAGIC) + MAX_FILTER_META_BYTES + 1 + MAX_FILTER_BYTES);
+    const newline = raw.indexOf(0x0a), start = Buffer.byteLength(FILTER_CACHE_MAGIC);
+    if (newline < start || newline - start > MAX_FILTER_META_BYTES || !raw.subarray(0, start).equals(Buffer.from(FILTER_CACHE_MAGIC))) {
+      throw new Error(`${spec.id} snapshot has an invalid or oversized metadata header`);
+    }
+    const meta = JSON.parse(raw.subarray(start, newline).toString("utf8"));
+    return verifyCachedFilter(spec, raw.subarray(newline + 1), meta);
+  }
+  // Read-only migration: the old pair is never overwritten or removed. The next
+  // successful download publishes a single snapshot that takes precedence.
+  const body = readBoundedFile(path.join(dir, `${spec.id}.txt`), MAX_FILTER_BYTES);
+  const meta = JSON.parse(readBoundedFile(path.join(dir, `${spec.id}.json`), MAX_FILTER_META_BYTES).toString("utf8"));
+  return verifyCachedFilter(spec, body, meta);
 }
 
 async function downloadFilter(spec, fetchImpl) {
-  const response = await fetchImpl(spec.url, {redirect: "follow", signal: AbortSignal.timeout(60000), headers: {"accept": "text/plain"}});
+  const response = await fetchImpl(spec.url, {redirect: "error", signal: AbortSignal.timeout(60000), headers: {"accept": "text/plain"}});
   if (!response.ok) throw new Error(`${spec.url}: HTTP ${response.status}`);
-  if (response.url && !response.url.startsWith("https://")) throw new Error(`${spec.url} redirected to a non-HTTPS address`);
+  if (response.url && (new URL(response.url).origin !== new URL(spec.url).origin || !response.url.startsWith("https://"))) throw new Error(`${spec.url} changed its trusted source origin`);
   const declared = Number(response.headers.get("content-length"));
   if (declared > MAX_FILTER_BYTES) throw new Error(`${spec.url} is larger than ${MAX_FILTER_BYTES} bytes`);
-  const body = Buffer.from(await response.arrayBuffer());
+  if (!response.body || typeof response.body.getReader !== "function") throw new Error("Filter response has no bounded readable body.");
+  const reader = response.body.getReader(), chunks = [];
+  let received = 0;
+  try {
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > MAX_FILTER_BYTES) throw new Error("Filter download exceeded its size limit.");
+      chunks.push(Buffer.from(value));
+    }
+  } catch (error) { await reader.cancel().catch(() => {}); throw error; }
+  finally { reader.releaseLock(); }
+  const body = Buffer.concat(chunks, received);
   const head = checkFilterBody(spec, body);
   return {body, meta: {id: spec.id, url: spec.url, sha256: crypto.createHash("sha256").update(body).digest("hex"), bytes: body.length,
     fetched_at: Math.floor(Date.now() / 1000), version: head.version || null, last_modified: head.last_modified || null, licence: head.licence,
@@ -164,16 +224,38 @@ async function downloadFilter(spec, fetchImpl) {
 }
 
 function writeAtomic(file, data) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, data, {mode: 0o600});
-  fs.renameSync(tmp, file);
+  // A private, unique staging directory prevents predictable temporary-file
+  // collisions. Until the one rename succeeds, the prior cache is untouched.
+  const stage = fs.mkdtempSync(path.join(path.dirname(file), ".filter-write-"));
+  const temporary = path.join(stage, "snapshot");
+  try {
+    const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try {
+      fs.writeFileSync(fd, data);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fs.renameSync(temporary, file);
+    // Persist the destination directory entry where directory fsync is supported.
+    if (process.platform !== "win32") {
+      const directory = fs.openSync(path.dirname(file), fs.constants.O_RDONLY);
+      try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+    }
+  } finally { fs.rmSync(stage, {recursive: true, force: true}); }
+}
+
+function writeCachedFilter(dir, spec, value) {
+  const {body, meta} = verifyCachedFilter(spec, value.body, value.meta);
+  const header = Buffer.from(JSON.stringify(meta));
+  if (header.length > MAX_FILTER_META_BYTES) throw new Error(`${spec.id} cache metadata exceeds its size limit`);
+  const snapshot = Buffer.concat([Buffer.from(FILTER_CACHE_MAGIC), header, Buffer.from("\n"), body]);
+  writeAtomic(path.join(dir, `${spec.id}.snapshot`), snapshot);
 }
 
 /**
  * The URL filter lists for a build: cached copies younger than a day, otherwise a fresh download (verified, then
  * cached). A failed download falls back to the cache with a warning; with neither, that list is left out.
  */
-export async function loadFilters(dir, {offline = false, log = () => {}, fetchImpl = globalThis.fetch, now = Date.now() / 1000, acceptChange = []} = {}) {
+export async function loadFilters(dir, {offline = false, allowMissing = false, log = () => {}, fetchImpl = globalThis.fetch, now = Date.now() / 1000, acceptChange = []} = {}) {
   fs.mkdirSync(dir, {recursive: true, mode: 0o700});
   const out = {};
   for (const spec of FILTER_LISTS) {
@@ -190,14 +272,17 @@ export async function loadFilters(dir, {offline = false, log = () => {}, fetchIm
       if (fresh) {
         // Compare with the last accepted copy (its counts were recorded beside its hash). A big move fails the build.
         if (cached && !acceptChange.includes(spec.id)) checkListChange(spec, {...listCounts(spec, cached.body), ...cached.meta}, fresh.meta);
-        writeAtomic(path.join(dir, `${spec.id}.txt`), fresh.body);
-        writeAtomic(path.join(dir, `${spec.id}.json`), JSON.stringify(fresh.meta, null, 2) + "\n");
+        writeCachedFilter(dir, spec, fresh);
         use = fresh;
       }
     }
-    if (!use) { log(`${spec.name} is not available: the build has no ${spec.name} rules`); continue; }
+    if (!use) {
+      if (!allowMissing) throw new Error(`Required filter ${spec.name} is unavailable; refresh it or explicitly use --allow-missing for a reduced build.`);
+      log(`${spec.name} is not available: the build has no ${spec.name} rules`); continue;
+    }
     out[spec.id] = {text: use.body.toString("utf8"), source: {id: spec.id, name: spec.name, url: spec.url, license: spec.license,
-      sha256: use.meta.sha256, bytes: use.meta.bytes, fetched_at: use.meta.fetched_at, version: use.meta.version, last_modified: use.meta.last_modified}};
+      sha256: use.meta.sha256, bytes: use.meta.bytes, fetched_at: use.meta.fetched_at, version: use.meta.version, last_modified: use.meta.last_modified,
+      stale: !Number.isFinite(use.meta.fetched_at) || now - use.meta.fetched_at > FILTER_MAX_AGE}};
   }
   return out;
 }
@@ -218,7 +303,7 @@ export function compileFilterRulesets(filters, {maxSuspicious = MAX_SUSPICIOUS} 
     const data = filters && filters[spec.id];
     if (!data || spec.kind === "domains") continue;
     const compiled = abp.compileFilters(data.text);
-    stats[spec.id] = compiled.stats;
+    stats[spec.id] = {...compiled.stats, blockingRules: compiled.block.length + compiled.important.length};
     if (compiled.stats.suspicious > maxSuspicious) {
       throw new Error(`${spec.name} has ${compiled.stats.suspicious} exceptions or $important filters not anchored to a host (at most ${maxSuspicious} allowed), e.g. ${JSON.stringify(compiled.stats.suspiciousLines[0])}. Review the list before building.`);
     }
@@ -323,9 +408,8 @@ export function loadLists(feedsDir, {tier = "pro.plus", threatTier = "full", all
       }
       const file = path.join(dir, spec.file);
       if (!exists(file)) {
-        // HaGeZi Threat Intelligence is the backbone of the malware and phishing list; without it the build would
-        // protect almost nothing, so its absence is fatal. The smaller threat feeds and the other lists only warn.
-        if (kind === "threats" && spec.hagezi && !allowMissing) throw new Error(`the malware and phishing feed ${spec.file} is missing from ${dir}; refresh the proxy's feeds, or pass --allow-missing to build without it`);
+        // Every selected source is required. Reduced development builds must opt in and carry a coverage receipt.
+        if (!allowMissing) throw new Error(`Required ${kind} feed ${spec.file} is missing from ${dir}; refresh the proxy's feeds, or pass --allow-missing for a reduced build`);
         log(`missing ${spec.file}: ${kind} list will not include ${spec.name}`);
         continue;
       }
@@ -335,7 +419,7 @@ export function loadLists(feedsDir, {tier = "pro.plus", threatTier = "full", all
       sources.push({id: spec.id, name: spec.name, url: spec.url, license: spec.license, entries: snap.names.length,
         sha256: snap.sha256, published_at: snap.published_at, updated_at: snap.updated_at});
     }
-    out[kind] = {names, sources};
+    out[kind] = {names, sources, required: specs.map(spec => spec.id), development: allowSmall};
   }
   return out;
 }
@@ -344,11 +428,11 @@ function chromeExtensionId(manifest) {
   return dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 }
 
-const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/params.js", "core/dnr.js", "core/cosmetic.js",
-  "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
+const SHARED = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/params.js", "core/dnr.js", "core/cosmetic-data.js", "core/cosmetic.js", "core/semantic.js",
+  "vendor/PSL-NOTICE.md", "vendor/public_suffix_list.dat", "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const SURROGATE_FILES = [...new Set(dnr.SURROGATES.map((s) => `surrogates/${s.file}`))];
-const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", ...SURROGATE_FILES];
-const CHROME_WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js"];
+const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", "semantic.html", "semantic.css", "semantic.js", "core/local-model.js", ...SURROGATE_FILES];
+const CHROME_WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/cosmetic.js"];
 export const GUARANTEED_STATIC_RULES = 30000;   // Chrome's GUARANTEED_MINIMUM_STATIC_RULES
 export const MAX_STATIC_REGEX_RULES = 1000;     // Chrome's MAX_NUMBER_OF_REGEX_RULES
 
@@ -377,7 +461,10 @@ function notice(lists, filters = {}) {
     "notice, the GPL-3.0 text (https://www.gnu.org/licenses/gpl-3.0.txt) and the list sources linked here.",
     "EasyPrivacy and EasyList are dual licensed GPL-3.0 or CC BY-SA 3.0 (https://easylist.to/pages/licence.html);",
     "this build uses them under GPL-3.0, like the HaGeZi data. The rules in rules/fp-trackers.json, easyprivacy.json,",
-    "easylist.json and filter-allow.json are converted from them (see each source below).", ""];
+    "easylist.json, filter-allow.json and core/cosmetic-data.js are converted from them (see each source below).", "",
+    "Public Suffix List data is packaged in vendor/public_suffix_list.dat and compiled into core/psl-data.js.",
+    "Its source notice, version and license (MPL-2.0) are preserved in vendor/PSL-NOTICE.md and the data header.",
+    "Source: https://publicsuffix.org/list/public_suffix_list.dat", ""];
   for (const data of Object.values(filters || {})) {
     const s = data.source;
     lines.push(`filters: ${s.name}`, `  source:  ${s.url}`, `  license: ${s.license.name} ${s.license.url}`,
@@ -409,19 +496,80 @@ export function splitRules(rules, limit = MAX_RULESET_BYTES) {
   return parts;
 }
 
+/** Replace both output folders with rollback on any ordinary rename failure. A killed process can leave the
+ * staging folder containing its last-good backups; retain that folder if rollback itself fails. */
+export function publishBuild(stage, out, rename = fs.renameSync) {
+  const changed = [];
+  try {
+    for (const name of ["chrome", "firefox"]) {
+      const destination = path.join(out, name), backup = path.join(stage, ".previous-" + name);
+      const entry = {destination, backup, saved: false, installed: false};
+      changed.push(entry);
+      if (fs.existsSync(destination)) { rename(destination, backup); entry.saved = true; }
+      rename(path.join(stage, name), destination); entry.installed = true;
+    }
+  } catch (error) {
+    const failures = [];
+    for (const entry of changed.reverse()) {
+      try {
+        if (entry.installed) fs.rmSync(entry.destination, {recursive: true, force: true});
+        if (entry.saved) rename(entry.backup, entry.destination);
+      } catch (restoreError) { failures.push(String(restoreError.message || restoreError)); }
+    }
+    if (failures.length) {
+      error.preserveStage = true;
+      error.message += "; last-good output could not be fully restored; keep " + stage + ": " + failures.join("; ");
+    }
+    throw error;
+  }
+}
+
 /** Build both browsers. Returns a summary. `lists` null means "no built-in lists". */
-export function build({out = path.join(ROOT, "dist-browser"), lists = null, filters = null, chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
+export function buildCoverage(lists, filters, compilation = null) {
+  const missing = [], stale = [];
+  for (const [kind, specs] of Object.entries(feedSpecs("pro.plus"))) {
+    const sources = lists && lists[kind] && lists[kind].sources || [];
+    const required = lists && lists[kind] && lists[kind].required || specs.map(spec => spec.id);
+    for (const id of required) {
+      const found = sources.find(source => source.id === id);
+      if (!found) missing.push(id);
+      else if (!Number.isFinite(found.updated_at) || Date.now() / 1000 - found.updated_at > 48 * 3600) stale.push(found.id);
+    }
+  }
+  for (const spec of FILTER_LISTS) {
+    if (!filters || !filters[spec.id]) missing.push(spec.id);
+    else if (filters[spec.id].source.stale) stale.push(spec.id);
+  }
+  const ineffective = compilation ? FILTER_LISTS.filter(spec => spec.kind !== "domains" && filters && filters[spec.id] &&
+    (!compilation[spec.id] || !compilation[spec.id].blockingRules)).map(spec => spec.id) : [];
+  const development = Object.values(lists || {}).some(data => data.development === true);
+  return {schema: 1, complete: !missing.length && !ineffective.length && !development, missing, stale: [...new Set(stale)],
+    ineffective, development, filterSyntax: "supported-subset", compilation: compilation || {},
+    capabilities: ["domain-blocking", "url-filtering", "site-cosmetics", "local-ad-review"],
+    compiler: "egress-guard-0.7"};
+}
+
+export function build({out = path.join(ROOT, "dist-browser"), lists = null, filters = null, requireComplete = false, chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
+  const compiledFilters = compileFilterRulesets(filters);
+  const coverage = buildCoverage(lists, filters, compiledFilters.stats);
+  if (requireComplete && !coverage.complete) throw new Error("Incomplete browser coverage: " +
+    [...coverage.missing, ...coverage.ineffective.map(id => id + " produced no blocking rules"), ...(coverage.development ? ["development feed-size override"] : [])].join(", "));
   const chromeManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.chrome.json"), "utf8"));
   const firefoxManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8"));
   const id = chromeExtensionId(chromeManifest);
   const warningUrl = `chrome-extension://${id}/warning.html`;
   fs.mkdirSync(out, {recursive: true});
   const stage = fs.mkdtempSync(path.join(out, ".build-"));
-  const summary = {extensionId: id, out, lists: {}};
+  const summary = {extensionId: id, out, lists: {}, coverage};
+  let preserveStage = false;
   try {
     // ---- Chrome ----
     const chrome = path.join(stage, "chrome");
     copy([...SHARED, ...CHROME_ONLY], chrome);
+    const cosmeticData = cosmetics.compileCosmetics(FILTER_LISTS.filter(f => f.kind !== "domains" && filters && filters[f.id]).map(f => filters[f.id].text));
+    const cosmeticBody = "/* Generated from verified filter data; see NOTICE.txt. */\nglobalThis.EGCosmeticData = Object.freeze(" + JSON.stringify(cosmeticData) + ");\n";
+    fs.writeFileSync(path.join(chrome, "core/cosmetic-data.js"), cosmeticBody);
+    summary.cosmetics = cosmeticData.stats;
     fs.mkdirSync(path.join(chrome, "rules"));
     const meta = {};
     const resources = [];
@@ -452,7 +600,6 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     }
     // Everything that is not a host list: small rulesets, one per popup category, each one file.
     const unwrapUrl = `chrome-extension://${id}/unwrap.html`;
-    const compiledFilters = compileFilterRulesets(filters);
     const privacy = dnr.compilePrivacy({trackerDomains: compiledFilters.trackerDomains, bounceDomains: filterDomains(filters, "adguard-clickthroughs")});
     const extra = {params: dnr.compileParams(), links: dnr.compileLinks(unwrapUrl), gpc: privacy.gpc, referrer: privacy.referrer,
       beacons: privacy.beacons, cookies: privacy.cookies, bounce: privacy.bounce, surrogates: dnr.compileSurrogates(), ...compiledFilters.rulesets};
@@ -488,12 +635,15 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     const hash = crypto.createHash("sha256");
     for (const r of resources) hash.update(fs.readFileSync(path.join(chrome, r.path)));
     hash.update(JSON.stringify(meta));
+    hash.update(JSON.stringify(coverage));
+    hash.update(cosmeticBody);
     for (const f of [...SHARED, ...CHROME_ONLY, "background-chrome.js", "manifest.chrome.json"]) hash.update(fs.readFileSync(path.join(SRC, f)));
     const buildId = hash.digest("hex").slice(0, 32);
-    fs.writeFileSync(path.join(chrome, "rules", "build.json"), JSON.stringify({build: buildId, built_at: Math.floor(Date.now() / 1000)}));
+    fs.writeFileSync(path.join(chrome, "rules", "build.json"), JSON.stringify({build: buildId, built_at: Math.floor(Date.now() / 1000), coverage,
+      cosmetics: cosmeticData.stats, psl_sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(SRC, "core/psl-data.js"))).digest("hex")}));
     summary.build = buildId;
     const worker = [...CHROME_WORKER.map((f) => `// ---- ${f}\n${fs.readFileSync(path.join(SRC, f), "utf8")}`),
-      `// ---- lists (generated)\nglobalThis.EGLists = Object.freeze(${JSON.stringify({extensionId: id, build: buildId, lists: meta})});\n`,
+      `// ---- lists (generated)\nglobalThis.EGLists = Object.freeze(${JSON.stringify({extensionId: id, build: buildId, lists: meta, coverage})});\n`,
       `// ---- background-chrome.js\n${fs.readFileSync(path.join(SRC, "background-chrome.js"), "utf8")}`].join("\n");
     fs.writeFileSync(path.join(chrome, "background.js"), worker);
     fs.writeFileSync(path.join(chrome, "manifest.json"), JSON.stringify(chromeManifest, null, 2) + "\n");
@@ -503,13 +653,13 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     const firefox = path.join(stage, "firefox");
     copy([...SHARED, "background.js"], firefox);
     fs.writeFileSync(path.join(firefox, "manifest.json"), JSON.stringify(firefoxManifest, null, 2) + "\n");
-
-    for (const name of ["chrome", "firefox"]) {
-      fs.rmSync(path.join(out, name), {recursive: true, force: true});
-      fs.renameSync(path.join(stage, name), path.join(out, name));
-    }
+    fs.writeFileSync(path.join(firefox, "NOTICE.txt"), notice({}, {}));
+    publishBuild(stage, out);
+  } catch (error) {
+    preserveStage = error.preserveStage === true;
+    throw error;
   } finally {
-    fs.rmSync(stage, {recursive: true, force: true});
+    if (!preserveStage) fs.rmSync(stage, {recursive: true, force: true});
   }
   return summary;
 }
@@ -556,9 +706,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     let filters = null;
     if (!args.noFilters) {
       filters = await loadFilters(args.filtersDir || (args.feeds ? path.join(args.feeds, "browser-filters") : defaultFiltersDir()),
-        {offline: Boolean(args.offline), acceptChange: args.acceptChange || [], log: (m) => console.warn(`warning: ${m}`)});
+        {offline: Boolean(args.offline), allowMissing: Boolean(args.allowMissing), acceptChange: args.acceptChange || [], log: (m) => console.warn(`warning: ${m}`)});
     }
-    const summary = build({out: args.out, lists, filters, chunk: args.chunk});
+    const summary = build({out: args.out, lists, filters, chunk: args.chunk, requireComplete: args.lists && !args.noFilters && !args.allowMissing});
+    console.log(`Coverage: ${summary.coverage.complete ? "complete" : "reduced: " + summary.coverage.missing.join(", ")}`);
+    console.log(`Cosmetics: ${summary.cosmetics.accepted} scoped rules, ${summary.cosmetics.exceptions} exceptions`);
     console.log(`Chrome:  ${path.join(summary.out, "chrome")}  (extension id ${summary.extensionId})`);
     for (const [kind, s] of Object.entries(summary.lists)) console.log(`  ${kind.padEnd(8)} ${String(s.domains).padStart(7)} domains in ${s.rules} rules, ${(s.bytes / 1048576).toFixed(1)} MB`);
     for (const [fid, st] of Object.entries(summary.filters || {})) {

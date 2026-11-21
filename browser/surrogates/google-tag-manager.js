@@ -16,7 +16,23 @@
     }
   };
   var layerName = "dataLayer";
-  var layer = w[layerName] = w[layerName] || [];
+  // The original script element retains its src attribute when its request is redirected.
+  // GTM/gtag document a custom global queue through ?l=name. Do not walk arbitrary globals,
+  // evaluate a path, invoke an accessor, or assign inherited/prototype-sensitive names.
+  try {
+    var script = typeof document !== "undefined" ? document.currentScript : null;
+    var src = script && (typeof script.getAttribute === "function" ? script.getAttribute("src") : script.src);
+    var match = typeof src === "string" && src.length <= 8192 ? /[?&]l=([^&#]*)/.exec(src) : null;
+    if (match) {
+      var requested = decodeURIComponent(match[1].replace(/\+/g, " "));
+      if (!/^[A-Za-z_$][A-Za-z0-9_$]{0,79}$/.test(requested) || /^(?:__proto__|prototype|constructor)$/.test(requested)) return;
+      layerName = requested;
+    }
+    var descriptor = Object.getOwnPropertyDescriptor(w, layerName);
+    if (descriptor && (!("value" in descriptor) || !Array.isArray(descriptor.value))) return;
+    if (!descriptor) Object.defineProperty(w, layerName, {value: [], writable: true, configurable: true, enumerable: true});
+  } catch { return; }
+  var layer = w[layerName];
   for (var i = 0; i < layer.length; i++) handle(layer[i]);
   var push = Array.prototype.push;
   layer.push = function () {
