@@ -41,9 +41,13 @@ function outcome(all, req) {
   return hit ? hit.action.type : "none";
 }
 
-test("priority ladder: exceptions > user rules > lists > continue-once > threats > params", () => {
+test("priority ladder: exceptions > user rules > lists > continue-once > threats > site modes > URL filters > params", () => {
   const p = dnr.PRIORITY;
   assert.ok(p.exception > p.userAllow && p.userAllow > p.userBlock && p.userBlock > p.list && p.list > p.continue && p.continue > p.threat && p.threat > p.params);
+  assert.ok(p.gpc > p.exception, "no allow rule can switch Sec-GPC off");
+  assert.ok(p.surrogate > p.list && p.surrogate < p.userBlock, "a stub beats the list block, your own block beats the stub");
+  assert.ok(p.threat > p.relax && p.relax > p.mode && p.mode > p.filterImportant && p.filterImportant > p.filterAllow && p.filterAllow > p.filter && p.filter > p.params,
+    "nothing a filter list or a site mode allows reaches the threat list");
 });
 
 test("list compiler chunks requestDomains, minimizes subdomains and never blocks navigation for ads/trackers", () => {
@@ -186,16 +190,26 @@ test("an exception shown as \"other\" does not also allow WebSocket, WebTranspor
 });
 
 test("tracking parameter stripping: exact names, navigations only, only when one is present", () => {
-  const out = dnr.compileParams();
-  assert.equal(out.length, dnr.TRACKING_PARAMS.length * 2);
-  assert.equal(new Set(out.map((r) => r.id)).size, out.length);
+  const all = dnr.compileParams();
+  const scopedCount = dnr.SCOPED_PARAMS.reduce((n, s) => n + s.params.length * 2, 0);
+  assert.equal(all.length, dnr.TRACKING_PARAMS.length * 2 + scopedCount + 1, "one path rule (Amazon /ref=)");
+  assert.equal(new Set(all.map((r) => r.id)).size, all.length);
+  assert.equal(new Set(dnr.TRACKING_PARAMS).size, dnr.TRACKING_PARAMS.length, "no duplicate names");
+  const out = all.filter((r) => !r.condition.requestDomains && !r.condition.regexFilter);
   const removed = out[0].action.redirect.transform.queryTransform.removeParams;
-  for (const rule of out) {
+  for (const rule of all) {
     assert.equal(rule.priority, dnr.PRIORITY.params);
+    if (rule.action.redirect.regexSubstitution) { assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]); continue; }
     assert.deepEqual(rule.condition.resourceTypes, ["main_frame", "sub_frame"]);
     assert.equal(rule.condition.regexFilter, undefined, "no regex: Chrome caps compiled regex size");
-    assert.deepEqual(rule.action.redirect.transform.queryTransform.removeParams, removed);
+    for (const kept of dnr.KEPT_PARAMS) assert.ok(!rule.action.redirect.transform.queryTransform.removeParams.includes(kept));
   }
+  for (const rule of out) assert.deepEqual(rule.action.redirect.transform.queryTransform.removeParams, removed);
+  // Generic names are removed only on the sites that use them for share tracking.
+  const youtube = all.find((r) => r.condition.requestDomains && r.condition.requestDomains.includes("youtube.com"));
+  assert.ok(youtube.action.redirect.transform.queryTransform.removeParams.includes("si"));
+  assert.ok(!removed.includes("si") && !removed.includes("s") && !removed.includes("trk"));
+  for (const name of ["_gl", "gad_source", "mc_cid", "vgo_ee", "__hstc", "pk_campaign", "mtm_source", "ttclid", "twclid", "li_fat_id", "s_cid", "vero_id", "oly_enc_id", "__s", "yclid", "dclid"]) assert.ok(removed.includes(name), name);
   for (const name of ["utm_source", "utm_medium", "utm_campaign", "fbclid", "gclid", "msclkid", "dclid", "gbraid", "wbraid", "mc_eid", "igshid"]) assert.ok(removed.includes(name), name);
   for (const name of ["id", "q", "page", "ref", "v", "t"]) assert.ok(!removed.includes(name), `${name} is functional and kept`);
   for (const name of ["mkt_tok", "_hsenc", "_hsmi"]) assert.ok(!removed.includes(name), `${name} is kept: unsubscribe and preference links need it`);

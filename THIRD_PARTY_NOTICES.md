@@ -16,7 +16,17 @@ The application code is MIT licensed. Downloaded feeds retain their own licenses
 
 `scripts/build-browser.mjs` compiles the proxy's verified HaGeZi (GPL-3.0), AdGuard CNAME (MIT), URLhaus via malware-filter (CC0-1.0 and MIT; host names only) and Phishing Army snapshots into Chrome `declarativeNetRequest` rulesets. HaGeZi, AdGuard and URLhaus licenses permit this. Phishing Army adds no restriction of its own, but its upstream sources' terms continue to apply; check them before passing a build on, especially commercially. The proxy's HaGeZi encrypted-DNS list is not compiled.
 
-The companion's built-in ad-slot hiding (`browser/core/cosmetic.js`) is a first-party selector list under the project's MIT license. EasyList (GPL-3.0 or CC BY-SA 3.0) was evaluated and is not bundled; see `docs/browser-companion.md`. The repository holds only the compiler and a small hand-written fixture (`tests/browser/fixtures/feeds`), not list data. Each build writes `NOTICE.txt` next to the rulesets with every source URL, license, entry count, publication time and SHA-256. Using a build yourself needs nothing further. Anyone who passes a build on must include that notice, the GPL-3.0 text and the list sources, as GPL-3.0 requires for the HaGeZi-derived rulesets.
+The companion's built-in ad-slot hiding (`browser/core/cosmetic.js`) is a first-party selector list under the project's MIT license. EasyList's cosmetic (element-hiding) rules are not bundled.
+
+The Chrome build also downloads, at build time and into its own cache (`<data>/browser-filters/`, never the proxy's feed cache), and converts into `declarativeNetRequest` rules:
+
+| Component | Role | License/source |
+| --- | --- | --- |
+| EasyPrivacy | Network (URL) filters for trackers, including first-party and proxied paths; its exceptions | Dual [GPL-3.0 or CC BY-SA 3.0](https://easylist.to/pages/licence.html); used under GPL-3.0 |
+| EasyList | Network (URL) filters for ads; its exceptions | Dual [GPL-3.0 or CC BY-SA 3.0](https://easylist.to/pages/licence.html); used under GPL-3.0 |
+| AdGuard CNAME trackers, disguised click-throughs | Host names whose cookies are stripped on a redirect hop (never blocked) | [MIT](https://github.com/AdguardTeam/cname-trackers/blob/master/LICENSE) |
+
+Each download is checked (HTTPS, size, `[Adblock Plus]` header, title, the licence line, minimum filter count, host-name syntax for the AdGuard list) and recorded with its SHA-256, size, fetch time and upstream version; the build's `NOTICE.txt` lists them. The tracking-parameter, link-wrapper, cookie-name, surrogate and fingerprinting/session-replay path lists in `browser/core/` and `browser/surrogates/` are written for this project (MIT); ClearURLs, Brave, Firefox and AdGuard URL-tracking lists were used only to check coverage, and no data was copied from them. The repository holds only the compiler and a small hand-written fixture (`tests/browser/fixtures/feeds`), not list data. Each build writes `NOTICE.txt` next to the rulesets with every source URL, license, entry count, publication time and SHA-256. Using a build yourself needs nothing further. Anyone who passes a build on must include that notice, the GPL-3.0 text and the list sources, as GPL-3.0 requires for the HaGeZi-, EasyPrivacy- and EasyList-derived rulesets.
 
 Each user's installation downloads these lists directly from their publishers for local filtering; nothing is mirrored or redistributed by this project. Retain upstream attribution and licenses if redistributing downloaded feed caches. Release archives intentionally omit those caches and all device state.
 

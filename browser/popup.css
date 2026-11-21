@@ -34,6 +34,21 @@ h2 { font-size: 13px; font-weight: 680; letter-spacing: -.01em; margin-bottom: 6
 .rows button { flex: 0 0 auto; font-size: 12px; min-height: 28px; padding: 3px 9px; }
 #blocked { max-height: 260px; overflow-y: auto; scrollbar-width: thin; }
 
+.cleaning { margin: 8px 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 6px; }
+.cleaning .stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.cleaning .stats b { color: var(--ink); font-size: 15px; font-weight: 680; font-variant-numeric: tabular-nums; }
+.cleaning button { justify-self: start; font-size: 12px; min-height: 28px; padding: 3px 9px; }
+.cleaning.off { border-style: dashed; }
+.modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 6px; }
+.mode { display: block; position: relative; color: var(--ink); font-size: 12px; font-weight: 600; text-align: center; }
+.mode + .mode { border-left: 1px solid var(--line); }
+.mode input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.mode span { display: block; padding: 7px 2px; }
+.mode input:checked + span { background: var(--forest); color: var(--on-forest); }
+.mode input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: -3px; }
+.default-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.default-mode select { font: 12px inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--white); }
+#strict-allowed { margin-top: 4px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 details { margin-top: 8px; }
 summary { cursor: pointer; color: var(--accent); font-weight: 620; }

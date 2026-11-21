@@ -15,7 +15,7 @@ const fixture = JSON.parse(read("tests/browser/fixtures/publisher/rules.json"));
 const ID = dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 const EXT = `chrome-extension://${ID}/`;
 const START = Date.UTC(2026, 10, 20, 12, 0, 0);
-const WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/dnr.js", "background-chrome.js"];
+const WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js", "background-chrome.js"];
 const event = () => { const fns = []; return {addListener: (fn) => fns.push(fn), fns, fire: (...a) => Promise.all(fns.map((f) => f(...a)))}; };
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setImmediate); };
 
@@ -88,19 +88,24 @@ async function worker({stored = fixture, packed = false} = {}) {
 test("manifest (Chrome): MV3 service worker, DNR rulesets, minimal permissions, fixed id, no remote code", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.background.service_worker, "background.js");
-  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "declarativeNetRequest", "declarativeNetRequestFeedback", "storage"]);
+  // cookies: tracking cookies removed as they are set; contextMenus + offscreen + clipboardWrite: "Copy clean link".
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "clipboardWrite", "contextMenus", "cookies", "declarativeNetRequest", "declarativeNetRequestFeedback", "offscreen", "storage"]);
   assert.deepEqual(manifest.host_permissions, ["http://*/*", "https://*/*"]);
-  assert.deepEqual(manifest.declarative_net_request.rule_resources.map((r) => r.id), ["threats", "trackers", "cname", "params"]);
-  assert.ok(manifest.declarative_net_request.rule_resources.every((r) => r.enabled));
+  // Rulesets are written by the build (scripts/build-browser.mjs); the source manifest lists none.
+  assert.deepEqual(manifest.declarative_net_request.rule_resources, []);
   // Only by a per-session URL, so a site cannot probe the fixed id to learn the extension is installed.
-  assert.deepEqual(manifest.web_accessible_resources, [{resources: ["warning.html"], matches: ["<all_urls>"], use_dynamic_url: true}]);
+  assert.deepEqual(manifest.web_accessible_resources, [{resources: ["warning.html", "unwrap.html", "surrogates/*.js"], matches: ["<all_urls>"], use_dynamic_url: true}]);
   assert.match(manifest.content_security_policy.extension_pages, /script-src 'self'/);
   // The worker may read its own packaged files (the threat ruleset) and nothing else.
   assert.match(manifest.content_security_policy.extension_pages, /connect-src 'self'(;|$)/);
   assert.match(manifest.content_security_policy.extension_pages, /frame-ancestors 'none'/);
   assert.equal(ID.length, 32);
-  assert.equal(manifest.content_scripts[0].all_frames, false);
-  for (const file of [...WORKER, ...manifest.content_scripts[0].js, "popup.html", "warning.html"]) assert.ok(fs.existsSync(path.join(root, "browser", file)), file);
+  // The page-world script only defines navigator.globalPrivacyControl; everything else runs isolated, top frame only.
+  assert.equal(manifest.content_scripts[0].world, "MAIN");
+  assert.deepEqual(manifest.content_scripts[0].js, ["page-gpc.js"]);
+  assert.equal(manifest.content_scripts[1].world, undefined);
+  assert.equal(manifest.content_scripts[1].all_frames, false);
+  for (const file of [...WORKER, ...manifest.content_scripts[0].js, ...manifest.content_scripts[1].js, "popup.html", "warning.html", "unwrap.html"]) assert.ok(fs.existsSync(path.join(root, "browser", file)), file);
 });
 
 test("stored request rules become scoped dynamic DNR rules on start; cosmetic rules do not", async () => {

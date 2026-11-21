@@ -94,11 +94,11 @@ test("a list too large for one Chrome ruleset file is split, and the manifest an
     const cm = JSON.parse(fs.readFileSync(path.join(chrome, "manifest.json"), "utf8"));
     const ids = cm.declarative_net_request.rule_resources.map((r) => r.id);
     assert.equal(ids.filter((id) => /^threats(-\d+)?$/.test(id)).length, summary.lists.threats.files);
-    assert.equal(ids[ids.length - 1], "params");
+    assert.ok(ids.includes("params") && ids.includes("links") && ids.includes("gpc"));
     const names = ids.filter((id) => /^threats/.test(id)).flatMap((id) => JSON.parse(fs.readFileSync(path.join(chrome, `rules/${id}.json`), "utf8")))
       .filter((r) => r.action.type === "block").flatMap((r) => r.condition.requestDomains);
     assert.equal(new Set(names).size, 30, "every name lands in exactly one part");
-    for (const r of cm.declarative_net_request.rule_resources.filter((x) => x.id !== "params")) assert.ok(fs.statSync(path.join(chrome, r.path)).size <= 600 || JSON.parse(fs.readFileSync(path.join(chrome, r.path))).length === 1, r.path);
+    for (const r of cm.declarative_net_request.rule_resources.filter((x) => /^(threats|trackers|cname)/.test(x.id))) assert.ok(fs.statSync(path.join(chrome, r.path)).size <= 600 || JSON.parse(fs.readFileSync(path.join(chrome, r.path))).length === 1, r.path);
     const worker = fs.readFileSync(path.join(chrome, "background.js"), "utf8");
     assert.ok(worker.includes('"rules/threats-2.json"'), "the worker can read every threat part");
   } finally { fs.rmSync(out, {recursive: true, force: true}); }

@@ -19,6 +19,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "browser");
 const dnr = require(path.join(SRC, "core/dnr.js"));
+const abp = require(path.join(ROOT, "scripts/lib/abp-dnr.cjs"));
 
 // Mirrors src/egress_guard/feeds.py (tests/browser/build.test.cjs checks they stay in sync).
 const HAGEZI = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/";
@@ -63,6 +64,139 @@ export function feedSpecs(tier, threatTier = "full") {
       name: `AdGuard CNAME-cloaked ${category}`, url: ADGUARD + `combined_disguised_${category}_justdomains.txt`,
       minimum: category === "ads" ? 1000 : 20000, license: ADGUARD_LICENSE})),
   };
+}
+
+// ---- URL filter lists (EasyPrivacy, EasyList) ------------------------------------------------------------------
+// Not proxy feeds (the proxy matches host names only), so the build keeps its own cache: <data>/browser-filters/
+// <id>.txt (the body exactly as downloaded) and <id>.json (source, SHA-256, size, fetch time, list version). The
+// build downloads a list only when its cached copy is missing or older than FILTER_MAX_AGE; --offline never does.
+// The extension itself never fetches anything.
+const EASYLIST_LICENSE = {name: "GPL-3.0 or CC BY-SA 3.0 (dual licensed)", url: "https://easylist.to/pages/licence.html"};
+export const FILTER_LISTS = Object.freeze([
+  {id: "easyprivacy", name: "EasyPrivacy", url: "https://easylist.to/easylist/easyprivacy.txt", minimum: 20000, license: EASYLIST_LICENSE},
+  {id: "easylist", name: "EasyList", url: "https://easylist.to/easylist/easylist.txt", minimum: 20000, license: EASYLIST_LICENSE},
+  // Not a filter list: first-party click-through subdomains that CNAME to affiliate and email click trackers. Used
+  // for the "bounce" ruleset (their cookies are stripped on the hop), never to block a navigation.
+  {id: "adguard-clickthroughs", kind: "domains", name: "AdGuard disguised click-throughs", minimum: 5000,
+    url: "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_clickthroughs_justdomains.txt",
+    license: {name: "MIT", url: "https://github.com/AdguardTeam/cname-trackers/blob/master/LICENSE"}},
+]);
+const FILTER_MAX_AGE = 24 * 3600;
+const MAX_FILTER_BYTES = 16 * 1024 * 1024;
+
+export function defaultFiltersDir() { return path.join(defaultFeedsDir(), "browser-filters"); }
+
+/** Check one downloaded or cached list body. Returns its header; throws with a reason. */
+export function checkFilterBody(spec, body) {
+  if (body.length > MAX_FILTER_BYTES) throw new Error(`${spec.name} exceeds ${MAX_FILTER_BYTES} bytes`);
+  const text = body.toString("utf8");
+  if (spec.kind === "domains") {
+    const names = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#") && !l.startsWith("!"));
+    const bad = names.find((n) => !dnsName(n));
+    if (bad !== undefined) throw new Error(`${spec.name} contains an invalid hostname: ${JSON.stringify(bad.slice(0, 80))}`);
+    if (names.length < spec.minimum) throw new Error(`${spec.name} has ${names.length} names, fewer than the minimum of ${spec.minimum}`);
+    return {filters: names.length, names};
+  }
+  if (!/^\[Adblock Plus[^\]]*\]\r?\n/.test(text)) throw new Error(`${spec.name} has no "[Adblock Plus …]" header`);
+  const head = abp.header(text);
+  if (head.title !== spec.name) throw new Error(`${spec.name}: unexpected title ${JSON.stringify(head.title || null)}`);
+  if (!head.licence || !head.licence.includes("easylist.to/pages/licence")) throw new Error(`${spec.name}: licence line missing or changed; review it before building`);
+  const filters = text.split("\n").filter((l) => l && !l.startsWith("!") && !l.startsWith("[")).length;
+  if (filters < spec.minimum) throw new Error(`${spec.name} has ${filters} filters, fewer than the minimum of ${spec.minimum}`);
+  return {...head, filters};
+}
+
+function readCachedFilter(dir, spec) {
+  const bodyFile = path.join(dir, `${spec.id}.txt`), metaFile = path.join(dir, `${spec.id}.json`);
+  for (const f of [bodyFile, metaFile]) if (!fs.lstatSync(f).isFile()) throw new Error(`${path.basename(f)} is not a regular file`);
+  const body = fs.readFileSync(bodyFile);
+  const meta = JSON.parse(fs.readFileSync(metaFile, "utf8"));
+  const digest = crypto.createHash("sha256").update(body).digest("hex");
+  if (digest !== meta.sha256) throw new Error(`${spec.id}.txt SHA-256 does not match ${spec.id}.json`);
+  if (meta.url !== spec.url) throw new Error(`${spec.id}.json names a different source`);
+  checkFilterBody(spec, body);
+  return {body, meta};
+}
+
+async function downloadFilter(spec, fetchImpl) {
+  const response = await fetchImpl(spec.url, {redirect: "follow", signal: AbortSignal.timeout(60000), headers: {"accept": "text/plain"}});
+  if (!response.ok) throw new Error(`${spec.url}: HTTP ${response.status}`);
+  if (response.url && !response.url.startsWith("https://")) throw new Error(`${spec.url} redirected to a non-HTTPS address`);
+  const declared = Number(response.headers.get("content-length"));
+  if (declared > MAX_FILTER_BYTES) throw new Error(`${spec.url} is larger than ${MAX_FILTER_BYTES} bytes`);
+  const body = Buffer.from(await response.arrayBuffer());
+  const head = checkFilterBody(spec, body);
+  return {body, meta: {id: spec.id, url: spec.url, sha256: crypto.createHash("sha256").update(body).digest("hex"), bytes: body.length,
+    fetched_at: Math.floor(Date.now() / 1000), version: head.version || null, last_modified: head.last_modified || null, licence: head.licence}};
+}
+
+function writeAtomic(file, data) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, data, {mode: 0o600});
+  fs.renameSync(tmp, file);
+}
+
+/**
+ * The URL filter lists for a build: cached copies younger than a day, otherwise a fresh download (verified, then
+ * cached). A failed download falls back to the cache with a warning; with neither, that list is left out.
+ */
+export async function loadFilters(dir, {offline = false, log = () => {}, fetchImpl = globalThis.fetch, now = Date.now() / 1000} = {}) {
+  fs.mkdirSync(dir, {recursive: true, mode: 0o700});
+  const out = {};
+  for (const spec of FILTER_LISTS) {
+    let cached = null;
+    try { cached = readCachedFilter(dir, spec); } catch (error) { if (error.code !== "ENOENT") log(`${spec.id} cache unusable: ${error.message}`); }
+    let use = cached;
+    if (!offline && (!cached || now - cached.meta.fetched_at > FILTER_MAX_AGE)) {
+      try {
+        use = await downloadFilter(spec, fetchImpl);
+        writeAtomic(path.join(dir, `${spec.id}.txt`), use.body);
+        writeAtomic(path.join(dir, `${spec.id}.json`), JSON.stringify(use.meta, null, 2) + "\n");
+      } catch (error) {
+        log(`could not download ${spec.name}: ${error.message}${cached ? "; using the cached copy" : ""}`);
+      }
+    }
+    if (!use) { log(`${spec.name} is not available: the build has no ${spec.name} rules`); continue; }
+    out[spec.id] = {text: use.body.toString("utf8"), source: {id: spec.id, name: spec.name, url: spec.url, license: spec.license,
+      sha256: use.meta.sha256, bytes: use.meta.bytes, fetched_at: use.meta.fetched_at, version: use.meta.version, last_modified: use.meta.last_modified}};
+  }
+  return out;
+}
+
+/**
+ * Compile EasyPrivacy and EasyList into rulesets: "fp-trackers" (EasyPrivacy path filters that match on any host,
+ * which is what catches first-party and proxied trackers, plus the hand-written ones), "easyprivacy" (the rest),
+ * "easylist", and "filter-allow" (both lists' exceptions). Returns {rulesets: {id: rules}, stats}.
+ */
+export function compileFilterRulesets(filters) {
+  const P = dnr.PRIORITY;
+  const sets = {"fp-trackers": dnr.compileHand("fp-trackers"), easyprivacy: [], easylist: [], "filter-allow": [], replay: dnr.compileHand("replay")};
+  const stats = {};
+  const generic = (r) => r.condition.urlFilter && !r.condition.urlFilter.startsWith("||") && !r.condition.urlFilter.startsWith("|") && !r.condition.requestDomains;
+  for (const spec of FILTER_LISTS) {
+    const data = filters && filters[spec.id];
+    if (!data || spec.kind === "domains") continue;
+    const compiled = abp.compileFilters(data.text);
+    stats[spec.id] = compiled.stats;
+    const place = (set, rule, priority) => sets[set].push({id: sets[set].length + 1, priority, ...rule});
+    for (const rule of compiled.block) place(spec.id === "easyprivacy" && generic(rule) ? "fp-trackers" : spec.id, rule, P.filter);
+    for (const rule of compiled.important) place(spec.id, rule, P.filterImportant);
+    for (const rule of compiled.allow) place("filter-allow", rule, P.filterAllow);
+  }
+  // Hosts the lists block wholesale (folded `||host^` filters): their third-party cookies are stripped whenever a
+  // request to them still goes out (an exception, a list's own @@).
+  const trackerDomains = [];
+  for (const id of ["fp-trackers", "easyprivacy", "easylist"]) {
+    for (const r of sets[id]) if (r.condition.requestDomains && !r.condition.initiatorDomains && !r.condition.urlFilter && !r.condition.regexFilter) trackerDomains.push(...r.condition.requestDomains);
+  }
+  return {rulesets: sets, stats, trackerDomains};
+}
+
+/** Host names from a "domains" list in the filter cache (already checked when cached). */
+export function filterDomains(filters, id) {
+  const data = filters && filters[id];
+  if (!data) return [];
+  return data.text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#") && !l.startsWith("!") && dnsName(l));
 }
 
 const MAX_FEED_BYTES = 64 * 1024 * 1024;   // feeds.MAX_FEED_BYTES
@@ -164,10 +298,13 @@ function chromeExtensionId(manifest) {
   return dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 }
 
-const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/dnr.js", "core/cosmetic.js",
+const SHARED = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/params.js", "core/dnr.js", "core/cosmetic.js",
   "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
-const CHROME_ONLY = ["warning.html", "warning.css", "warning.js"];
-const CHROME_WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/dnr.js"];
+const SURROGATE_FILES = [...new Set(dnr.SURROGATES.map((s) => `surrogates/${s.file}`))];
+const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", ...SURROGATE_FILES];
+const CHROME_WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/params.js", "core/cookies.js", "core/dnr.js"];
+export const GUARANTEED_STATIC_RULES = 30000;   // Chrome's GUARANTEED_MINIMUM_STATIC_RULES
+export const MAX_STATIC_REGEX_RULES = 1000;     // Chrome's MAX_NUMBER_OF_REGEX_RULES
 
 function copy(files, dest) {
   for (const file of files) {
@@ -187,11 +324,19 @@ export function joinNames(names) {
   return `${words[0].slice(0, common).join(" ")} ${words.map((w) => w.slice(common).join(" ")).join(" and ")}`;
 }
 
-function notice(lists) {
+function notice(lists, filters = {}) {
   const lines = ["Egress Guard Companion: bundled list data", "",
     "The extension code is MIT licensed. The rulesets in rules/ are generated from the lists below and keep",
     "their upstream licenses. HaGeZi lists are GPL-3.0: if you pass this build to anyone else, include this",
-    "notice, the GPL-3.0 text (https://www.gnu.org/licenses/gpl-3.0.txt) and the list sources linked here.", ""];
+    "notice, the GPL-3.0 text (https://www.gnu.org/licenses/gpl-3.0.txt) and the list sources linked here.",
+    "EasyPrivacy and EasyList are dual licensed GPL-3.0 or CC BY-SA 3.0 (https://easylist.to/pages/licence.html);",
+    "this build uses them under GPL-3.0, like the HaGeZi data. The rules in rules/fp-trackers.json, easyprivacy.json,",
+    "easylist.json and filter-allow.json are converted from them (see each source below).", ""];
+  for (const data of Object.values(filters || {})) {
+    const s = data.source;
+    lines.push(`filters: ${s.name}`, `  source:  ${s.url}`, `  license: ${s.license.name} ${s.license.url}`,
+      `  version: ${s.version || "unknown"}  last modified: ${s.last_modified || "unknown"}  fetched: ${new Date(s.fetched_at * 1000).toISOString()}  sha256: ${s.sha256}`, "");
+  }
   for (const [kind, meta] of Object.entries(lists)) {
     for (const s of meta.sources) {
       const when = s.published_at ? new Date(s.published_at * 1000).toISOString() : "unknown";
@@ -219,7 +364,7 @@ export function splitRules(rules, limit = MAX_RULESET_BYTES) {
 }
 
 /** Build both browsers. Returns a summary. `lists` null means "no built-in lists". */
-export function build({out = path.join(ROOT, "dist-browser"), lists = null, chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
+export function build({out = path.join(ROOT, "dist-browser"), lists = null, filters = null, chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
   const chromeManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.chrome.json"), "utf8"));
   const firefoxManifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8"));
   const id = chromeExtensionId(chromeManifest);
@@ -258,10 +403,38 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, chun
         updated_at: stamps("updated_at").length ? Math.min(...stamps("updated_at")) : null};
       summary.lists[kind] = {domains: compiled.domains, rules: compiled.rules.length, bytes, files: parts.length};
     }
-    if (resources.length + 1 > MAX_ENABLED_RULESETS) throw new Error(`${resources.length + 1} rulesets exceed Chrome's limit of ${MAX_ENABLED_RULESETS} enabled rulesets`);
-    chromeManifest.declarative_net_request.rule_resources = [...resources,
-      ...chromeManifest.declarative_net_request.rule_resources.filter((r) => !dnr.LIST_KINDS[r.id])];
-    fs.writeFileSync(path.join(chrome, "rules", "params.json"), JSON.stringify(dnr.compileParams()));
+    // Everything that is not a host list: small rulesets, one per popup category, each one file.
+    const unwrapUrl = `chrome-extension://${id}/unwrap.html`;
+    const compiledFilters = compileFilterRulesets(filters);
+    const privacy = dnr.compilePrivacy({trackerDomains: compiledFilters.trackerDomains, bounceDomains: filterDomains(filters, "adguard-clickthroughs")});
+    const extra = {params: dnr.compileParams(), links: dnr.compileLinks(unwrapUrl), gpc: privacy.gpc, referrer: privacy.referrer,
+      beacons: privacy.beacons, cookies: privacy.cookies, bounce: privacy.bounce, surrogates: dnr.compileSurrogates(), ...compiledFilters.rulesets};
+    summary.filters = compiledFilters.stats;
+    summary.rulesets = {};
+    for (const [rid, rules] of Object.entries(extra)) {
+      fs.writeFileSync(path.join(chrome, "rules", `${rid}.json`), JSON.stringify(rules));
+      resources.push({id: rid, enabled: true, path: `rules/${rid}.json`});
+      summary.rulesets[rid] = rules.length;
+    }
+    if (resources.length > MAX_ENABLED_RULESETS) throw new Error(`${resources.length} rulesets exceed Chrome's limit of ${MAX_ENABLED_RULESETS} enabled rulesets`);
+    chromeManifest.declarative_net_request.rule_resources = resources;
+    // Every static rule counts against the guaranteed minimum; a host list is a handful of rules however long it is.
+    let staticRules = 0, regexRules = 0;
+    for (const r of resources) {
+      const rules = JSON.parse(fs.readFileSync(path.join(chrome, r.path), "utf8"));
+      staticRules += rules.length;
+      regexRules += rules.filter((x) => x.condition.regexFilter).length;
+    }
+    if (staticRules > GUARANTEED_STATIC_RULES) throw new Error(`${staticRules} static rules exceed Chrome's guaranteed ${GUARANTEED_STATIC_RULES}`);
+    if (regexRules > MAX_STATIC_REGEX_RULES) throw new Error(`${regexRules} regular-expression rules exceed Chrome's limit of ${MAX_STATIC_REGEX_RULES}`);
+    summary.staticRules = staticRules;
+    summary.regexRules = regexRules;
+    const sourceOf = (fid) => filters && filters[fid] ? filters[fid].source : null;
+    meta.filters = {label: "URL filters", name: joinNames(FILTER_LISTS.filter((f) => sourceOf(f.id) && f.kind !== "domains").map((f) => f.name)),
+      rules: Object.entries(compiledFilters.rulesets).reduce((n, [, r]) => n + r.length, 0), domains: 0,
+      sources: FILTER_LISTS.filter((f) => sourceOf(f.id)).map((f) => ({name: f.name, url: f.url, license: f.license.name, version: sourceOf(f.id).version})),
+      published_at: null, updated_at: Math.min(...FILTER_LISTS.map((f) => (sourceOf(f.id) || {}).fetched_at || Infinity)) || null};
+    if (!Number.isFinite(meta.filters.updated_at)) meta.filters.updated_at = null;
     // Build identity: a hash of every ruleset and of the list metadata. An unpacked extension reads its own folder
     // live, so the running worker compares this with rules/build.json on disk and reloads itself after a rebuild.
     const hash = crypto.createHash("sha256");
@@ -276,7 +449,7 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, chun
       `// ---- background-chrome.js\n${fs.readFileSync(path.join(SRC, "background-chrome.js"), "utf8")}`].join("\n");
     fs.writeFileSync(path.join(chrome, "background.js"), worker);
     fs.writeFileSync(path.join(chrome, "manifest.json"), JSON.stringify(chromeManifest, null, 2) + "\n");
-    fs.writeFileSync(path.join(chrome, "NOTICE.txt"), notice(lists || {}));
+    fs.writeFileSync(path.join(chrome, "NOTICE.txt"), notice(lists || {}, filters || {}));
 
     // ---- Firefox (user rules through blocking webRequest; built-in lists are Chrome-only for now) ----
     const firefox = path.join(stage, "firefox");
@@ -306,7 +479,10 @@ function parseArgs(argv) {
     else if (a === "--no-lists") args.lists = false;
     else if (a === "--allow-small") args.allowSmall = true;
     else if (a === "--allow-missing") args.allowMissing = true;
-    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing]"); process.exit(0); }
+    else if (a === "--filters") args.filtersDir = path.resolve(next());
+    else if (a === "--offline") args.offline = true;
+    else if (a === "--no-filters") args.noFilters = true;
+    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing] [--filters DIR] [--offline] [--no-filters]"); process.exit(0); }
     else throw new Error(`unknown argument ${a}`);
   }
   return args;
@@ -328,9 +504,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         if (stamp && Date.now() / 1000 - stamp > day) console.warn(`warning: ${s.name} is older than 48 hours; refresh the proxy's feeds and rebuild`);
       }
     }
-    const summary = build({out: args.out, lists, chunk: args.chunk});
+    let filters = null;
+    if (!args.noFilters) {
+      filters = await loadFilters(args.filtersDir || (args.feeds ? path.join(args.feeds, "browser-filters") : defaultFiltersDir()),
+        {offline: Boolean(args.offline), log: (m) => console.warn(`warning: ${m}`)});
+    }
+    const summary = build({out: args.out, lists, filters, chunk: args.chunk});
     console.log(`Chrome:  ${path.join(summary.out, "chrome")}  (extension id ${summary.extensionId})`);
     for (const [kind, s] of Object.entries(summary.lists)) console.log(`  ${kind.padEnd(8)} ${String(s.domains).padStart(7)} domains in ${s.rules} rules, ${(s.bytes / 1048576).toFixed(1)} MB`);
+    for (const [fid, st] of Object.entries(summary.filters || {})) {
+      const dropped = Object.values(st.dropped).reduce((a, b) => a + b, 0);
+      console.log(`  ${fid.padEnd(12)} ${st.network} network filters: ${st.converted} converted into ${st.rules} rules, ${dropped} dropped`);
+    }
+    console.log(`  rulesets: ${Object.entries(summary.rulesets).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+    console.log(`  ${summary.staticRules} static rules of ${GUARANTEED_STATIC_RULES} guaranteed, ${summary.regexRules} regex rules of ${MAX_STATIC_REGEX_RULES}`);
     console.log(`Firefox: ${path.join(summary.out, "firefox")}`);
   } catch (error) {
     console.error(`build-browser: ${error.message}`);

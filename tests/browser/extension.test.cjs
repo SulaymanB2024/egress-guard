@@ -156,7 +156,7 @@ async function warningPage(href, {framed = false} = {}) {
     addEventListener: (type, fn) => { win.listeners[type] = fn; }});
   ctx.top = framed ? {} : ctx;
   ctx.self = ctx;
-  for (const file of ["core/hosts.js", "core/dnr.js", "warning.js"]) vm.runInContext(read(`browser/${file}`), ctx, {filename: file});
+  for (const file of ["core/hosts.js", "core/links.js", "core/params.js", "core/dnr.js", "warning.js"]) vm.runInContext(read(`browser/${file}`), ctx, {filename: file});
   await ctx.__EGWarning.ready;
   return {doc, sent, win, location, ctx};
 }

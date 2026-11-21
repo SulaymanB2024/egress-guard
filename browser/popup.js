@@ -7,9 +7,18 @@
   const FORM_TYPES = ["beacon", "ping", "xmlhttprequest", "image", "script", "sub_frame"];
   const EXCEPTION_MINUTES = 15;
   const LIST_LABELS = {threats: "Malware and phishing", trackers: "Ads and trackers", cname: "Disguised trackers", user: "Your rules"};
-  const LIST_ORDER = ["threats", "trackers", "cname", "user"];
+  const LIST_ORDER = ["threats", "trackers", "cname", "fp-trackers", "easyprivacy", "replay", "beacons", "easylist", "links", "surrogates", "strict", "noscript", "embeds", "user"];
+  // Categories whose entries are a request you could let through for a while. Unwrapped links are navigations.
+  const NO_EXCEPTION = new Set(["threats", "links"]);
+  const MODES = [
+    ["relaxed", "Relaxed", "Host lists, malware protection and your rules only. URL filters, beacon blocking and link unwrapping are off here."],
+    ["standard", "Standard", "Host lists plus URL filters for first-party trackers, fingerprinting and session replay, beacons and link trackers."],
+    ["strict", "Strict", "Standard, plus third-party scripts, frames and fonts blocked (payment, sign-in and captcha providers excepted), third-party cookies stripped and video or social embeds held until you click."],
+    ["noscript", "No scripts", "Strict, and no JavaScript runs on this site at all. For reading."],
+  ];
   let tab = null;
   let genericOn = true;
+  let categories = {};
 
   function el(tag, text, className) {
     const node = document.createElement(tag);
@@ -71,9 +80,48 @@
   }
 
   const listLabel = (id, lists) => {
-    const meta = lists.find((l) => l.id === id);
-    return (meta && meta.label) || LIST_LABELS[id] || id;
+    const meta = lists.find((l) => l.id === id && l.domains > 0);
+    return (meta && meta.label) || categories[id] || LIST_LABELS[id] || id;
   };
+
+  /** Link and cookie cleaning: what it did here, and the one brake (per site). */
+  function renderCleaning(state) {
+    const c = state.cleaning;
+    $("cleaning").hidden = !c;
+    if (!c) return;
+    $("links-cleaned").textContent = String(c.links);
+    $("links-unit").textContent = c.links === 1 ? "link cleaned in this tab" : "links cleaned in this tab";
+    $("cookies-removed").textContent = String(c.cookies);
+    $("cookies-unit").textContent = c.cookies === 1 ? "tracking cookie removed on this site" : "tracking cookies removed on this site";
+    $("cleaning").classList.toggle("off", !c.on);
+    $("clean-note").textContent = c.on
+      ? "Tracking parameters and link redirectors are stripped from every link, and tracking cookies are deleted as they are set."
+      : "Cleaning is off for this site: its links keep their parameters and its tracking cookies stay.";
+    $("clean-toggle").textContent = c.on ? "Stop cleaning on this site" : "Clean links and cookies on this site";
+    $("clean-toggle").setAttribute("aria-pressed", String(!c.on));
+    $("clean-toggle").onclick = () => act({type: "set-clean", on: !c.on});
+  }
+
+  /** Protection level for this site: four radio buttons, the default, and hosts allowed under Strict. */
+  function renderModes(state) {
+    const group = $("modes");
+    const current = state.mode || "standard";
+    group.replaceChildren(...MODES.map(([id, label]) => {
+      const wrap = el("label", null, "mode");
+      const input = document.createElement("input");
+      input.type = "radio"; input.name = "mode"; input.value = id; input.checked = id === current;
+      input.addEventListener("change", () => act({type: "set-mode", mode: id === state.defaultMode ? "default" : id}));
+      wrap.append(input, el("span", label));
+      return wrap;
+    }));
+    const info = MODES.find((m) => m[0] === current);
+    $("mode-note").textContent = `${info ? info[2] : ""}${state.siteMode ? "" : " (the default for every site)"}`;
+    $("default-mode").value = state.defaultMode === "strict" ? "strict" : "standard";
+    const allowed = $("strict-allowed");
+    allowed.hidden = !(state.strictAllowed && state.strictAllowed.length);
+    allowed.replaceChildren(...(state.strictAllowed || []).map((h) => row({verb: "Allowed", text: h, tags: [["third party under Strict", ""]]},
+      [["Remove", () => act({type: "strict-unallow", host: h}), `Stop allowing ${h} on this site`]])));
+  }
 
   function renderHero(blocked, lists, counts = null) {
     const totals = {};
@@ -94,14 +142,14 @@
 
   function renderLists(lists) {
     const footer = $("lists");
-    const active = lists.filter((l) => l.domains > 0);
+    const active = lists.filter((l) => l.domains > 0 || l.rules > 0 && l.id === "filters");
     if (!active.length) { footer.textContent = "No built-in lists in this build: only your own rules apply."; return; }
     const stamps = active.map((l) => l.published_at || l.updated_at).filter((t) => typeof t === "number");
     const day = stamps.length ? new Date(Math.min(...stamps) * 1000).toLocaleDateString(undefined, {month: "short", day: "numeric"}) : null;
     const parts = [el("span", day ? `Built-in lists (oldest from ${day}): ` : "Built-in lists: ")];
     active.forEach((l, i) => {
       if (i) parts.push(document.createTextNode(" · "));
-      parts.push(el("b", l.name), document.createTextNode(` (${Number(l.domains).toLocaleString("en-US")})`));
+      parts.push(el("b", l.name), document.createTextNode(l.domains > 0 ? ` (${Number(l.domains).toLocaleString("en-US")})` : ` (${Number(l.rules).toLocaleString("en-US")} URL rules)`));
     });
     parts.push(document.createTextNode("."));
     footer.replaceChildren(...parts);
@@ -110,11 +158,14 @@
   async function render() {
     const state = await send({type: "popup-state"});
     const lists = (state && state.lists) || [];
+    categories = (state && state.categories) || {};
     renderLists(lists);
     $("rebuilt").hidden = !(state && state.rebuilt === true);
     if (!state || !state.site) {
       $("site").textContent = "Not a web page";
       for (const id of ["pick", "restore"]) $(id).disabled = true;
+      $("protection").hidden = true;
+      $("cleaning").hidden = true;
       renderHero([], lists);
       for (const id of ["blocked", "rules", "exceptions"]) empty($(id), "Nothing here.");
       $("hidden").textContent = "Open a regular web page to see its rules.";
@@ -122,6 +173,9 @@
     }
     $("site").textContent = state.host;
     if (!$("rule-host").value) $("rule-host").value = state.host;
+    $("protection").hidden = false;
+    renderModes(state);
+    renderCleaning(state);
 
     const blocked = $("blocked");
     const items = [...state.blocked].sort((a, b) => LIST_ORDER.indexOf(a.list || "user") - LIST_ORDER.indexOf(b.list || "user") || b.count - a.count);
@@ -137,10 +191,12 @@
       const list = b.list || "user";
       const tags = [[`${b.type}${b.count > 1 ? ` ×${b.count}` : ""}`, ""], [listLabel(list, lists), list]];
       // No one-click exception for malware and phishing hosts, navigations, or types an exception cannot name exactly.
-      const allowable = list !== "threats" && b.type !== "main_frame" && (state.types || []).includes(b.type);
+      const allowable = !NO_EXCEPTION.has(list) && b.type !== "main_frame" && (state.types || []).includes(b.type);
       const buttons = !allowable ? [] : [[`Allow ${EXCEPTION_MINUTES} min`,
         () => act({type: "add-exception", host: b.host, path: b.path, resourceType: b.type, minutes: EXCEPTION_MINUTES}),
         `Allow ${b.host}${b.path} (${b.type}) on this site for ${EXCEPTION_MINUTES} minutes`]];
+      // Under Strict the repair is the whole host, for this site, until you remove it.
+      if (list === "strict") buttons.unshift(["Allow host", () => act({type: "strict-allow", host: b.host}), `Allow ${b.host} on this site under Strict`]);
       return row({host: b.host, path: b.path, tags}, buttons);
     }));
 
@@ -225,6 +281,7 @@
       await render();
     });
     $("generic").addEventListener("click", () => act({type: "set-generic", on: !genericOn}));
+    $("default-mode").addEventListener("change", (event) => act({type: "set-default-mode", mode: event.target.value}));
     $("add-rule").addEventListener("submit", async (event) => {
       event.preventDefault();
       const types = [...$("rule-types").querySelectorAll('input[name="types"]')].filter((b) => b.checked).map((b) => b.value);
