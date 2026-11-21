@@ -10,16 +10,19 @@
   body { margin: 0; }
   .content { display: flex; flex-direction: column; }
   .status { font-size: var(--t-headline); line-height: var(--lh-headline); gap: var(--s3); }
-  .status .dot { width: 10px; height: 10px; }
-  .fact-line { margin-top: var(--s1); color: var(--muted); padding-left: calc(10px + var(--s3)); }
+  .status .dot { width: 12px; height: 12px; }
+  .fact-line { margin-top: var(--s1); color: var(--muted); padding-left: var(--s5); }
   /* The Path: This Mac, four walls in the order traffic crosses them, the internet. A wall that is down has a hole. */
-  .path { margin-top: var(--s6); display: grid; grid-template-columns: 88px repeat(4, minmax(0, 1fr)) 88px; position: relative; }
-  .path::before { content: ""; position: absolute; left: 44px; right: 44px; top: 60px; height: 2px; background: var(--line); }
+  .path { margin-top: var(--s6); display: grid; grid-template-columns: 64px repeat(4, minmax(0, 1fr)) 64px; position: relative; }
+  .path::before { content: ""; position: absolute; left: 20px; right: 20px; top: 67px; height: 2px; background: var(--line); }
   .end, .wall { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
-  .end .ic { width: 40px; height: 40px; margin-top: 40px; border-radius: 10px; background: var(--paper); display: grid; place-items: center; }
+  .end:first-child { align-items: flex-start; text-align: left; }
+  .end:last-child { align-items: flex-end; text-align: right; }
+  .end .ic { width: 40px; height: 40px; margin-top: 48px; background: var(--paper); display: grid; place-items: center; }
+  .wall .dt .host { display: block; white-space: nowrap; }
   .end .ic svg { width: 28px; height: 28px; stroke: var(--ink); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .end .nm { margin-top: var(--s3); font-size: var(--t-body); color: var(--muted); }
-  .wall .bar { position: relative; width: 8px; height: 120px; border-radius: 4px; background: var(--state); }
+  .wall .bar { position: relative; width: 8px; height: 136px; border-radius: 4px; background: var(--state); }
   .wall[data-state="reduced"] .bar { background: repeating-linear-gradient(to bottom, var(--state) 0 12px, transparent 12px 18px); }
   .wall[data-state="unprotected"] .bar { background: linear-gradient(to bottom, var(--state) 0 38%, transparent 38% 62%, var(--state) 62% 100%); }
   .wall .nm { margin-top: var(--s3); font-weight: var(--w-strong); }
@@ -30,8 +33,9 @@
   .numbers .label { font-size: var(--t-body); line-height: var(--lh-body); }
   .day { margin-top: var(--s6); }
   .day .head { display: flex; justify-content: space-between; color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); margin-bottom: var(--s2); }
-  .day .bars { --bars-h: 56px; }
-  .day .bars i { background: var(--ink); }
+  .day .bars { --bars-h: 80px; gap: 4px; position: relative; }
+  .day .bars i { background: var(--faint); position: relative; }
+  .day .bars i.now { background: var(--ink); }
   .day .bars i.t { background: var(--threat); }
 </style>
 </head>
@@ -72,7 +76,7 @@
     </div>
 
     <figure class="day" aria-label="Connections blocked per hour today">
-      <div class="head"><span>Blocked per hour</span><span>Red: an hour a threat was stopped</span></div>
+      <div class="head"><span>Blocked per hour, today</span><span class="num" style="color:var(--threat)">Threat stopped at 10:00</span></div>
       <div class="bars" id="bars"></div>
       <div class="bars-axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>Now</span></div>
     </figure>
@@ -81,7 +85,7 @@
 <script>
   const v = [40,22,14,9,6,4,3,5,18,62,140,188,210,176,190,230,260,240,198,170,150,120,96,40];
   const threat = new Set([10]);
-  document.getElementById("bars").innerHTML = v.map((n, i) => `<i class="${threat.has(i) ? "t" : ""}" style="--h:${n / 260 * 100}%"></i>`).join("");
+  document.getElementById("bars").innerHTML = v.map((n, i) => `<i class="${threat.has(i) ? "t" : ""}${i === v.length - 1 ? " now" : ""}"${threat.has(i) ? ` data-label="Threat stopped ${String(i).padStart(2, "0")}:00"` : ""} style="--h:${n / 260 * 100}%"></i>`).join("");
   if (location.hash === "#reduced") {
     document.getElementById("status").dataset.state = "reduced";
     document.getElementById("word").textContent = "Reduced";

@@ -10,7 +10,7 @@
   /* Popup layout: 360 wide, 16px side gutter, content column 328. Height follows content, budget 520. */
   .popup { width: 360px; display: flex; flex-direction: column; }
   .popup > header { display: flex; align-items: center; gap: var(--s2); height: 48px; padding: 0 var(--s4); }
-  .popup > header .site { font-family: var(--font-mono); font-weight: var(--w-strong); font-size: var(--t-body); min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; }
+  .popup > header .site { font-family: var(--font-mono); font-weight: var(--w-strong); font-size: 13px; min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; }
   .popup > header .status { flex: none; font-size: var(--t-caption); }
   .popup .tabs { padding: 0 var(--s4); }
   .popup main { padding: var(--s5) var(--s4) var(--s4); display: flex; flex-direction: column; }
@@ -24,7 +24,7 @@
   .foot .t-caption { color: var(--muted); }
   /* Second level */
   .group + .group { margin-top: var(--s5); }
-  .group > h2 { display: flex; justify-content: space-between; font-size: var(--t-body); font-weight: var(--w-strong); padding-bottom: var(--s1); }
+  .group > h2 { display: flex; justify-content: space-between; align-items: center; min-height: var(--hit); font-size: var(--t-body); font-weight: var(--w-strong); padding-bottom: var(--s1); }
   .group > h2 .num { font-weight: var(--w-regular); color: var(--muted); }
   .popup .row { grid-template-columns: minmax(0, 1fr) auto; min-height: 48px; }
   .url .path { color: var(--muted); }
@@ -80,7 +80,7 @@
 <section class="frame popup" data-name="popup-zero-longhost">
   <header>
     <span class="mark" aria-hidden="true"></span>
-    <span class="site" title="accounts.internal-billing-portal.eu-west-2.example-enterprise.co.uk">accounts.…​.example-enterprise.co.uk</span>
+    <span class="site" title="accounts.internal-billing-portal.eu-west-2.example-enterprise.co.uk">….example-enterprise.co.uk</span>
     <span class="status" data-state="protected"><span class="dot"></span><span class="word">Protected</span></span>
   </header>
   <nav class="tabs" aria-label="Popup sections">
@@ -181,7 +181,7 @@
       <p class="t-title">Chrome pages can't be filtered</p>
       <p class="muted">Open a website to see what Egress Guard blocks on it.</p>
     </div>
-    <div class="foot" style="margin-top:0"><a class="btn quiet" href="#" style="padding-left:0">Open the dashboard</a><a class="btn quiet" href="#">Settings</a></div>
+    <div class="foot" style="margin-top:0"><a class="btn quiet" href="#">Open the dashboard</a><a class="btn quiet" href="#">Settings</a></div>
   </main>
 </section></figure>
 
@@ -203,14 +203,14 @@
     <section class="group">
       <h2>First-party tracker scripts <span class="num">2</span></h2>
       <ul class="list">
-        <li class="row" aria-selected="true" tabindex="0"><div class="main"><div class="line1 url host" title="https://publisher.example/sgtm/gtm.js?id=GTM-K8Q2ZX&amp;l=dataLayer">publisher.example<span class="path">/sgtm/gtm.js</span></div><div class="line2">Script</div></div><button class="btn act">Allow 15 min</button></li>
+        <li class="row" aria-selected="true" tabindex="0"><div class="main"><div class="line1 url host" title="https://publisher.example/sgtm/gtm.js?id=GTM-K8Q2ZX&amp;l=dataLayer">publisher.example<span class="path">/…/gtm.js</span></div><div class="line2">Script</div></div><button class="btn act">Allow 15 min</button></li>
         <li class="row" tabindex="0"><div class="main"><div class="line1 url host">publisher.example<span class="path">/g/collect</span></div><div class="line2">Image</div></div><button class="btn act">Allow 15 min</button></li>
       </ul>
     </section>
     <section class="group">
       <h2>Ads and trackers <span class="num">2</span></h2>
       <ul class="list">
-        <li class="row" tabindex="0"><div class="main"><div class="line1 url host" title="https://securepubads.g.doubleclick.net/pagead/managed/js/gpt/m202611180101/pubads_impl.js">securepubads.g.doubleclick.net<span class="path">/…/pubads_impl.js</span></div><div class="line2">Script</div></div><button class="btn act">Allow 15 min</button></li>
+        <li class="row" tabindex="0"><div class="main"><div class="line1 url host" title="https://securepubads.g.doubleclick.net/pagead/managed/js/gpt/m202611180101/pubads_impl.js">securepubads.g.doubleclick.net<span class="path">/…</span></div><div class="line2">Script</div></div><button class="btn act">Allow 15 min</button></li>
         <li class="row" tabindex="0"><div class="main"><div class="line1 url host">tracker-fixture.test<span class="path">/p.gif</span></div><div class="line2">Image</div></div><button class="btn act">Allow 15 min</button></li>
       </ul>
     </section>
@@ -261,7 +261,7 @@
   </nav>
   <main style="padding-top:var(--s4)">
     <section class="group">
-      <h2>Rules for this site</h2>
+      <h2>Rules for this site <button class="btn quiet" style="font-weight:var(--w-regular)">Add…</button></h2>
       <ul class="list">
         <li class="row" tabindex="0"><div class="main"><div class="line1 host">cdn.segment.com</div><div class="line2">Always block</div></div><button class="btn quiet act">Remove</button></li>
       </ul>
@@ -274,13 +274,12 @@
     </section>
     <section class="group">
       <h2>On this page</h2>
-      <div class="tools" style="margin-top:var(--s2)">
-        <button class="btn">Block an element…</button>
-        <button class="btn">Show ad slots</button>
-        <button class="btn quiet">Restore page</button>
-      </div>
+      <ul class="list">
+        <li class="row" tabindex="0"><span class="main">Block an element…</span><span class="trail" aria-hidden="true">›</span></li>
+        <li class="row" tabindex="0"><span class="main">Show hidden ad slots</span><span class="trail">2 ›</span></li>
+        <li class="row" tabindex="0"><span class="main">Restore everything hidden here</span><span class="trail" aria-hidden="true">›</span></li>
+      </ul>
     </section>
-    <div class="foot"><button class="btn quiet" style="padding-left:0">Add a rule…</button></div>
   </main>
 </section></figure>
 
@@ -330,12 +329,12 @@
       <label class="setting"><span>Open mail-scanner links directly</span><input class="switch" type="checkbox"></label>
     </section>
     <section class="group provenance" style="margin-top:var(--s4)">
-      <h2>Block lists <span class="num">updated Nov 18</span></h2>
+      <h2>Block lists <span class="num">Updated</span></h2>
       <ul class="list">
-        <li class="row"><div class="main"><div class="line1">HaGeZi Threat Intelligence (Medium)</div></div><span class="trail">2</span></li>
-        <li class="row"><div class="main"><div class="line1">HaGeZi Multi PRO++</div></div><span class="trail">2</span></li>
-        <li class="row"><div class="main"><div class="line1">AdGuard CNAME-cloaked trackers</div></div><span class="trail">1</span></li>
-        <li class="row"><div class="main"><div class="line1">EasyPrivacy URL rules</div></div><span class="trail">32</span></li>
+        <li class="row"><div class="main"><div class="line1">HaGeZi Threat Intelligence (Medium)</div></div><span class="trail">Nov 18</span></li>
+        <li class="row"><div class="main"><div class="line1">HaGeZi Multi PRO++</div></div><span class="trail">Nov 18</span></li>
+        <li class="row"><div class="main"><div class="line1">AdGuard CNAME-cloaked trackers</div></div><span class="trail">Nov 19</span></li>
+        <li class="row"><div class="main"><div class="line1">EasyPrivacy URL rules</div></div><span class="trail">Nov 20</span></li>
       </ul>
     </section>
   </main>

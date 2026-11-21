@@ -16,8 +16,7 @@
   .status-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); padding-top: var(--s5); flex-wrap: wrap; }
   .status { font-size: var(--t-title); line-height: var(--lh-title); }
   .status .fact { font-size: var(--t-body); }
-  .callout { margin-top: var(--s4); display: flex; align-items: center; justify-content: space-between; gap: var(--s4); }
-  .callout .strong { color: var(--state); }
+  .status-row .acts { display: flex; gap: var(--s2); flex-wrap: wrap; }
   .hero { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--s5); margin-top: var(--s6); align-items: end; }
   .hero .focal { grid-column: span 4; }
   .hero .focal .label { font-size: var(--t-body); line-height: var(--lh-body); color: var(--ink); }
@@ -27,9 +26,9 @@
   .legend { display: flex; gap: var(--s4); }
   .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 1px; margin-right: var(--s1); background: var(--faint); vertical-align: 0; }
   .legend i.b { background: var(--ink); }
-  .bars.stack { --bars-h: 120px; }
-  .bars.stack i { position: relative; }
-  .bars.stack i > b { position: absolute; left: 0; right: 0; bottom: 0; height: var(--bh); background: var(--ink); border-radius: 1px 1px 0 0; }
+  .bars.day { --bars-h: 120px; gap: 4px; }
+  .bars.day i.b { background: var(--faint); }
+  .bars.day i.now { background: var(--ink); }
   .reasons { margin-top: var(--s6); --cols: 4; padding-top: var(--s5); border-top: 1px solid var(--line); }
   .reasons .value { font-size: var(--t-headline); line-height: var(--lh-headline); }
   .reasons .label { font-size: var(--t-body); line-height: var(--lh-body); }
@@ -37,7 +36,7 @@
   .tools { display: flex; gap: var(--s3); align-items: center; margin: var(--s4) 0 var(--s2); flex-wrap: wrap; }
   .tools .field { width: 320px; }
   .tools .sp { flex: 1; }
-  .table .row { grid-template-columns: 88px minmax(0, 1fr) 240px 88px; min-height: 40px; padding: 0; }
+  .table .row { grid-template-columns: 88px minmax(0, 1fr) 240px 88px; min-height: 40px; padding: 0 var(--s2); }
   .table .dec.blocked { font-weight: var(--w-strong); }
   .table .dec.allowed { color: var(--muted); }
   .table .why { color: var(--muted); white-space: nowrap; overflow: hidden; }
@@ -47,13 +46,15 @@
   @media (max-width: 720px) {
     .wrap { padding: 0 var(--s4); }
     .bar .scope, .bar .updated { display: none; }
+    .status-row .status { flex-wrap: wrap; row-gap: 0; }
+    .status-row .status .fact { flex-basis: 100%; padding-left: calc(8px + var(--s2)); }
     .hero { grid-template-columns: 1fr; row-gap: var(--s5); }
     .hero .focal, .hero .chart { grid-column: auto; }
-    .bars.stack { --bars-h: 96px; gap: 1px; }
+    .bars.day { --bars-h: 96px; gap: 2px; }
     .reasons { --cols: 2; row-gap: var(--s4); }
     .tools .field { width: 100%; }
     .tools .seg { width: 100%; }
-    .table .row { grid-template-columns: minmax(0, 1fr) auto; min-height: 56px; padding: var(--s2) 0; row-gap: 2px; }
+    .table .row { grid-template-columns: minmax(0, 1fr) auto; min-height: 56px; padding: var(--s2); row-gap: 2px; }
     .table .dec { grid-row: 2; font-size: var(--t-caption); line-height: var(--lh-caption); }
     .table .host-c { grid-column: 1 / -1; }
     .table .why { grid-row: 2; grid-column: 1; padding-left: 64px; font-size: var(--t-caption); line-height: var(--lh-caption); }
@@ -71,11 +72,7 @@
 
   <div class="status-row">
     <p class="status" id="status" data-state="protected"><span class="dot"></span><span class="word" id="word">Protected</span><span class="fact" id="fact">Filtering every app · lists updated 2 h ago</span></p>
-    <button class="btn" id="pause">Pause ad filtering</button>
-  </div>
-  <div class="callout" data-state="reduced" id="callout" hidden>
-    <p><span class="strong">2 block lists are 3 days old.</span> New threats on them may get through.</p>
-    <button class="btn">Update lists</button>
+    <span class="acts"><button class="btn" id="update" hidden>Update lists</button><button class="btn" id="pause">Pause ad filtering</button></span>
   </div>
 
   <section id="full">
@@ -86,8 +83,8 @@
         <span class="sub num">15% of 619 connections · up 19% on yesterday</span>
       </div>
       <figure class="chart" aria-label="Connections per hour, last 24 hours: blocked and allowed">
-        <div class="chart-head t-caption"><span>Last 24 hours</span><span class="legend"><span><i class="b"></i>Blocked</span><span><i></i>Allowed</span></span></div>
-        <div class="bars stack" id="bars"></div>
+        <div class="chart-head t-caption"><span>Blocked per hour, last 24 hours</span><span class="num">Peak 15 at 10:00</span></div>
+        <div class="bars day" id="bars"></div>
         <div class="bars-axis"><span>16:00</span><span>22:00</span><span>04:00</span><span>10:00</span><span>Now</span></div>
       </figure>
     </div>
@@ -127,8 +124,9 @@
   const total = [56,44,33,25,9,4,3,1,2,4,4,7,22,44,40,63,76,84,86,83,78,72,62,14];
   const blocked = [6,2,5,4,1,0,0,0,0,1,1,1,3,4,4,3,8,11,15,10,8,7,6,4];
   const max = 100;
-  document.getElementById("bars").innerHTML = total.map((t, i) =>
-    `<i style="--h:${Math.max(t / max * 100, 1)}%" title="${blocked[i]} blocked of ${t}"><b style="--bh:${t ? blocked[i] / t * 100 : 0}%"></b></i>`).join("");
+  const peak = Math.max(...blocked);
+  document.getElementById("bars").innerHTML = blocked.map((b, i) =>
+    `<i class="${b ? "b" : "zero"}${i === 23 ? " now" : ""}" style="--h:${b / peak * 100}%" title="${b} blocked of ${total[i]}"></i>`).join("");
   const rows = [
     ["blocked","stats.g.doubleclick.net","Ad or tracker list","1 min ago"],
     ["allowed","app.example-maps.test","No rule matched","2 min ago"],
@@ -147,8 +145,8 @@
   if (h === "#reduced") {
     const s = document.getElementById("status"); s.dataset.state = "reduced";
     document.getElementById("word").textContent = "Reduced";
-    document.getElementById("fact").textContent = "2 block lists out of date";
-    document.getElementById("callout").hidden = false;
+    document.getElementById("fact").textContent = "2 block lists are 3 days old";
+    document.getElementById("update").hidden = false;
   }
   if (h === "#empty") {
     document.getElementById("full").hidden = true; document.getElementById("empty").hidden = false;

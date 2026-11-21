@@ -32,6 +32,7 @@
   --fill-primary: #19382e;  /* forest: the one primary button per view, brand mark */
   --on-primary: #fbfbf7;    /* 12.3:1 on forest */
   --focus: #2f6f58;         /* focus ring, 5.4:1 */
+  --select: rgba(24, 39, 33, .07); /* hovered or selected row; not a state */
 
   /* State: the only hues. Each passes 4.5:1 as text on paper and raised. */
   --protected: #235843;     /* 7.5:1 */
@@ -65,6 +66,7 @@
     --fill-primary: #cfe3d6;
     --on-primary: #0f1713; /* 13.6:1 */
     --focus: #8fc9ac;
+    --select: rgba(230, 232, 223, .08);
     --protected: #7fb89c;  /* 8.0:1 */
     --reduced: #d6a25f;    /* 8.0:1 */
     --unprotected: #e08a7f;/* 7.0:1 */
@@ -145,7 +147,7 @@ ul, ol { list-style: none; }
   border: 1px solid var(--edge); background: var(--raised); color: var(--ink);
 }
 .btn.primary { background: var(--fill-primary); border-color: var(--fill-primary); color: var(--on-primary); }
-.btn.quiet { background: transparent; border-color: transparent; color: var(--ink); padding: 0 var(--s2); text-decoration: underline; text-decoration-color: var(--edge); text-underline-offset: 3px; }
+.btn.quiet { background: transparent; border-color: transparent; color: var(--ink); padding: 0; min-width: var(--hit); text-decoration: underline; text-decoration-color: var(--edge); text-underline-offset: 3px; }
 .btn.lg { min-height: 40px; padding: 0 var(--s4); }
 .btn[disabled] { opacity: .5; cursor: default; }
 .btn .kbd { color: var(--muted); font-weight: var(--w-regular); }
@@ -175,15 +177,18 @@ ul, ol { list-style: none; }
 .tabs .count { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: var(--w-regular); }
 
 /* List row: lead / main / trailing. A hairline only between rows of the same list. */
-.list > li + li { border-top: 1px solid var(--line); }
-.row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: var(--s3); min-height: 44px; padding: var(--s2) 0; }
+/* Rows bleed 8px into the gutter so a hover or selection fill does not touch the text; the hairline stays on the text edges. */
+.list > li { position: relative; }
+.list > li + li::before { content: ""; position: absolute; left: var(--s2); right: var(--s2); top: 0; height: 1px; background: var(--line); }
+.row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: var(--s3); min-height: 44px; padding: var(--s2); margin: 0 calc(-1 * var(--s2)); border-radius: var(--r-control); }
 .row .main { min-width: 0; }
 .row .main .line1 { white-space: nowrap; overflow: hidden; }
 .row .main .line2 { color: var(--muted); font-size: var(--t-caption); line-height: var(--lh-caption); }
 .row .trail { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Trailing action: hidden at rest, shown on hover, keyboard focus or selection. Never repeated down a list at rest. */
-.row .act { visibility: hidden; }
-.row:hover .act, .row:focus-within .act, .row[aria-selected="true"] .act { visibility: visible; }
+.row .act { display: none; }
+.row:hover, .row:focus-within, .row[aria-selected="true"] { background: var(--select); }
+.row:hover .act, .row:focus-within .act, .row[aria-selected="true"] .act { display: inline-flex; }
 
 /* Disclosure: a quiet row with a chevron. */
 .disclosure > summary { list-style: none; display: flex; align-items: center; gap: var(--s2); min-height: var(--hit); cursor: pointer; color: var(--ink); }

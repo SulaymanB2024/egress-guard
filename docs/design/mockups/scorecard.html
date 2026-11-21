@@ -16,8 +16,9 @@
   .summary .names { color: var(--ink); padding-bottom: 2px; max-width: 72ch; }
   .summary .rest { color: var(--muted); }
   .group { margin-top: var(--s7); }
-  .group > h2 { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: var(--s2); border-bottom: 1px solid var(--line); }
-  .group > h2 .muted { font-size: var(--t-body); font-weight: var(--w-regular); }
+  .group > h2 { display: flex; align-items: baseline; gap: var(--s3); padding-bottom: var(--s2); border-bottom: 1px solid var(--line); }
+  .group > h2 .muted { font-size: var(--t-body); font-weight: var(--w-regular); flex: 1; }
+  .group > h2 .days-h { font-size: var(--t-caption); font-weight: var(--w-regular); color: var(--muted); width: 112px; text-align: right; }
   /* KPI row: state | name | value | target | 7-day strip. Edges at 0, 128, -472, -360, -112 (from the right). */
   .kpi { border-bottom: 1px solid var(--line); }
   .kpi > summary { display: grid; grid-template-columns: 128px minmax(0, 1fr) 128px 232px 112px; column-gap: var(--s5); align-items: center; min-height: 48px; cursor: pointer; list-style: none; }
@@ -26,22 +27,23 @@
   .kpi .nm { font-weight: var(--w-strong); }
   .kpi .val { text-align: right; font-size: var(--t-title); line-height: var(--lh-title); font-weight: var(--w-strong); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .kpi .tgt { color: var(--muted); white-space: nowrap; overflow: hidden; }
-  .kpi .bars { --bars-h: 24px; }
-  .kpi .bars i:last-child { background: var(--ink); }
+  .days { display: flex; gap: 4px; justify-content: flex-end; }
+  .days i { width: 10px; height: 10px; border-radius: 2px; background: var(--state); }
+  .days i[data-state="none"] { background: transparent; box-shadow: inset 0 0 0 1px var(--edge); }
   .kpi .ev { padding: 0 0 var(--s4) calc(128px + var(--s5)); max-width: calc(128px + var(--s5) + 72ch); display: flex; flex-direction: column; gap: var(--s2); }
   .kpi .ev .host { color: var(--ink); }
   .kpi .ev .muted { font-size: var(--t-caption); line-height: var(--lh-caption); }
   .lists { margin-top: var(--s7); }
   .lists .tabs { margin-bottom: var(--s2); }
-  .lists .row { grid-template-columns: minmax(0, 1fr) auto; min-height: 36px; padding: 0; max-width: 560px; }
+  .lists .row { grid-template-columns: minmax(0, 1fr) auto; min-height: 36px; padding: 0 var(--s2); max-width: 576px; }
   .foot { margin-top: var(--s6); color: var(--muted); max-width: 72ch; }
   @media (max-width: 720px) {
     .wrap { padding: 0 var(--s4) var(--s6); }
     .bar .updated { display: none; }
-    .kpi > summary { grid-template-columns: minmax(0, 1fr) auto 56px; grid-template-rows: auto auto; row-gap: 2px; padding: var(--s2) 0; column-gap: var(--s3); }
+    .kpi > summary { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto; row-gap: 2px; padding: var(--s3) 0; column-gap: var(--s3); }
     .kpi .nm { grid-column: 1; grid-row: 1; }
     .kpi .val { grid-column: 2; grid-row: 1; }
-    .kpi .bars { grid-column: 3; grid-row: 1 / span 2; --bars-h: 28px; }
+    .kpi .days { grid-column: 1 / -1; grid-row: 3; justify-content: flex-start; margin-top: var(--s1); }
     .kpi .st { grid-column: 1; grid-row: 2; font-size: var(--t-caption); line-height: var(--lh-caption); }
     .kpi .tgt { grid-column: 2; grid-row: 2; font-size: var(--t-caption); line-height: var(--lh-caption); text-align: right; }
     .kpi .ev { padding-left: 0; }
@@ -58,7 +60,7 @@
   </section>
 
   <section class="group" aria-labelledby="g1">
-    <h2 class="t-title" id="g1">Security <span class="muted num">3 of 5 on target</span></h2>
+    <h2 class="t-title" id="g1">Security <span class="muted num">3 of 5 on target</span><span class="days-h">Last 7 days</span></h2>
     <details class="kpi" data-state="protected"><summary><span class="st"><span class="dot"></span>On target</span><span class="nm">Protection uptime</span><span class="val">100%</span><span class="tgt">target ≥ 99.9%, 7 days</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
     <details class="kpi" data-state="unprotected" open><summary><span class="st"><span class="dot"></span>Off target</span><span class="nm">Threat stops</span><span class="val">109</span><span class="tgt">target 0 got through · 4 did</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:20%"></i><i style="--h:12%"></i><i style="--h:100%"></i></span></summary>
       <div class="ev">
@@ -73,7 +75,7 @@
   </section>
 
   <section class="group" aria-labelledby="g2">
-    <h2 class="t-title" id="g2">Anonymity <span class="muted num">3 of 4 on target</span></h2>
+    <h2 class="t-title" id="g2">Anonymity <span class="muted num">3 of 4 on target</span><span class="days-h">Last 7 days</span></h2>
     <details class="kpi" data-state="protected"><summary><span class="st"><span class="dot"></span>On target</span><span class="nm">Tracker exposure</span><span class="val">99.55%</span><span class="tgt">target ≥ 99% of listed blocked</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
     <details class="kpi" data-state="neutral"><summary><span class="st"><span class="dot hollow"></span>Information</span><span class="nm">Third-party spread</span><span class="val">6,918</span><span class="tgt">domains · top 10 own 21.8%</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
     <details class="kpi" data-state="protected"><summary><span class="st"><span class="dot"></span>On target</span><span class="nm">DNS privacy</span><span class="val">100%</span><span class="tgt">target 100% encrypted</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:100%"></i></span></summary></details>
@@ -82,15 +84,15 @@
   </section>
 
   <section class="group" aria-labelledby="g3">
-    <h2 class="t-title" id="g3">Efficiency <span class="muted num">0 of 1 on target</span></h2>
+    <h2 class="t-title" id="g3">Efficiency <span class="muted num">0 of 1 on target</span><span class="days-h">Last 7 days</span></h2>
     <details class="kpi" data-state="unprotected"><summary><span class="st"><span class="dot"></span>Off target</span><span class="nm">Resource cost</span><span class="val">5.0% CPU</span><span class="tgt">target &lt; 8% · DNS p95 16 ms</span><span class="bars"><i class="zero"></i><i class="zero"></i><i class="zero"></i><i style="--h:30%"></i><i style="--h:62%"></i><i style="--h:100%"></i><i style="--h:84%"></i></span></summary></details>
   </section>
 
   <section class="lists">
     <nav class="tabs" aria-label="Today's lists">
-      <a href="#" aria-current="page">Trackers that got through <span class="count">9</span></a>
-      <a href="#">Threats blocked <span class="count">13</span></a>
-      <a href="#">Feed age <span class="count">16</span></a>
+      <a href="#" aria-current="page">Got through <span class="count">9</span></a>
+      <a href="#">Threats <span class="count">13</span></a>
+      <a href="#">Feeds <span class="count">16</span></a>
     </nav>
     <ul class="list">
       <li class="row"><span class="host line1">metrics.icloud.com</span><span class="trail">41</span></li>
@@ -104,5 +106,17 @@
 
   <p class="foot t-caption">Computed on this Mac from the guard ledger, the DNS filter's log and local probes. Nothing is sent anywhere.</p>
 </div>
+<script>
+  // 7-day state per KPI, oldest first: p on target, r watch, u off target, n information, - not measured.
+  const days = ["------p", "pupuuuu", "------p", "-----uu", "------r", "ppppppp", "nnnnnnn", "------p", "------u", "------p", "---ppuu"];
+  const map = {p: "protected", r: "reduced", u: "unprotected", n: "neutral", "-": "none"};
+  const word = {p: "on target", r: "watch", u: "off target", n: "information", "-": "not measured"};
+  document.querySelectorAll(".kpi .bars").forEach((el, k) => {
+    const d = days[k]; const span = document.createElement("span"); span.className = "days";
+    span.setAttribute("aria-label", "Last 7 days: " + [...d].map((c) => word[c]).join(", "));
+    span.innerHTML = [...d].map((c) => `<i data-state="${map[c]}"></i>`).join("");
+    el.replaceWith(span);
+  });
+</script>
 </body>
 </html>

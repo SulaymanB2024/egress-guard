@@ -17,7 +17,7 @@
   .thead { height: 32px; color: var(--muted); font-size: var(--t-caption); border-bottom: 1px solid var(--line); }
   .tr { height: 28px; }
   .tr:nth-child(even) { background: transparent; }
-  .tr.sel { background: var(--sunken); }
+  .tr.sel { background: var(--select); }
   .tr .tm { color: var(--muted); font-variant-numeric: tabular-nums; }
   .tr .blocked { font-weight: var(--w-strong); }
   .tr .allowed { color: var(--muted); }
@@ -75,8 +75,26 @@
     ["14:28:21","allowed","fonts.example-cdn.test","No rule matched"],
     ["14:28:02","blocked","bat.bing.com","Ad or tracker list"],
   ];
+  // Reference implementation of the hostname truncation rule in DESIGN.md: drop whole middle labels, never cut a label
+  // unless the registrable domain alone is too long.
+  function fitHost(host, max) {
+    if (host.length <= max) return host;
+    const L = host.split(".");
+    const k = L.length > 2 && L[L.length - 1].length === 2 && /^(co|com|org|net|ac|gov|edu)$/.test(L[L.length - 2]) ? 3 : 2;
+    const tail = L.slice(-k).join(".");
+    let head = [];
+    for (const label of L.slice(0, -k)) {
+      const next = [...head, label].join(".") + ".…." + tail;
+      if (next.length > max) break;
+      head.push(label);
+    }
+    if (head.length) return head.join(".") + ".…." + tail;
+    if (("…." + tail).length <= max) return "…." + tail;
+    const keep = max - 1, a = Math.ceil(keep / 2);
+    return tail.slice(0, a) + "…" + tail.slice(tail.length - (keep - a));
+  }
   document.getElementById("rows").innerHTML = rows.map(([t, d, h, r, s], i) =>
-    `<div class="tr${i === 5 ? " sel" : ""}"${s ? ` data-state="${s}"` : ""}><span class="tm">${t}</span><span class="${d}">${d === "blocked" ? "Blocked" : "Allowed"}</span><span class="h host" title="${h}">${h}</span><span class="r">${r}</span></div>`).join("");
+    `<div class="tr${i === 5 ? " sel" : ""}"${s ? ` data-state="${s}"` : ""}><span class="tm">${t}</span><span class="${d}">${d === "blocked" ? "Blocked" : "Allowed"}</span><span class="h host" title="${h}">${fitHost(h, 56)}</span><span class="r">${r}</span></div>`).join("");
 </script>
 </body>
 </html>
