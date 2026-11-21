@@ -111,12 +111,13 @@
     if (D.testMatchOutcome) {
       try {
         const outcome = await D.testMatchOutcome({url: `https://${host}/`, type: "main_frame"});
-        return outcome.matchedRules.some((m) => m.rulesetId === "threats");
+        return outcome.matchedRules.some((m) => listKind(m.rulesetId) === "threats");
       } catch { /* fall through to the packaged list */ }
     }
     if (!threatNames) {
-      threatNames = fetch(OWN + "rules/threats.json").then((r) => r.json())
-        .then((rules) => new Set(rules.filter((r) => r.action.type === "block").flatMap((r) => r.condition.requestDomains || [])));
+      const files = ((LISTS.lists || {}).threats || {}).files || ["rules/threats.json"];
+      threatNames = Promise.all(files.filter((f) => /^rules\/threats(-[0-9]+)?\.json$/.test(f)).map((file) => fetch(OWN + file).then((r) => r.json())))
+        .then((sets) => new Set(sets.flat().filter((r) => r.action.type === "block").flatMap((r) => r.condition.requestDomains || [])));
       threatNames.catch(() => { threatNames = null; });
     }
     const names = await threatNames;
@@ -142,11 +143,14 @@
     }, 200);
   }
 
+  // A large list is split across rulesets "threats", "threats-2", …; they are one list to the user.
+  function listKind(rulesetId) { return typeof rulesetId === "string" ? rulesetId.replace(/-[0-9]+$/, "") : rulesetId; }
+
   function listOf(rule) {
     // Allow rules (your allow rules and timed exceptions) also report matches; they blocked nothing.
     if (rule.rulesetId === "_dynamic") return allowIds.has(rule.ruleId) ? null : {list: "user", ruleId: sources[rule.ruleId] || null};
     if (rule.rulesetId === "_session") return null;
-    return {list: rule.rulesetId};
+    return {list: listKind(rule.rulesetId)};
   }
 
   async function onMatched(info) {

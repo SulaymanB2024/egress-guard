@@ -65,7 +65,7 @@ test("extension source has no HTML injection, eval, remote URLs or networking AP
     let code = fs.readFileSync(file, "utf8");
     // The one sanctioned read: the Chrome worker loads its own packaged threat ruleset (CSP connect-src 'self').
     // And it asks Chrome how a navigation to a host would match (testMatchOutcome), which sends nothing.
-    if (path.basename(file) === "background-chrome.js") code = code.replace('fetch(OWN + "rules/threats.json")', "OWN_RULESET").replace("url: `https://${host}/`", "url: PROBE");
+    if (path.basename(file) === "background-chrome.js") code = code.replace("fetch(OWN + file)", "OWN_RULESET").replace("url: `https://${host}/`", "url: PROBE");
     for (const banned of [/innerHTML/, /outerHTML/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function/, /\bfetch\s*\(/, /XMLHttpRequest/, /WebSocket/, /sendBeacon/, /importScripts/, /https?:\/\/(?!\*)/, /setTimeout\(\s*["'`]/, /\bon[a-z]+\s*=\s*["']/]) {
       assert.doesNotMatch(code, banned, `${path.relative(root, file)} contains ${banned}`);
     }
