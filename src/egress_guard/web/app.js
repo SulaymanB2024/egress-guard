@@ -644,6 +644,7 @@ function renderActivity() {
         : events.length ? 'The ' + plural(events.length, 'latest decision', 'latest decisions') + ' from this Mac’s proxy.' : '';
   $('activity-summary').textContent = summary + (dropped ? ' ' + plural(dropped, 'event was', 'events were') + ' not recorded because the ledger was busy.' : '');
   $('activity-summary').hidden = !$('activity-summary').textContent;
+  document.querySelector('[data-decision]').closest('.segmented').hidden = history === 'none';
   const message = $('activity-message');
   message.hidden = Boolean(filtered.length) || !events || history === 'none';
   message.textContent = events?.length ? 'No recent decisions match. Press Enter to check this domain.' : 'No activity yet.';
