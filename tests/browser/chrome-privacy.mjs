@@ -485,7 +485,7 @@ try {
     for (const scheme of ["light", "dark"]) {
       await cdp("Emulation.setEmulatedMedia", {features: [{name: "prefers-color-scheme", value: scheme}]}, pop);
       await navigate(pop, `chrome-extension://${id}/popup.html?tab=${tabId}`);
-      await until(pop, "Number(document.getElementById('blocked-count').textContent) > 0 && document.querySelectorAll('#modes input').length === 4", "popup rendered");
+      await until(pop, "Number(document.getElementById('blocked-count').textContent) > 0 && document.querySelectorAll('#modes button').length === 4", "popup rendered");
       await sleep(300);
       await screenshot(pop, path.join(shots, `popup-categories-${scheme}.png`), 360);
     }

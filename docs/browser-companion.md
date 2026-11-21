@@ -116,8 +116,9 @@ the real-site results below for what it leaves.
 
 **Warning page.** A navigation to a threat-listed site never reaches it. The
 page shows the host, the full address, the list and its date. **Go back** is
-the default. **I understand the risk…** reveals **Continue to this site
-once**, which adds two session `allow` rules for that tab and that host only:
+the one filled button and has the focus. **Continue anyway…** (quiet) reveals
+a confirmation with the consequence and **Open <host> once** (Escape closes
+it again), which adds two session `allow` rules for that tab and that host only:
 the navigation, and the host's own requests. Ads and trackers stay blocked on
 the continued page, and so does every other threat-listed host the page pulls
 in (an `allowAllRequests` rule would have lifted those for the whole frame
@@ -173,19 +174,39 @@ console hosts (`accounts.google.com`, `pay.google.com`, `ads.google.com`,
 `EXCLUDED_HOSTS` in `core/params.js`) are left alone entirely, although the
 Google and Amazon per-site sets cover their consumer sites.
 
-**Popup.** It leads with what was blocked on this page: the count and a
-breakdown by named category (Ads and trackers, Disguised trackers, Malware and
-phishing, First-party tracker script, Tracking request, Ad request,
-Fingerprinting or session replay, Third-party beacon, Link tracker unwrapped,
-Tracker answered by a stub, Strict mode, Scripts off, Your rules). Then the
-link and cookie cleaning counts with **Stop cleaning on this site**, the
-site's protection level, and each blocked endpoint with its type and category
-and **Allow 15 min** (never for malware and phishing hosts, navigations, or
-WebSocket-like types; Strict blocks also offer **Allow host**). Below that: elements hidden on the page, the built-in ad-slot count
-with **Show ad slots on this site** / **Hide ad slots on this site**, this
-site's rules with **Remove**, timed exceptions, and the list versions the
-build contains. It follows the system light or dark setting. The toolbar
-badge shows Chrome's own per-tab count of blocked requests.
+**Popup.** Built to the design system in `docs/design/` (`DESIGN.md`
+section 12; `browser/ui.css` carries `docs/design/tokens.css` unchanged, and
+`tests/browser/ui-tokens.test.cjs` fails if they drift). A 360 px popup with
+a header (site host, truncated in the middle by whole labels, and a status
+dot and word) and four tabs, operable with the arrow keys:
+
+- **This page**: requests blocked on this page as the one large number (a
+  stopped malware or phishing request adds "1 threat stopped" in the threat
+  colour), then links cleaned, cookies removed and elements hidden, then
+  **Protection on this site**: Relaxed, Standard, Strict or No scripts, with a
+  quiet **Pause** beside the heading that shows everything hidden on this page
+  until **Resume** (blocking continues). "Newer lists have been built" and a
+  paused page each add one callout. It fits 520 px without scrolling.
+- **Blocked**: grouped by named category (Ads and trackers, Disguised
+  trackers, Malware and phishing, First-party tracker script, Tracking
+  request, Ad request, Fingerprinting or session replay, Third-party beacon,
+  Link tracker unwrapped, Tracker answered by a stub, Strict mode, Scripts
+  off, Your rules), one row per endpoint with its type. **Allow 15 min**
+  appears only on the hovered or keyboard-focused row (never for malware and
+  phishing hosts, navigations, or WebSocket-like types; Strict blocks also
+  offer **Allow host**).
+- **Rules**: this site's rules with **Remove** and **Add…** (the endpoint
+  form; Escape closes it), timed exceptions with **End now**, and page tools:
+  **Block an element…**, **Show hidden ad slots** / **Hide ad slots on this
+  site**, **Restore everything hidden here** / **Resume hiding**, and **Stop
+  cleaning on this site** / **Clean links and cookies on this site**.
+- **Settings**: the default level for other sites (Standard or Strict),
+  **Always open scanned links directly**, and each list file with its date;
+  **List files and hashes** shows every SHA-256.
+
+Each second-level view has an empty state; a browser page says it cannot be
+filtered. It follows the system light or dark setting. The toolbar badge
+shows Chrome's own per-tab count of blocked requests.
 
 What the popup can list depends on how the extension is installed, and it
 says which:
@@ -291,8 +312,8 @@ exception count moved by more than 2× from the last accepted copy (those
 counts are recorded beside its SHA-256 in the cache's `<id>.json`); review
 the list, then rebuild with `--accept-list-change ID`. The AdGuard
 click-through list has the same cap. Each list's SHA-256 and last-modified
-date are written to `NOTICE.txt` and shown under **List files** in the popup
-footer.
+date are written to `NOTICE.txt` and shown under **List files and hashes**
+in the popup's Settings tab.
 
 ## Link and cookie cleaning
 
@@ -349,12 +370,14 @@ Protection and Trend Micro Click Time Protection links go, from anywhere, to
 a local page (`unwrap.html`, reachable only by the DNR redirect: it is
 web-accessible by its per-session dynamic address alone, refuses to render
 inside a frame and never navigates by itself). It shows the destination host
-large in a monospace face, the full address below it and, for an
-internationalized name, both the `xn--` form that really opens and the
-Unicode form it may imitate. **Continue through the scanner** has the focus:
+in a monospace face under the question "Open this link through <scanner>?",
+the full address below it and, for an internationalized name, one
+"Look-alike letters" callout with the Unicode form it may imitate (the `xn--`
+form is what opens). **Continue through <scanner>** has the focus:
 the worker adds a session rule that lets the next navigation to that scanner
 host in that tab pass once, so the scanner gets its own address, signature
-and parameters untouched. **Open directly (skips the mail scan)** opens the
+and parameters untouched. **Open directly** (its accessible name and tooltip
+say it skips the mail scan) opens the
 decoded destination after the threat-list check. Mimecast keeps the address
 on its server, so only the host is shown and only Continue is offered. The
 click-time cleaner and **Copy clean link** never change a scanner's link. The
@@ -365,7 +388,11 @@ Proofpoint unwrapped automatically) and its escape hatch, which could not be
 reached: the scanner's host was never a page you could open the popup on.
 
 The interstitial at 1440 px and 390 px, light and dark, is captured by
-`node tests/browser/chrome-privacy.mjs --shots DIR`.
+`node tests/browser/chrome-privacy.mjs --shots DIR`. Every extension page and
+popup state, with awkward real strings, is captured and audited (clipping,
+sizes, spacing, filled buttons, names, the 520 px budget) by
+`node docs/design/review/capture.mjs --extension`. A link tracker whose
+destination cannot be read shows the link, **Go back** and **Copy link**.
 
 **Tracking cookies** (`core/cookies.js`, 44 name patterns, using the
 `cookies` permission) are deleted the moment they are set, first or third
@@ -444,8 +471,8 @@ back on).
 | `__qca` | Quantcast | everywhere | Visitor id |
 | `_cb_ls`, `_cb_svref`, `_chartbeat<n>` | Chartbeat | everywhere | Visitor and referrer. Bare `_cb` dropped: too short to be unique |
 
-The popup shows **links cleaned in this tab** and **tracking cookies removed
-on this site**. **Stop cleaning on this site**: links to that site keep their
+The popup shows **links cleaned** (this tab) and **cookies removed** (tracking
+cookies, this site). **Stop cleaning on this site**: links to that site keep their
 parameters and are not unwrapped, and its own tracking cookies stay. Its
 pages' third-party requests to tracker hosts still go without cookies: an
 allow at the cleaning tier for its subresources would also lift every URL
@@ -526,11 +553,14 @@ own level:
 | No scripts | Strict, plus every script the site's pages request is blocked and a `script-src 'none'` Content-Security-Policy is appended to them, so inline scripts do not run either. Switching a site to No scripts (or Strict) unregisters its service workers and clears its Cache Storage, so a worker cannot serve cached pages and scripts no rule sees. That reaches the origins the extension can name (the site, `www.`, and every origin of the site open in a tab); another subdomain's worker stays until Chrome's own site-data clearing removes it, and the popup says so |
 
 **Click-to-load.** Under Strict and No scripts a held embed is replaced by a
-local placeholder naming the provider. One real click (synthetic clicks are
+local placeholder in the embed's own box: "Held by Egress Guard", the
+provider and kind ("YouTube video"), **Load video** and a quiet **Load signed
+in**. One real click (synthetic clicks are
 ignored) adds a session rule for that provider in that tab only and loads it;
 the allowance ends when the tab navigates. The embed still loads **without
 cookies**: the allow sits below Strict's and the tracker-host cookie
-stripping. **Load with cookies (signed in)** is the explicit second choice.
+stripping. **Load signed in** (loads with cookies) is the explicit second
+choice. A refused click adds one line in the threat colour.
 The page owns the DOM around the placeholder, so it is hardened against
 clickjacking: the host element has `!important` inline styles and
 `all:initial !important`, and a click counts only when Chrome's

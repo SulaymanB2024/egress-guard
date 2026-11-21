@@ -24,7 +24,7 @@ main > .inline-error { padding: var(--s3) var(--s4) 0; }
 #panel-page { padding-top: var(--s5); }
 
 /* This page: the focal number, three facts, the one control. */
-.focal .label { font-size: var(--t-body); line-height: var(--lh-body); color: var(--muted); }
+.focal .label { margin-top: var(--s1); font-size: var(--t-body); line-height: var(--lh-body); color: var(--muted); }
 .threat-line { margin-top: var(--s2); }
 .facts { margin-top: var(--s5); }
 .facts .value { font-size: var(--t-title); line-height: var(--lh-title); }
