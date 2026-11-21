@@ -177,6 +177,7 @@ try {
   };
   sw = await attachWorker();
   check("service worker started", Boolean(sw));
+  check("service worker script initialised", await waitFor(async () => (await swEval("typeof __EGBackground")) === "object", 30000));
   await swEval("__EGBackground.ready.then(() => true)");
   const enabled = await swEval("chrome.declarativeNetRequest.getEnabledRulesets()");
   check("static rulesets enabled: threats, trackers, cname, params", ["threats", "trackers", "cname", "params"].every((r) => enabled.includes(r)), enabled.join(","));
@@ -256,7 +257,7 @@ try {
     for (const scheme of ["light", "dark"]) {
       await cdp("Emulation.setEmulatedMedia", {features: [{name: "prefers-color-scheme", value: scheme}]}, pop);
       await navigate(pop, `chrome-extension://${id}/popup.html?tab=${tabId}`);
-      await until(pop, "Number(document.getElementById('blocked-count').textContent) > 0", "popup rendered blocked items");
+      await until(pop, "Number(document.getElementById('blocked-count').textContent) > 0 && Boolean(document.querySelector('#exceptions li')) && document.getElementById('hidden').textContent.length > 0", "popup rendered blocked items");
       await sleep(300);
       await screenshot(pop, path.join(shots, `popup-${scheme}.png`), 360);
     }
