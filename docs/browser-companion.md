@@ -32,7 +32,9 @@ or without the proxy running.
    ```
 
    It prints the Chrome and Firefox folders, the extension id and the size of
-   each list. Options: `--feeds DIR` (a feed cache other than the proxy's
+   each list. A missing malware and phishing feed stops the build (pass
+   `--allow-missing` to build without it on purpose); feed files must be
+   regular files, not links. Options: `--feeds DIR` (a feed cache other than the proxy's
    data directory), `--tier pro|pro.plus|ultimate` (default `pro.plus`, the
    proxy's default), `--no-lists` (your own rules and parameter stripping
    only), `--out DIR` (default `dist-browser/`, which git ignores).
@@ -73,17 +75,30 @@ check below.
 **Warning page.** A navigation to a threat-listed site never reaches it. The
 page shows the host, the full address, the list and its date. **Go back** is
 the default. **I understand the risk…** reveals **Continue to this site
-once**, which adds a session rule for that tab and that host only. Ads and
-trackers stay blocked on the continued page. The exception ends when the tab
-leaves the site, after 10 minutes, or when Chrome restarts.
+once**, which adds two session `allow` rules for that tab and that host only:
+the navigation, and the host's own requests. Ads and trackers stay blocked on
+the continued page, and so does every other threat-listed host the page pulls
+in (an `allowAllRequests` rule would have lifted those for the whole frame
+tree; the headless check proves they stay blocked). The exception ends when
+the tab leaves the site, after 10 minutes, or when Chrome restarts.
+
+The worker only continues to the address the page displayed: the page sends
+it, and it must equal the address in the page's own URL at click time. If
+anything changes the fragment after load the page reloads. Inside a frame the
+page refuses to offer Continue (and the extension CSP sets `frame-ancestors
+'none'`). The host must really be on the bundled threat list (Chrome's
+`testMatchOutcome` in unpacked builds, the packaged ruleset otherwise).
+Threat-listed requests never get a one-click **Allow** in the popup.
 
 **Parameters removed** (exact names): `utm_source`, `utm_medium`,
 `utm_campaign`, `utm_term`, `utm_content`, `utm_id` and other `utm_*` names
 listed in the source, `fbclid`, `gclid`, `gclsrc`, `dclid`, `gbraid`,
 `wbraid`, `msclkid`, `yclid`, `twclid`, `ttclid`, `igshid`, `li_fat_id`,
-`mc_eid`, `_hsenc`, `_hsmi`, `mkt_tok`, `oly_anon_id`, `oly_enc_id`,
-`vero_id`, `rb_clickid`, `s_cid`, `wickedid`, `epik`, `_openstat`,
-`srsltid`. Functional parameters such as `id`, `q`, `ref` or `v` are kept.
+`mc_eid`, `oly_anon_id`, `oly_enc_id`, `vero_id`, `rb_clickid`, `s_cid`,
+`wickedid`, `epik`, `_openstat`, `srsltid`. Functional parameters such as
+`id`, `q`, `ref` or `v` are kept, and so are Marketo's `mkt_tok` and
+HubSpot's `_hsenc` and `_hsmi`: unsubscribe and email-preference links stop
+working without them.
 
 **Popup.** It leads with what was blocked on this page: the count, a
 breakdown by list, then each endpoint with its type and list and **Allow 15
@@ -111,8 +126,11 @@ own per-tab count of blocked requests.
 - The list of blocked endpoints in the popup relies on Chrome's
   `onRuleMatchedDebug`, which exists only for unpacked extensions. A packed
   build would show the count badge only.
-- The extension id and `warning.html` are web-accessible, so a site can tell
-  that this extension is installed.
+- Fingerprinting. `warning.html` is web-accessible with `use_dynamic_url`, so
+  a page cannot fetch it at the fixed id (the headless check confirms the
+  fetch is refused); Chrome still performs the DNR redirect to it. A site can
+  still infer that *some* blocker runs from requests that fail, as with any
+  blocker.
 
 ## Your own rules (both browsers)
 
@@ -140,7 +158,7 @@ priority ladder (`browser/core/dnr.js`):
 | 6 | Your allow rules |
 | 5 | Your block rules |
 | 4 | Ad, tracker and CNAME lists |
-| 3 | Continue once (session, one tab, one host) |
+| 3 | Continue once (session `allow`, one tab, one host and its own requests) |
 | 2 | Malware and phishing lists |
 | 1 | Tracking-parameter stripping |
 
@@ -192,9 +210,11 @@ Firefox quits.
 | `alarms` | Both | Remove exceptions and rules when they expire |
 
 No `tabs`, `scripting`, `cookies`, `history` or native messaging. There is
-no remote code: extension pages allow only their own scripts with
-`connect-src 'none'`, and the extension makes no network requests of its
-own. List data is compiled into the extension at build time.
+no remote code: extension pages allow only their own scripts. In Chrome,
+`connect-src 'self'` lets the worker read its own packaged threat ruleset
+(packed builds, to check a host before Continue); it makes no network
+requests. Firefox keeps `connect-src 'none'`. List data is compiled into the
+extension at build time.
 
 ## Licences of bundled list data
 

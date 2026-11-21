@@ -13,9 +13,21 @@
     return new Date(seconds * 1000).toLocaleDateString(undefined, {year: "numeric", month: "short", day: "numeric"});
   }
 
+  function lock(message) {
+    $("reveal").disabled = true;
+    $("continue").disabled = true;
+    $("confirm").hidden = true;
+    if (message) showError(message);
+  }
+
   async function init() {
+    // Inside another page's frame the user cannot see what they would agree to (clickjacking): no Continue.
+    if (root.top !== root.self) { lock("This warning cannot be used inside another page."); return; }
     const target = parseLocation();
-    if (!target) { $("host").textContent = "Unknown address"; $("reveal").disabled = true; return; }
+    if (!target) { $("host").textContent = "Unknown address"; lock(); return; }
+    // If anything changes the address after this page rendered, start over so the page never shows one host and
+    // continues to another.
+    root.addEventListener("hashchange", () => { lock(); root.location.reload(); });
     $("host").textContent = target.host;
     $("url").textContent = target.url;
     document.title = `Blocked: ${target.host}`;
@@ -31,7 +43,7 @@
     });
     $("continue").addEventListener("click", async () => {
       $("continue").disabled = true;
-      const reply = await B.runtime.sendMessage({type: "continue-once"});
+      const reply = await B.runtime.sendMessage({type: "continue-once", url: target.url});
       if (!reply || reply.error || !reply.url) { $("continue").disabled = false; showError(reply && reply.error ? reply.error : "Could not add the exception."); return; }
       root.location.replace(reply.url);
     });

@@ -14,8 +14,13 @@
   const KEY = "egressGuard";
   const ALARM = "eg-expiry";
   const MAX_LOG = 100;
+  const MAX_PATH = 256;             // characters of a blocked request's path kept in the per-tab log
   const CONTINUE_MINUTES = 10;
   const CONTINUE_BASE = 100000;   // session rule ids for "continue once"
+  // The extension's own origin. Not runtime.getURL(): with use_dynamic_url (warning.html is web-accessible only by a
+  // per-session URL, so sites cannot detect the extension) getURL returns that dynamic origin, while our own pages
+  // (popup, warning page after the DNR redirect) still run at the fixed-id origin.
+  const OWN = `chrome-extension://${C.runtime.id}/`;
   const EXCEPTION_MINUTES_MAX = rulesApi.MAX_EXCEPTION_MINUTES;
 
   const store = new RuleStore({persist: {
@@ -53,26 +58,62 @@
   // ---- "continue once" session rules --------------------------------------------
   async function continues() { return (await C.storage.session.get("continues")).continues || []; }
   async function saveContinues(list) { await C.storage.session.set({continues: list}); }
+  const ruleIds = (c) => [c.id, c.id + 1];       // each continue is two session rules (dnr.continueRules)
 
-  async function addContinue(host, tabId) {
-    const list = (await continues()).filter((c) => !(c.host === host && c.tabId === tabId));
-    const used = new Set(list.map((c) => c.id));
-    let id = CONTINUE_BASE;
-    while (used.has(id)) id++;
-    const rule = dnr.continueRule(id, host, tabId);
-    await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [id], addRules: [rule]});
-    list.push({id, host, tabId, expiresAt: Date.now() + CONTINUE_MINUTES * 60000});
-    await saveContinues(list);
-    await schedule();
-    return list[list.length - 1];
+  // Read-modify-write of the continue list is serialised, so two clicks never pick the same rule id.
+  let continuing = Promise.resolve();
+  function serial(fn) {
+    const run = continuing.catch(() => {}).then(fn);
+    continuing = run;
+    return run;
   }
 
-  async function dropContinues(test) {
-    const list = await continues();
-    const gone = list.filter(test);
-    if (!gone.length) return;
-    await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.map((c) => c.id)});
-    await saveContinues(list.filter((c) => !gone.includes(c)));
+  function addContinue(host, tabId) {
+    return serial(async () => {
+      const list = await continues();
+      const replaced = list.filter((c) => c.host === host && c.tabId === tabId);
+      const kept = list.filter((c) => !replaced.includes(c));
+      const used = new Set(kept.flatMap(ruleIds));
+      let id = CONTINUE_BASE;
+      while (used.has(id) || used.has(id + 1)) id += 2;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: [...replaced.flatMap(ruleIds), id, id + 1], addRules: dnr.continueRules(id, host, tabId)});
+      const entry = {id, host, tabId, expiresAt: Date.now() + CONTINUE_MINUTES * 60000};
+      await saveContinues([...kept, entry]);
+      await schedule();
+      return entry;
+    });
+  }
+
+  function dropContinues(test) {
+    return serial(async () => {
+      const list = await continues();
+      const gone = list.filter(test);
+      if (!gone.length) return;
+      await C.declarativeNetRequest.updateSessionRules({removeRuleIds: gone.flatMap(ruleIds)});
+      await saveContinues(list.filter((c) => !gone.includes(c)));
+    });
+  }
+
+  // ---- is a host on the bundled malware and phishing list? ---------------------------------
+  // Unpacked builds ask Chrome itself (testMatchOutcome). Packed builds lack that API, so the worker reads its own
+  // packaged threat ruleset once (the CSP allows connect-src 'self' and nothing else).
+  let threatNames = null;
+  async function isThreat(host) {
+    const D = C.declarativeNetRequest;
+    if (D.testMatchOutcome) {
+      try {
+        const outcome = await D.testMatchOutcome({url: `https://${host}/`, type: "main_frame"});
+        return outcome.matchedRules.some((m) => m.rulesetId === "threats");
+      } catch { /* fall through to the packaged list */ }
+    }
+    if (!threatNames) {
+      threatNames = fetch(OWN + "rules/threats.json").then((r) => r.json())
+        .then((rules) => new Set(rules.filter((r) => r.action.type === "block").flatMap((r) => r.condition.requestDomains || [])));
+      threatNames.catch(() => { threatNames = null; });
+    }
+    const names = await threatNames;
+    for (let name = host; name.includes("."); name = name.slice(name.indexOf(".") + 1)) if (names.has(name)) return true;
+    return false;
   }
 
   // ---- per-tab blocked log (unpacked builds report matches through onRuleMatchedDebug) ----
@@ -111,7 +152,7 @@
     if (!host) return;
     const type = request.type === "main_frame" ? "main_frame" : (dnr.CHROME_TO_CORE[request.type] || "other");
     const log = await tabLog(request.tabId);
-    const path = parsed.pathname || "/";
+    const path = (parsed.pathname || "/").slice(0, MAX_PATH);
     const prior = log.items.find((x) => x.host === host && x.path === path && x.type === type && x.list === source.list);
     if (prior) prior.count++;
     else if (log.items.length < MAX_LOG) log.items.push({host, path, type, list: source.list, ruleId: source.ruleId || null, count: 1});
@@ -130,7 +171,7 @@
 
   C.tabs.onUpdated.addListener((tabId, info) => {
     if (info.status === "loading") resetTab(tabId).catch(() => {});
-    if (typeof info.url === "string" && !info.url.startsWith(C.runtime.getURL(""))) {
+    if (typeof info.url === "string" && !info.url.startsWith(OWN)) {
       // A "continue once" exception ends when the tab leaves the host it was granted for.
       const host = hosts.hostOfUrl(info.url);
       dropContinues((c) => c.tabId === tabId && !(host && hosts.withinScope(host, c.host))).catch(() => {});
@@ -150,7 +191,7 @@
   });
 
   // ---- messaging -------------------------------------------------------------------
-  const extensionUrl = (sender, page) => typeof sender.url === "string" && sender.url.startsWith(C.runtime.getURL(page));
+  const extensionUrl = (sender, page) => typeof sender.url === "string" && sender.url.startsWith(OWN + page);
   // The popup normally has no tab; opened as popup.html?tab=<id> (development captures) it does.
   const fromPopup = (sender) => extensionUrl(sender, "popup.html");
   const fromWarning = (sender) => sender.tab && Number.isInteger(sender.tab.id) && extensionUrl(sender, "warning.html");
@@ -197,8 +238,12 @@
       }
       case "continue-once": {
         if (!fromWarning(sender)) return {error: "Not allowed from a page."};
+        if (sender.frameId !== 0) return {error: "The warning page cannot continue from inside a frame."};
         const target = dnr.parseWarning(sender.url);
         if (!target) return {error: "Nothing to continue to."};
+        // The page names the address it showed; if the fragment changed since, the user agreed to something else.
+        if (message.url !== target.url) return {error: "The address changed after this page loaded. Reload it and read it again."};
+        if (!(await isThreat(target.host))) return {error: "That site is not on the malware and phishing list."};
         await addContinue(target.host, sender.tab.id);
         return {ok: true, url: target.url};
       }
@@ -231,6 +276,8 @@
         const host = hosts.hostOfUrl(message.tabUrl);
         if (!host) return {error: "Open a web page first."};
         if (message.resourceType === "main_frame") return {error: "Navigations are allowed with Continue on the warning page."};
+        const target = hosts.normalizeHost(message.host);
+        if (target && await isThreat(target)) return {error: "This host is on the malware and phishing list; it cannot be allowed from here."};
         const minutes = Math.min(message.minutes, EXCEPTION_MINUTES_MAX);
         const result = await attempt(() => store.addException({site: hosts.siteOf(host), host: message.host, path: message.path, type: message.resourceType, minutes}));
         if (!result.error) await afterChange();

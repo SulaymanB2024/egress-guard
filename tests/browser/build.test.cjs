@@ -47,6 +47,30 @@ test("snapshots are re-verified: tampering, bad names, wrong counts and small li
   assert.equal(dnsName("xn--bcher-kva.example"), "xn--bcher-kva.example");
 });
 
+test("a missing threat feed is fatal unless explicitly allowed; links, non-files and oversize snapshots are refused unread", async () => {
+  const {loadLists, readSnapshot} = await load();
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "blocklists"));
+    fs.copyFileSync(path.join(FEEDS, "blocklists/hagezi-pro.plus.txt"), path.join(dir, "blocklists/hagezi-pro.plus.txt"));
+    assert.throws(() => loadLists(dir, {allowSmall: true}), /threat.*missing|missing.*threat/i);
+    const notes = [];
+    const lists = loadLists(dir, {allowSmall: true, allowMissing: true, log: (m) => notes.push(m)});
+    assert.equal(lists.threats.names.length, 0);
+    assert.ok(notes.some((n) => /hagezi-threat-intel/.test(n)));
+    const real = path.join(FEEDS, "blocklists/hagezi-threat-intel.txt");
+    const link = path.join(dir, "blocklists/hagezi-threat-intel.txt");
+    fs.symlinkSync(real, link);
+    assert.throws(() => readSnapshot(link), /regular file/);
+    assert.throws(() => loadLists(dir, {allowSmall: true}), /regular file/);
+    assert.throws(() => readSnapshot(path.join(dir, "blocklists")), /regular file/);
+    const big = path.join(dir, "big.txt");
+    fs.writeFileSync(big, "");
+    fs.truncateSync(big, 33 * 1024 * 1024);
+    assert.throws(() => readSnapshot(big), /size limit/);
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});
+
 test("build emits Chrome and Firefox from shared sources; Chrome gets rulesets, a bundled worker and a notice", async () => {
   const {build, loadLists} = await load();
   const out = tmp();
@@ -66,7 +90,8 @@ test("build emits Chrome and Firefox from shared sources; Chrome gets rulesets, 
     const trackers = JSON.parse(fs.readFileSync(path.join(chrome, "rules/trackers.json"), "utf8"));
     assert.deepEqual(trackers[0].condition.requestDomains, ["adserver.example", "tracker-fixture.test"], "subdomains folded into parents");
     const worker = fs.readFileSync(path.join(chrome, "background.js"), "utf8");
-    assert.doesNotMatch(worker, /importScripts|\bfetch\s*\(/);
+    assert.doesNotMatch(worker, /importScripts/);
+    assert.deepEqual(worker.match(/\bfetch\s*\([^)]*\)/g), ['fetch(OWN + "rules/threats.json")'], "the worker fetches only its own packaged threat ruleset");
     assert.match(worker, /globalThis\.EGLists = /);
     assert.match(worker, /HaGeZi Multi PRO\+\+/);
     const notice = fs.readFileSync(path.join(chrome, "NOTICE.txt"), "utf8");

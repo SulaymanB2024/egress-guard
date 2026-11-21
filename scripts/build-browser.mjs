@@ -56,7 +56,17 @@ export function dnsName(value) {
 
 /** Read and re-verify one proxy snapshot ("# {json}\n" + sorted names). Throws with a reason. */
 export function readSnapshot(file, {minimum = 0} = {}) {
-  const data = fs.readFileSync(file);
+  // Check what the path is before reading it: no symlinks, devices or directories, nothing oversized.
+  const info = fs.lstatSync(file);
+  if (!info.isFile()) throw new Error(`${path.basename(file)} is not a regular file`);
+  if (info.size > MAX_FEED_BYTES) throw new Error("snapshot exceeds the size limit");
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let data;
+  try {
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile() || opened.ino !== info.ino) throw new Error(`${path.basename(file)} is not a regular file`);
+    data = fs.readFileSync(fd);
+  } finally { fs.closeSync(fd); }
   if (data.length > MAX_FEED_BYTES) throw new Error("snapshot exceeds the size limit");
   const newline = data.indexOf(0x0a);
   if (newline < 0 || data[0] !== 0x23 || data[1] !== 0x20) throw new Error("snapshot has no metadata header");
@@ -79,8 +89,11 @@ export function defaultFeedsDir() {
   return path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local/state"), "egress-guard");
 }
 
-/** Load every list for `tier` from `feedsDir/blocklists`. Missing files are reported, never guessed. */
-export function loadLists(feedsDir, {tier = "pro.plus", allowSmall = false, log = () => {}} = {}) {
+/**
+ * Load every list for `tier` from `feedsDir/blocklists`. Missing files are reported, never guessed. A missing
+ * malware and phishing feed is fatal unless `allowMissing`: a build without it would silently protect nothing.
+ */
+export function loadLists(feedsDir, {tier = "pro.plus", allowSmall = false, allowMissing = false, log = () => {}} = {}) {
   const dir = path.join(feedsDir, "blocklists");
   const out = {};
   for (const [kind, specs] of Object.entries(feedSpecs(tier))) {
@@ -88,7 +101,13 @@ export function loadLists(feedsDir, {tier = "pro.plus", allowSmall = false, log 
     const sources = [];
     for (const spec of specs) {
       const file = path.join(dir, spec.file);
-      if (!fs.existsSync(file)) { log(`missing ${spec.file}: ${kind} list will be empty`); continue; }
+      let present = true;
+      try { fs.lstatSync(file); } catch { present = false; }
+      if (!present) {
+        if (kind === "threats" && !allowMissing) throw new Error(`the malware and phishing feed ${spec.file} is missing from ${dir}; refresh the proxy's feeds, or pass --allow-missing to build without it`);
+        log(`missing ${spec.file}: ${kind} list will be empty`);
+        continue;
+      }
       const snap = readSnapshot(file, {minimum: allowSmall ? 0 : spec.minimum});
       for (const name of snap.names) names.push(name);
       sources.push({id: spec.id, name: spec.name, url: spec.url, license: spec.license, entries: snap.names.length,
@@ -203,7 +222,8 @@ function parseArgs(argv) {
     else if (a === "--chunk") args.chunk = Number(next());
     else if (a === "--no-lists") args.lists = false;
     else if (a === "--allow-small") args.allowSmall = true;
-    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--out DIR] [--no-lists]"); process.exit(0); }
+    else if (a === "--allow-missing") args.allowMissing = true;
+    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--out DIR] [--no-lists] [--allow-missing]"); process.exit(0); }
     else throw new Error(`unknown argument ${a}`);
   }
   return args;
@@ -218,7 +238,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (!fs.existsSync(path.join(feeds, "blocklists"))) {
         throw new Error(`no feed cache at ${path.join(feeds, "blocklists")}. Run \`egress-guard refresh\` (or pass --feeds DIR), or build with --no-lists.`);
       }
-      lists = loadLists(feeds, {tier: args.tier, allowSmall: args.allowSmall, log: (m) => console.warn(`warning: ${m}`)});
+      lists = loadLists(feeds, {tier: args.tier, allowSmall: args.allowSmall, allowMissing: args.allowMissing, log: (m) => console.warn(`warning: ${m}`)});
       const day = 48 * 3600;
       for (const [kind, data] of Object.entries(lists)) for (const s of data.sources) {
         const stamp = s.published_at || s.updated_at;

@@ -127,7 +127,9 @@
     else blocked.replaceChildren(...items.map((b) => {
       const list = b.list || "user";
       const tags = [[`${b.type}${b.count > 1 ? ` ×${b.count}` : ""}`, ""], [listLabel(list, lists), list]];
-      const buttons = b.type === "main_frame" ? [] : [[`Allow ${EXCEPTION_MINUTES} min`,
+      // No one-click exception for malware and phishing hosts, navigations, or types an exception cannot name exactly.
+      const allowable = list !== "threats" && b.type !== "main_frame" && (state.types || []).includes(b.type);
+      const buttons = !allowable ? [] : [[`Allow ${EXCEPTION_MINUTES} min`,
         () => act({type: "add-exception", host: b.host, path: b.path, resourceType: b.type, minutes: EXCEPTION_MINUTES}),
         `Allow ${b.host}${b.path} (${b.type}) on this site for ${EXCEPTION_MINUTES} minutes`]];
       return row({host: b.host, path: b.path, tags}, buttons);

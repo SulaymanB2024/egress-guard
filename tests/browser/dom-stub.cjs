@@ -130,6 +130,7 @@ class Element extends Node {
   attachShadow({mode}) { this.shadowRoot = new ShadowRoot(this.ownerDocument, this, mode); return this.shadowRoot; }
   matches(selector) { return parseSelector(selector).some((complex) => matchComplex(this, complex, complex.length - 1)); }
   getBoundingClientRect() { return {width: 100, height: 50, top: 0, left: 0, right: 100, bottom: 50, x: 0, y: 0}; }
+  focus() { this.ownerDocument.activeElement = this; }
 }
 
 class ShadowRoot extends Node {

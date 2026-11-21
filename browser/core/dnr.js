@@ -7,7 +7,9 @@
  * Priority ladder (higher wins; within one extension allow beats block at equal priority):
  *   1 params        strip tracking parameters from navigations (redirect)
  *   2 threat        malware/phishing: navigation -> local warning page, everything else blocked
- *   3 continue      "continue once" from the warning page (session allowAllRequests, one tab, one host)
+ *   3 continue      "continue once" from the warning page: session `allow` rules for one tab and one host, its
+ *                   navigation and its own requests. Never allowAllRequests, which would lift every lower-priority
+ *                   rule (other threat hosts included) for the whole frame tree.
  *   4 list          ad/tracker and CNAME-cloaked tracker lists
  *   5 user block    endpoint rules added in the popup
  *   6 user allow    endpoint allow rules
@@ -31,15 +33,21 @@
     imageset: ["image"], stylesheet: ["stylesheet"], font: ["font"], media: ["media"], sub_frame: ["sub_frame"],
     object: ["object"], csp_report: ["csp_report"], other: ["other", "websocket", "webtransport", "webbundle"],
   });
+  // Chrome type -> type shown in the popup. Web sockets, web transport and web bundles keep their own names: they are not
+  // rule types, so the popup offers no exception for them, and an "other" exception never covers them.
   const CHROME_TO_CORE = Object.freeze({ping: "ping", xmlhttprequest: "xmlhttprequest", script: "script", image: "image",
-    stylesheet: "stylesheet", font: "font", media: "media", sub_frame: "sub_frame", object: "object", csp_report: "csp_report"});
+    stylesheet: "stylesheet", font: "font", media: "media", sub_frame: "sub_frame", object: "object", csp_report: "csp_report",
+    websocket: "websocket", webtransport: "webtransport", webbundle: "webbundle", other: "other"});
+  // Exceptions open exactly the type that was shown.
+  const EXCEPTION_TYPE_MAP = Object.freeze({...TYPE_MAP, other: ["other"]});
 
   // Click and campaign identifiers that carry no page content. Exact names only: DNR removeParams has no wildcards.
+  // Kept on purpose: mkt_tok (Marketo), _hsenc and _hsmi (HubSpot), which unsubscribe and preference links need.
   const TRACKING_PARAMS = Object.freeze([
     "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "utm_name", "utm_cid",
     "utm_reader", "utm_referrer", "utm_social", "utm_social-type", "utm_brand", "utm_place", "utm_pubreferrer", "utm_swu",
     "fbclid", "gclid", "gclsrc", "dclid", "gbraid", "wbraid", "msclkid", "yclid", "twclid", "ttclid", "igshid",
-    "li_fat_id", "mc_eid", "_hsenc", "_hsmi", "mkt_tok", "oly_anon_id", "oly_enc_id", "vero_id", "rb_clickid",
+    "li_fat_id", "mc_eid", "oly_anon_id", "oly_enc_id", "vero_id", "rb_clickid",
     "s_cid", "wickedid", "epik", "_openstat", "srsltid",
   ]);
 
@@ -120,7 +128,7 @@
   }
 
   const live = (item, now) => item.expiresAt === undefined || item.expiresAt > now;
-  const chromeTypes = (types) => [...new Set(types.flatMap((t) => TYPE_MAP[t] || []))].sort();
+  const chromeTypes = (types, map = TYPE_MAP) => [...new Set(types.flatMap((t) => map[t] || []))].sort();
 
   /**
    * Dynamic rules for the user's request rules and live exceptions.
@@ -130,9 +138,9 @@
     const out = [];
     const sources = {};
     let id = firstId;
-    const push = (sourceId, priority, actionType, site, host, path, types, party) => {
+    const push = (sourceId, priority, actionType, site, host, path, types, party, map) => {
       const condition = {regexFilter: endpointRegex(host, path), isUrlFilterCaseSensitive: true, requestDomains: [host],
-        initiatorDomains: [site], resourceTypes: chromeTypes(types)};
+        initiatorDomains: [site], resourceTypes: chromeTypes(types, map)};
       if (party === "first") condition.domainType = "firstParty";
       if (party === "third") condition.domainType = "thirdParty";
       sources[id] = sourceId;
@@ -145,17 +153,25 @@
     }
     for (const exc of exceptions) {
       if (!live(exc, now)) continue;
-      push(exc.id, PRIORITY.exception, "allow", exc.site, exc.host, exc.path, [exc.type]);
+      push(exc.id, PRIORITY.exception, "allow", exc.site, exc.host, exc.path, [exc.type], undefined, EXCEPTION_TYPE_MAP);
     }
     return {rules: out, sources};
   }
 
-  /** Session rule for "continue once": one tab, one host, below the tracker lists. */
-  function continueRule(id, host, tabId) {
+  /**
+   * Session rules for "continue once" (ids `id` and `id + 1`), below the tracker lists: in one tab, the navigation to
+   * one host, and requests to that host made by that host itself. Plain `allow`, so other threat-listed hosts the page
+   * pulls in stay blocked.
+   */
+  function continueRules(id, host, tabId) {
     const name = hosts.normalizeHost(host);
-    if (!name || !Number.isInteger(tabId) || tabId < 0) throw new Error("continue needs a host and a tab");
-    return {id, priority: PRIORITY.continue, action: {type: "allowAllRequests"},
-      condition: {requestDomains: [name], resourceTypes: ["main_frame"], tabIds: [tabId]}};
+    if (!name || !Number.isInteger(tabId) || tabId < 0 || !Number.isInteger(id) || id < 1) throw new Error("continue needs a host and a tab");
+    return [
+      {id, priority: PRIORITY.continue, action: {type: "allow"},
+        condition: {requestDomains: [name], resourceTypes: ["main_frame"], tabIds: [tabId]}},
+      {id: id + 1, priority: PRIORITY.continue, action: {type: "allow"},
+        condition: {requestDomains: [name], initiatorDomains: [name], resourceTypes: [...SUBRESOURCE_TYPES], tabIds: [tabId]}},
+    ];
   }
 
   /** Parse the warning page's location (…/warning.html?list=threats#<blocked URL>). */
@@ -177,8 +193,8 @@
     return [...sha256Hex.slice(0, 32)].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join("");
   }
 
-  const api = Object.freeze({PRIORITY, SUBRESOURCE_TYPES, TYPE_MAP, CHROME_TO_CORE, TRACKING_PARAMS, LIST_KINDS, DEFAULT_CHUNK,
-    endpointRegex, minimize, compileList, compileParams, compileUserState, continueRule, parseWarning, extensionIdFromHex});
+  const api = Object.freeze({PRIORITY, SUBRESOURCE_TYPES, TYPE_MAP, CHROME_TO_CORE, EXCEPTION_TYPE_MAP, TRACKING_PARAMS, LIST_KINDS, DEFAULT_CHUNK,
+    endpointRegex, minimize, compileList, compileParams, compileUserState, continueRules, parseWarning, extensionIdFromHex});
   if (isNode) module.exports = api;
   else root.EGDnr = api;
 })(globalThis);

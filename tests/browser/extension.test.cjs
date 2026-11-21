@@ -62,7 +62,10 @@ test("extension source has no HTML injection, eval, remote URLs or networking AP
   walk(path.join(root, "browser"));
   assert.ok(files.length >= 10);
   for (const file of files.filter((f) => /\.(js|html)$/.test(f))) {
-    const code = fs.readFileSync(file, "utf8");
+    let code = fs.readFileSync(file, "utf8");
+    // The one sanctioned read: the Chrome worker loads its own packaged threat ruleset (CSP connect-src 'self').
+    // And it asks Chrome how a navigation to a host would match (testMatchOutcome), which sends nothing.
+    if (path.basename(file) === "background-chrome.js") code = code.replace('fetch(OWN + "rules/threats.json")', "OWN_RULESET").replace("url: `https://${host}/`", "url: PROBE");
     for (const banned of [/innerHTML/, /outerHTML/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function/, /\bfetch\s*\(/, /XMLHttpRequest/, /WebSocket/, /sendBeacon/, /importScripts/, /https?:\/\/(?!\*)/, /setTimeout\(\s*["'`]/, /\bon[a-z]+\s*=\s*["']/]) {
       assert.doesNotMatch(code, banned, `${path.relative(root, file)} contains ${banned}`);
     }
@@ -139,6 +142,72 @@ test("acceptance (adapter): exception allows one endpoint, expires via alarm, an
   assert.equal((await bg.request(beacon)).cancel, true);
   const wild = await bg.fromPopup({type: "add-exception", tabId: 1, tabUrl, host: "publisher.example", path: "/*", resourceType: "beacon", minutes: 5});
   assert.ok(wild.error);
+});
+
+/** Load warning.html with a fake chrome; `framed` puts it inside another page's frame. */
+async function warningPage(href, {framed = false} = {}) {
+  const doc = parseHTML(read("browser/warning.html"));
+  const sent = [];
+  const win = {listeners: {}, reloads: 0, replaced: null};
+  const location = {href, reload: () => { win.reloads++; }, replace: (u) => { win.replaced = u; }};
+  const chrome = {runtime: {sendMessage: async (msg) => { sent.push(msg); return msg.type === "continue-once" ? {ok: true, url: msg.url} : {minutes: 10}; }},
+    tabs: {update: async () => {}}};
+  const ctx = vm.createContext({document: doc, chrome, console, URL, location, history: {length: 1},
+    addEventListener: (type, fn) => { win.listeners[type] = fn; }});
+  ctx.top = framed ? {} : ctx;
+  ctx.self = ctx;
+  for (const file of ["core/hosts.js", "core/dnr.js", "warning.js"]) vm.runInContext(read(`browser/${file}`), ctx, {filename: file});
+  await ctx.__EGWarning.ready;
+  return {doc, sent, win, location, ctx};
+}
+
+test("warning page: Continue sends the address it shows, re-renders if the address changes, and refuses to work in a frame", async () => {
+  const WARN = "chrome-extension://danbhmcinakkkkbobacafgidgkfibfmg/warning.html?list=threats#";
+  const page = await warningPage(`${WARN}https://login.bad.example/x`);
+  assert.equal(allText(page.doc.getElementById("host")), "login.bad.example");
+  userClick(page.doc.getElementById("reveal"));
+  userClick(page.doc.getElementById("continue"));
+  await settle(); await settle();
+  assert.equal(JSON.stringify(page.sent.find((m) => m.type === "continue-once")), JSON.stringify({type: "continue-once", url: "https://login.bad.example/x"}));
+  // An opener changes only the fragment: the page must not keep showing the old host with a live Continue.
+  page.location.href = `${WARN}https://other-bad.example/`;
+  assert.equal(typeof page.win.listeners.hashchange, "function");
+  page.win.listeners.hashchange();
+  assert.equal(page.win.reloads, 1);
+  assert.equal(page.doc.getElementById("continue").disabled, true);
+  const framed = await warningPage(`${WARN}https://login.bad.example/x`, {framed: true});
+  assert.equal(framed.doc.getElementById("reveal").disabled, true);
+  assert.equal(framed.doc.getElementById("continue").disabled, true);
+  assert.equal(framed.sent.some((m) => m.type === "continue-once"), false);
+});
+
+/** Render the popup against a canned popup-state reply. */
+async function popupWith(state) {
+  const doc = parseHTML(read("browser/popup.html"));
+  const sent = [];
+  const browser = {
+    runtime: {sendMessage: async (msg) => { sent.push(msg); return msg.type === "popup-state" ? JSON.parse(JSON.stringify(state)) : {ok: true}; }},
+    tabs: {query: async () => [{id: 1, url: "https://publisher.example/a"}],
+      sendMessage: async () => ({site: "publisher.example", paused: false, hidden: 0, shown: 0, protectedRules: [], overbroadRules: []})},
+  };
+  const ctx = vm.createContext({document: doc, browser, console, close: () => {}});
+  vm.runInContext(read("browser/popup.js"), ctx, {filename: "popup.js"});
+  await ctx.__EGPopup.ready;
+  return {doc, sent, text: (id) => allText(doc.getElementById(id))};
+}
+const BASE_STATE = {host: "publisher.example", site: "publisher.example", lists: [], requestRules: [], cosmeticRules: [], exceptions: [],
+  types: ["beacon", "ping", "xmlhttprequest", "script", "image", "imageset", "stylesheet", "font", "media", "sub_frame", "object", "csp_report", "other"]};
+
+test("popup offers no one-click Allow for malware hosts or for WebSocket-like types", async () => {
+  const {doc, text} = await popupWith({...BASE_STATE, feedback: "debug", blocked: [
+    {host: "cdn.bad.example", path: "/x.js", type: "script", list: "threats", count: 1},
+    {host: "pixel.tracker.test", path: "/socket", type: "websocket", list: "trackers", count: 1},
+    {host: "pixel.tracker.test", path: "/p.gif", type: "image", list: "trackers", count: 2},
+  ]});
+  const buttons = doc.getElementById("blocked").querySelectorAll('button[type="button"]');
+  assert.equal(buttons.length, 1, "only the tracker image can be allowed");
+  assert.match(buttons[0].getAttribute("aria-label"), /pixel\.tracker\.test\/p\.gif \(image\)/);
+  assert.match(text("blocked"), /cdn\.bad\.example\/x\.js/, "the threat request is still listed");
 });
 
 test("popup renders blocked vs hidden, rules and exceptions with textContent only", async () => {

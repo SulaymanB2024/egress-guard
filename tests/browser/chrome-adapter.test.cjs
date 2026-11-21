@@ -19,7 +19,11 @@ const WORKER = ["core/hosts.js", "core/selectors.js", "core/rules.js", "core/sto
 const event = () => { const fns = []; return {addListener: (fn) => fns.push(fn), fns, fire: (...a) => Promise.all(fns.map((f) => f(...a)))}; };
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setImmediate); };
 
-async function worker({stored = fixture} = {}) {
+// Threat-listed names in the fake browser (the real worker asks Chrome's testMatchOutcome, or reads its own ruleset).
+const THREATS = ["bad.example", "other-bad.example"];
+const isListed = (host) => THREATS.some((d) => host === d || host.endsWith(`.${d}`));
+
+async function worker({stored = fixture, packed = false} = {}) {
   const clock = {now: START};
   const local = {egressGuard: stored && JSON.parse(JSON.stringify(stored))};
   const session = {};
@@ -32,7 +36,8 @@ async function worker({stored = fixture} = {}) {
   const alarms = new Map();
   const tabMessages = [];
   const chrome = {
-    runtime: {id: ID, getURL: (p) => EXT + p, onMessage: event()},
+    // With use_dynamic_url, getURL returns the per-session origin; the extension's own pages still run at EXT.
+    runtime: {id: ID, getURL: (p) => `chrome-extension://4f9e0c2a-dynamic-session/${p}`, onMessage: event()},
     storage: {local: area(local), session: area(session)},
     alarms: {create: (name, info) => alarms.set(name, info), clear: async (name) => alarms.delete(name), onAlarm: event()},
     tabs: {onUpdated: event(), onRemoved: event(), sendMessage: async (tabId, msg) => { tabMessages.push({tabId, msg}); }, query: async () => [{id: 1, url: "https://publisher.example/article"}]},
@@ -41,24 +46,38 @@ async function worker({stored = fixture} = {}) {
       getDynamicRules: async () => dynamicRules.map((r) => ({...r})),
       updateDynamicRules: async ({removeRuleIds = [], addRules = []}) => { dynamicRules = JSON.parse(JSON.stringify([...dynamicRules.filter((r) => !removeRuleIds.includes(r.id)), ...addRules])); },
       updateSessionRules: async ({removeRuleIds = [], addRules = []}) => { sessionRules = JSON.parse(JSON.stringify([...sessionRules.filter((r) => !removeRuleIds.includes(r.id)), ...addRules])); },
+      getSessionRules: async () => sessionRules.map((r) => ({...r})),
       onRuleMatchedDebug: event(),
+      testMatchOutcome: async ({url, type}) => ({matchedRules: type === "main_frame" && isListed(new URL(url).hostname) ? [{ruleId: 2, rulesetId: "threats"}] : []}),
+      getMatchedRules: async ({tabId}) => ({rulesMatchedInfo: matchedInfo.filter((m) => m.tabId === tabId)}),
       setExtensionActionOptions: async () => {},
     },
   };
+  const matchedInfo = [];
+  const fetched = [];
+  if (packed) { delete chrome.declarativeNetRequest.onRuleMatchedDebug; delete chrome.declarativeNetRequest.testMatchOutcome; }
+  // Only the worker's own packaged ruleset may be fetched (the CSP allows connect-src 'self' and nothing else).
+  const fetch = async (url) => {
+    fetched.push(url);
+    if (url !== `${EXT}rules/threats.json`) throw new Error(`unexpected fetch ${url}`);
+    return {ok: true, json: async () => [{id: 1, priority: 2, action: {type: "block"}, condition: {requestDomains: THREATS}}]};
+  };
   class FakeDate extends Date { static now() { return clock.now; } }
-  const ctx = vm.createContext({chrome, console, URL, Date: FakeDate, crypto: globalThis.crypto, setTimeout, clearTimeout});
+  const ctx = vm.createContext({chrome, console, URL, Date: FakeDate, crypto: globalThis.crypto, setTimeout, clearTimeout, fetch});
   ctx.EGLists = {lists: {trackers: {label: "Ads and trackers", name: "HaGeZi Multi PRO++", domains: 4}, threats: {label: "Malware and phishing", name: "HaGeZi Threat Intelligence (Medium)", domains: 2}}};
   for (const file of WORKER) vm.runInContext(read(`browser/${file}`), ctx, {filename: file});
   await ctx.__EGBackground.ready;
   const send = (msg, sender) => new Promise((resolve) => { assert.equal(chrome.runtime.onMessage.fns[0](msg, {id: ID, ...sender}, (r) => resolve(JSON.parse(JSON.stringify(r)))), true); });
   const popup = (msg) => send(msg, {url: `${EXT}popup.html`});
   const page = (msg, url = "https://publisher.example/article", tabId = 1) => send(msg, {url, frameId: 0, tab: {id: tabId, url}});
-  const warning = (msg, blocked = "https://login.bad.example/x?y=1", tabId = 4) => {
+  const warning = (msg, blocked = "https://login.bad.example/x?y=1", tabId = 4, frameId = 0) => {
     const url = `${EXT}warning.html?list=threats#${blocked}`;
-    return send(msg, {url, frameId: 0, tab: {id: tabId, url}});
+    return send(msg, {url, frameId, tab: {id: tabId, url}});
   };
+  // What the warning page sends: the address it is showing.
+  const cont = (blocked = "https://login.bad.example/x?y=1", tabId = 4, shown = blocked, frameId = 0) => warning({type: "continue-once", url: shown}, blocked, tabId, frameId);
   const matched = (tabId, url, type, rulesetId, ruleId = 1) => chrome.declarativeNetRequest.onRuleMatchedDebug.fire({request: {tabId, url, type}, rule: {ruleId, rulesetId}});
-  return {ctx, chrome, clock, local, session, alarms, tabMessages, popup, page, warning, matched, api: ctx.__EGBackground,
+  return {ctx, chrome, clock, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground,
     dynamic: () => dynamicRules, sessionRules: () => sessionRules};
 }
 
@@ -69,9 +88,12 @@ test("manifest (Chrome): MV3 service worker, DNR rulesets, minimal permissions, 
   assert.deepEqual(manifest.host_permissions, ["http://*/*", "https://*/*"]);
   assert.deepEqual(manifest.declarative_net_request.rule_resources.map((r) => r.id), ["threats", "trackers", "cname", "params"]);
   assert.ok(manifest.declarative_net_request.rule_resources.every((r) => r.enabled));
-  assert.deepEqual(manifest.web_accessible_resources, [{resources: ["warning.html"], matches: ["<all_urls>"]}]);
+  // Only by a per-session URL, so a site cannot probe the fixed id to learn the extension is installed.
+  assert.deepEqual(manifest.web_accessible_resources, [{resources: ["warning.html"], matches: ["<all_urls>"], use_dynamic_url: true}]);
   assert.match(manifest.content_security_policy.extension_pages, /script-src 'self'/);
-  assert.match(manifest.content_security_policy.extension_pages, /connect-src 'none'/);
+  // The worker may read its own packaged files (the threat ruleset) and nothing else.
+  assert.match(manifest.content_security_policy.extension_pages, /connect-src 'self'(;|$)/);
+  assert.match(manifest.content_security_policy.extension_pages, /frame-ancestors 'none'/);
   assert.equal(ID.length, 32);
   assert.equal(manifest.content_scripts[0].all_frames, false);
   for (const file of [...WORKER, ...manifest.content_scripts[0].js, "popup.html", "warning.html"]) assert.ok(fs.existsSync(path.join(root, "browser", file)), file);
@@ -148,31 +170,79 @@ test("continue once: only the warning page may ask; one tab, one host; ends when
   const w = await worker();
   assert.match((await w.page({type: "continue-once"})).error, /Not allowed/);
   assert.match((await w.popup({type: "continue-once"})).error, /Not allowed/);
-  assert.match((await w.warning({type: "continue-once"}, "javascript:alert(1)")).error, /Nothing to continue/);
-  const ok = await w.warning({type: "continue-once"});
+  assert.match((await w.cont("javascript:alert(1)")).error, /Nothing to continue/);
+  const ok = await w.cont();
   assert.deepEqual({...ok}, {ok: true, url: "https://login.bad.example/x?y=1"});
-  const [rule] = w.sessionRules();
-  assert.equal(rule.action.type, "allowAllRequests");
-  assert.deepEqual(rule.condition.tabIds, [4]);
-  assert.deepEqual(rule.condition.requestDomains, ["login.bad.example"]);
-  assert.equal(rule.priority, dnr.PRIORITY.continue);
+  const rules = w.sessionRules();
+  assert.equal(rules.length, 2);
+  for (const rule of rules) {
+    assert.equal(rule.action.type, "allow", "never allowAllRequests");
+    assert.deepEqual(rule.condition.tabIds, [4]);
+    assert.deepEqual(rule.condition.requestDomains, ["login.bad.example"]);
+    assert.equal(rule.priority, dnr.PRIORITY.continue);
+  }
   assert.ok(w.alarms.has("eg-expiry"), "a 10-minute cap is scheduled");
+  assert.equal(w.alarms.get("eg-expiry").when, START + 10 * 60000);
   // Moving within the host keeps it; another tab's navigation does not affect it; leaving ends it.
   await w.chrome.tabs.onUpdated.fire(4, {status: "loading", url: "https://login.bad.example/next"}, {});
   await w.chrome.tabs.onUpdated.fire(5, {status: "loading", url: "https://news.example/"}, {});
   await settle();
-  assert.equal(w.sessionRules().length, 1);
+  assert.equal(w.sessionRules().length, 2);
   await w.chrome.tabs.onUpdated.fire(4, {status: "loading", url: "https://news.example/"}, {});
   await settle();
   assert.equal(w.sessionRules().length, 0);
   // The cap: expires even if the tab stays.
-  await w.warning({type: "continue-once"});
+  await w.cont();
   w.clock.now = START + 10 * 60000;
   await w.chrome.alarms.onAlarm.fire({name: "eg-expiry"});
   await settle();
   assert.equal(w.sessionRules().length, 0);
   const info = await w.warning({type: "warning-info", list: "threats"});
   assert.equal(info.list.name, "HaGeZi Threat Intelligence (Medium)");
+});
+
+test("continue once refuses a different host than the page showed, a framed warning page, and unlisted hosts", async () => {
+  const w = await worker();
+  // The opener swapped only the fragment after the page rendered login.bad.example: the shown URL no longer matches.
+  const swapped = await w.cont("https://other-bad.example/", 4, "https://login.bad.example/x?y=1");
+  assert.match(swapped.error, /changed/);
+  assert.match((await w.warning({type: "continue-once"})).error, /changed/, "a message without the shown URL is refused");
+  assert.match((await w.cont(undefined, 4, undefined, 3)).error, /frame/, "a warning page inside a frame cannot continue");
+  assert.match((await w.cont("https://news.example/")).error, /not on the malware/, "only a threat-listed host can be continued to");
+  assert.equal(w.sessionRules().length, 0);
+});
+
+test("continue once: concurrent requests get distinct rule ids", async () => {
+  const w = await worker();
+  const replies = await Promise.all([w.cont(undefined, 4), w.cont("https://other-bad.example/", 5), w.cont(undefined, 6)]);
+  assert.ok(replies.every((r) => r.ok), JSON.stringify(replies));
+  const ids = w.sessionRules().map((r) => r.id);
+  assert.equal(ids.length, 6);
+  assert.equal(new Set(ids).size, 6, ids.join(","));
+  assert.equal((await w.api.continues()).length, 3);
+});
+
+test("threat-listed requests cannot be allowed from the popup", async () => {
+  const w = await worker();
+  const reply = await w.popup({type: "add-exception", tabId: 1, tabUrl: "https://publisher.example/article", host: "cdn.bad.example", path: "/x.js", resourceType: "script", minutes: 15});
+  assert.match(reply.error, /malware/);
+  assert.equal(w.dynamic().some((r) => r.priority === dnr.PRIORITY.exception), false);
+});
+
+test("packed build: the threat check reads only the extension's own ruleset", async () => {
+  const w = await worker({packed: true});
+  assert.match((await w.cont("https://news.example/")).error, /not on the malware/);
+  assert.equal((await w.cont()).ok, true);
+  assert.deepEqual([...new Set(w.fetched)], [`${EXT}rules/threats.json`]);
+});
+
+test("blocked log keeps at most 256 characters of a path", async () => {
+  const w = await worker();
+  await w.matched(1, `https://pixel.tracker.test/${"a".repeat(5000)}`, "image", "trackers");
+  await w.matched(1, "wss://pixel.tracker.test/socket", "websocket", "trackers");
+  const state = await w.popup({type: "popup-state", tabId: 1, tabUrl: "https://publisher.example/article"});
+  assert.equal(state.blocked[0].path.length, 256);
+  assert.equal(state.blocked[1].type, "websocket", "WebSocket is shown as itself, not as other");
 });
 
 test("pages cannot use popup actions; the warning page cannot either; strangers are refused", async () => {
