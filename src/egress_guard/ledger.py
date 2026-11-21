@@ -105,6 +105,8 @@ class Ledger:
             with connection:
                 connection.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
                 connection.execute("INSERT OR REPLACE INTO meta VALUES ('history', ?)", (self.history,))
+                connection.execute("INSERT OR REPLACE INTO meta VALUES ('retention_days', ?)",
+                                   (str(self._retention_seconds // 86400),))
                 self._dropped_saved = -1
                 if self.history == "aggregate":
                     connection.execute("""
@@ -114,6 +116,7 @@ class Ledger:
                             PRIMARY KEY (day, host, decision, source)
                         )
                     """)
+                self._record_created(connection)
                 if self.history != "full":
                     return connection
                 connection.execute("""
@@ -131,6 +134,19 @@ class Ledger:
             connection.close()
             raise
         return connection
+
+    def _record_created(self, connection: sqlite3.Connection) -> None:
+        """Write the creation time once. A database that already holds rows keeps its oldest row's time."""
+        if connection.execute("SELECT 1 FROM meta WHERE key = 'created'").fetchone():
+            return
+        oldest = None
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if self.history == "aggregate":
+            oldest = connection.execute("SELECT MIN(day) FROM daily").fetchone()[0]
+        elif "events" in tables:
+            oldest = connection.execute("SELECT MIN(ts) FROM events").fetchone()[0]
+        created = min(int(time.time()), oldest) if oldest is not None else int(time.time())
+        connection.execute("INSERT OR IGNORE INTO meta VALUES ('created', ?)", (str(created),))
 
     def _take_batch(self) -> list[tuple]:
         try:
@@ -184,11 +200,19 @@ class Ledger:
                                     "DO UPDATE SET count = count + 1",
                                     (ts // 86400 * 86400, host if decision == "blocked" else "", decision, source),
                                 )
-                            connection.execute("""
-                                DELETE FROM daily WHERE rowid IN (
-                                    SELECT rowid FROM daily ORDER BY day DESC LIMIT -1 OFFSET ?
-                                )
-                            """, (MAX_EVENTS,))
+                            # Deterministic: oldest days go first, and within a day the smallest counts.
+                            surplus = """SELECT rowid FROM daily
+                                         ORDER BY day DESC, count DESC, host, decision, source LIMIT -1 OFFSET ?"""
+                            touched = connection.execute(
+                                f"SELECT MAX(day) FROM daily WHERE rowid IN ({surplus})", (MAX_EVENTS,)).fetchone()[0]
+                            if touched is not None:
+                                # Days up to this one lost rows, so the dashboard shows them as partial.
+                                connection.execute(
+                                    f"DELETE FROM daily WHERE rowid IN ({surplus})", (MAX_EVENTS,))
+                                connection.execute(
+                                    "INSERT INTO meta VALUES ('trimmed_through', ?) ON CONFLICT(key) DO UPDATE "
+                                    "SET value = CAST(MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)",
+                                    (str(touched),))
                         pending = []
                     elif pending:
                         with connection:

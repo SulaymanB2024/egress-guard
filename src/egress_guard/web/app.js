@@ -30,13 +30,17 @@ const reasons = {
   'local-block': 'Your block rule', 'local-allow': 'Your allow rule', 'temporary-exception': 'Temporarily allowed',
   'tracker-paused': 'Ad filtering paused', 'dashboard-exception': 'Exempt dashboard host', 'no-match': 'No rule matched',
   'plaintext-credentials': 'Password sent unencrypted', 'not-ready': 'Filters not ready', 'non-tls-tunnel': 'Non-TLS tunnel refused',
-  'invalid-host': 'Malformed hostname', 'invalid-request': 'Malformed request', doh: 'Encrypted DNS bypass',
+  'invalid-host': 'Malformed hostname', 'invalid-request': 'Malformed request', doh: 'Encrypted DNS server',
+  'malware-feed': 'Malware list', 'phishing-feed': 'Phishing list', 'lookalike-domain': 'Look-alike domain',
+  'doh-feed': 'Encrypted DNS server', 'safety-list': 'Built-in safety list',
+  'ip-literal': 'Direct IP address (not filtered)', 'nonstandard-port': 'Unusual port (not filtered)',
 };
 const sourceCategory = {
   'threat-intel': 'threats', malware: 'threats', phishing: 'threats',
+  'malware-feed': 'threats', 'phishing-feed': 'threats', 'lookalike-domain': 'threats', 'doh-feed': 'doh', doh: 'doh',
   'tracker-feed': 'ads', tracker: 'ads', ads: 'ads', 'cname-feed': 'cname', 'cname-cloak': 'cname', 'local-block': 'manual',
 };
-const categoryLabels = {threats: 'Malware and phishing', ads: 'Ads and trackers', cname: 'Cloaked trackers (CNAME)', manual: 'Your block rules', other: 'Other protections'};
+const categoryLabels = {threats: 'Malware and phishing', ads: 'Ads and trackers', cname: 'Cloaked trackers (CNAME)', doh: 'Encrypted DNS servers', manual: 'Your block rules', other: 'Other protections'};
 
 const records = new Map();
 let status = null;
@@ -115,6 +119,9 @@ function reasonText(source) {
 }
 
 function categoryOf(source) {
+  // The service derives this from its policy table; the built-in table covers a page that has no insights yet.
+  const served = insights?.source_categories;
+  if (served && typeof served === 'object' && Object.hasOwn(served, source)) return served[source];
   return Object.hasOwn(sourceCategory, source) ? sourceCategory[source] : 'other';
 }
 
@@ -346,7 +353,9 @@ function hasHistory() {
 }
 
 function renderOutcome() {
-  if (!changed('outcome', [insights, range])) return;
+  // generated_at moves on every poll; leaving it out means an unchanged ledger does not redraw anything.
+  const {generated_at: _generatedAt, ...stable} = insights || {};
+  if (!changed('outcome', [stable, range])) return;
   const mode = historyMode();
   const today = insights?.today;
   const number = $('hero-number');
@@ -467,20 +476,41 @@ function periodLabel(item, short) {
   return short ? weekday.format(start) : weekday.format(start) + ' ' + day.format(start) + (item.kind === 'utc-day' ? ' (UTC)' : '');
 }
 
+function isPartial(item) {
+  return item?.complete === false;
+}
+
 function readout(item, isLast) {
   const node = $('chart-readout');
-  node.replaceChildren();
+  const next = document.createDocumentFragment();
+  // Only touch the live region when the words change, so a poll does not announce it again.
+  const show = () => { if (node.textContent !== next.textContent) node.replaceChildren(next); };
   if (!item) {
     const values = series(historyMode());
     const blocked = values.reduce((sum, value) => sum + count(value.blocked), 0);
     const total = values.reduce((sum, value) => sum + count(value.blocked) + count(value.allowed), 0);
-    node.append(element('strong', numberFormat.format(blocked)), ' blocked of ' + numberFormat.format(total) + (range === 'day' && historyMode() === 'full' ? ' in the last 24 hours' : ' in the last 7 days'));
+    next.append(element('strong', numberFormat.format(blocked)), ' blocked of ' + numberFormat.format(total) + (range === 'day' && historyMode() === 'full' ? ' in the last 24 hours' : ' in the last 7 days') + (values.some(isPartial) ? ' (some periods are only partly recorded)' : ''));
+    show();
     return;
   }
   const blocked = count(item.blocked);
   const total = blocked + count(item.allowed);
-  node.append(periodLabel(item, false) + (isLast ? ' (so far)' : '') + ' · ', element('strong', numberFormat.format(blocked)), ' blocked of ' + numberFormat.format(total));
+  if (isPartial(item) && !total) {
+    next.append(periodLabel(item, false) + ' · no data recorded for this period');
+  } else {
+    next.append(periodLabel(item, false) + (isLast ? ' (so far)' : '') + ' · ', element('strong', numberFormat.format(blocked)), ' blocked of ' + numberFormat.format(total) + (isPartial(item) ? ' (partial: history does not cover the whole period)' : ''));
+  }
+  show();
 }
+
+function describe(item) {
+  const blocked = count(item.blocked);
+  const allowed = count(item.allowed);
+  if (isPartial(item) && !blocked && !allowed) return periodLabel(item, false) + ': no data recorded';
+  return periodLabel(item, false) + ': ' + numberFormat.format(blocked) + ' blocked, ' + numberFormat.format(allowed) + ' allowed' + (isPartial(item) ? ' (partial)' : '');
+}
+
+let chartPending = false;
 
 function renderTimeline(mode) {
   const figure = $('timeline');
@@ -488,6 +518,9 @@ function renderTimeline(mode) {
   const show = (mode === 'full' || mode === 'aggregate');
   figure.hidden = !show;
   if (!show) return;
+  // Redrawing would drop keyboard focus from the bar being read; apply it when focus leaves.
+  chartPending = chart.contains(document.activeElement);
+  if (chartPending) return;
   $('range-day').disabled = mode !== 'full';
   $('range-day').title = mode === 'full' ? '' : 'Hourly totals need full history';
   if (mode !== 'full') range = 'week';
@@ -504,7 +537,7 @@ function renderTimeline(mode) {
   const maximum = niceMax(Math.max(0, ...values.map((item) => count(item.blocked) + count(item.allowed))));
   const slot = plotWidth / Math.max(1, values.length);
   const gap = Math.min(range === 'day' ? 4 : 14, slot * 0.28);
-  const root = svg('svg', {viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': 'Blocked and allowed connections per ' + (range === 'day' ? 'hour' : 'day')});
+  const root = svg('svg', {viewBox: `0 0 ${width} ${height}`, role: 'group', 'aria-label': 'Blocked and allowed connections per ' + (range === 'day' ? 'hour' : 'day') + '. Use the left and right arrow keys to read each one.'});
   const y = (value) => top + plotHeight - (value / maximum) * plotHeight;
 
   const blank = !hasHistory();
@@ -520,7 +553,11 @@ function renderTimeline(mode) {
     const barWidth = Math.max(1, slot - gap);
     const blocked = count(item.blocked);
     const allowed = count(item.allowed);
-    const partial = item.complete === false;
+    const partial = isPartial(item);
+    if (partial && !blocked && !allowed) {
+      const stub = Math.min(plotHeight * 0.14, 28);
+      root.append(svg('rect', {x, width: barWidth, y: y(0) - stub, height: stub, rx: 1.5, class: 'bar-unknown'}));
+    }
     if (allowed) root.append(svg('rect', {x, width: barWidth, y: y(blocked + allowed), height: Math.max(0.5, y(blocked) - y(blocked + allowed)), rx: 1.5, class: 'bar-allowed' + (partial ? ' bar-partial' : '')}));
     if (blocked) root.append(svg('rect', {x, width: barWidth, y: y(blocked), height: Math.max(1, y(0) - y(blocked)), rx: 1.5, class: 'bar-blocked' + (partial ? ' bar-partial' : '')}));
     const every = range === 'day' ? 6 : 1;
@@ -533,7 +570,9 @@ function renderTimeline(mode) {
     }
     const hit = svg('rect', {x: left + index * slot, y: top, width: slot, height: plotHeight, class: 'hit', tabindex: index === values.length - 1 ? 0 : -1});
     const title = svg('title');
-    title.textContent = periodLabel(item, false) + ': ' + numberFormat.format(blocked) + ' blocked, ' + numberFormat.format(allowed) + ' allowed';
+    title.textContent = describe(item);
+    hit.setAttribute('role', 'img');
+    hit.setAttribute('aria-label', title.textContent);
     hit.append(title);
     hit.addEventListener('pointerenter', () => readout(item, last));
     hit.addEventListener('focus', () => { hits.forEach((node) => node.classList.remove('active')); hit.classList.add('active'); readout(item, last); });
@@ -559,7 +598,9 @@ function renderTimeline(mode) {
 
   $('chart-table').tBodies[0].replaceChildren(...values.map((item) => {
     const row = element('tr');
-    row.append(element('th', periodLabel(item, false)), element('td', numberFormat.format(count(item.blocked))), element('td', numberFormat.format(count(item.allowed))));
+    const unknown = isPartial(item) && !count(item.blocked) && !count(item.allowed);
+    const cell = (value) => unknown ? 'No data' : numberFormat.format(count(value)) + (isPartial(item) ? ' (partial)' : '');
+    row.append(element('th', periodLabel(item, false)), element('td', cell(item.blocked)), element('td', cell(item.allowed)));
     row.firstChild.scope = 'row';
     return row;
   }));
@@ -605,7 +646,7 @@ function renderBreakdown(mode) {
     name.type = 'button';
     name.title = 'Show in activity';
     name.addEventListener('click', () => focusHost(item.host));
-    row.append(name, element('span', threat ? 'Threat' : categoryLabels[item.category]?.split(' ')[0] === 'Cloaked' ? 'CNAME' : item.category === 'manual' ? 'Your rule' : '', threat ? 'tag threat' : 'tag'),
+    row.append(name, element('span', threat ? 'Threat' : categoryLabels[item.category]?.split(' ')[0] === 'Cloaked' ? 'CNAME' : item.category === 'manual' ? 'Your rule' : item.category === 'doh' ? 'DNS' : '', threat ? 'tag threat' : 'tag'),
       element('span', numberFormat.format(count(item.count)), 'count'));
     const meter = element('span', null, 'meter');
     const fill = element('span');
@@ -980,6 +1021,13 @@ $('confirm-form').addEventListener('submit', (event) => void submitAction(event)
 for (const id of ['pause', 'resume', 'refresh-filters', 'pause-canaries', 'resume-canaries']) {
   $(id).addEventListener('click', () => openAction(id.replaceAll('-', '_')));
 }
+$('chart').addEventListener('focusout', (event) => {
+  if (!chartPending || $('chart').contains(event.relatedTarget)) return;
+  chartPending = false;
+  window.setTimeout(() => {
+    if (!$('chart').contains(document.activeElement) && insights) renderTimeline(historyMode());
+  }, 0);
+});
 let resizeFrame = 0;
 new ResizeObserver(() => {
   cancelAnimationFrame(resizeFrame);
