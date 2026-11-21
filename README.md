@@ -4,7 +4,7 @@ Local ad, tracker and threat filtering for macOS, with a portable Python core.
 
 Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps the origin server's certificate and encrypted contents. No root daemon, browser certificate trust, or account credentials are needed for filtering.
 
-**0.4.0 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. The core has no macOS routing dependency, but Windows transport has not been tested. Windows dashboard authentication and verified health are unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
+**0.5.0 is an alpha release.** The filtering transport has been exercised on macOS ARM64 with Python 3.12. Native proxy transactions are covered by mocked macOS commands; this release has not been tested on every Mac configuration. The core has no macOS routing dependency, but Windows transport has not been tested. Windows dashboard authentication and verified health are unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
 
 ## What it does
 
@@ -69,7 +69,7 @@ For recovery without the CLI, turn off the matching `127.0.0.1:18080` HTTP and H
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r requirements/runtime.lock
-python -m pip install --no-deps --no-index ./egress_guard-0.4.0-py3-none-any.whl
+python -m pip install --no-deps --no-index ./egress_guard-0.5.0-py3-none-any.whl
 python -m pip check
 egress-guard init
 egress-guard refresh
