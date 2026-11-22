@@ -81,13 +81,28 @@
       "kind": "qualification-pass",
       "detail": "Executed exact baseline files as genuine Node v22.16.0 test runner: 7/7 passed. Four newly added tests failed against baseline, proving old false-clean canary-volume, byte-growth and same-source claims plus path-with-spaces CLI silent exit. Modified exact blob-matched source and tests: 11/11 native node --test cases passed, 0 failures/skips; CLI child-process/hash/0600/exclusive output paths exercised. No full installed repository suite or Chrome used.",
       "evidence": "tests/browser/sdk-wire-drift.test.cjs"
+    },
+    {
+      "kind": "implementation-pass",
+      "detail": "Fixed sampled first-party collector gate that previously discarded received bytes on other controlled fixture origins and could credit zero-leakage after positive off-target TLS delivery. Summary now validates and preserves other-origin received bytes; both arms must be origin-isolated for the narrow sampled-window PASS. Fixed existing receiver test fixture and matcher; four new regression cases.",
+      "source_blob_shas": {
+        "window": "53879e987e0ffc80d69554388313aec21d464d71",
+        "existing_test": "76adb12c49bb191e7f72a6107b6ac765d46c32a1",
+        "new_test": "6918d4833492f2070b45c051b0a11b0350650335"
+      },
+      "evidence": "docs/collector-origin-contamination-0.11.md"
+    },
+    {
+      "kind": "qualification-pass",
+      "detail": "On isolated Git-blob-matched source in Node v22.16.0, ran actual node --test for existing collector-byte-windows and new collector-origin-contamination suites:10 passed,0 failures/skips; baseline synthetic origin-shift counterexample reproduced the old false PASS; protected off-target receiver delivery now NOT COVERED, clean windows retain PASS. Full repository suites and native Chrome/proxy integration were not run.",
+      "evidence": "tests/browser/collector-origin-contamination.test.cjs"
     }
   ],
   "next_actions": [
-    "Run full installed Node and Python suites in an environment with complete checkout/dependencies; isolated SDK test suite now passes genuine node --test 11/11.",
-    "Obtain independent source-pinned local SDK collector observations with exact origin TLS/application-byte counters and fixed functional controls; do not treat comparator declarations as external attestation.",
-    "Investigate request-level source attribution on shared first-party TLS connections and unbounded delayed sends before awarding zero-leakage outcomes.",
-    "Preserve existing review-only rule discovery, source pins, feed rollback, manual/threat precedence and browser/OS authority boundaries; do not infer population privacy effect from local cases."
+    "Run full installed Node and Python suites and controlled real proxy/browser collector lifecycle in an expressly permitted environment; prior Chromium startup restriction remains in force here.",
+    "Investigate request-level attribution on shared first-party TLS streams and delayed sends beyond the bounded receiver drain without awarding unexplained cross-origin byte windows a PASS.",
+    "Obtain independent source-pinned local SDK collector receipts before interpreting offline drift comparisons as real native SDK behavior.",
+    "Preserve last-good feed review, deterministic DNR proofs, GPC/WebRTC native qualification requirements and manual/threat/OS authority boundaries."
   ],
   "not_covered": [
     "native Chromium in the initial environment",
@@ -113,7 +128,10 @@
     "independent attestation of externally supplied sdk-wire-drift receipt",
     "real vendor protocol drift, live collector impact or production SDK behavior",
     "complete repository Node/Python suite for SDK drift count and CLI fixes",
-    "independent real-world attribution for tracking-byte growth"
+    "independent real-world attribution for tracking-byte growth",
+    "full installed repository regression suite after collector origin-contamination fix",
+    "native Chrome/real proxy execution for origin-contamination evidence gate",
+    "causal attribution for positive bytes received on unrelated origin within action windows"
   ],
   "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
 }

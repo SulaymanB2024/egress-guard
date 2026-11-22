@@ -40,22 +40,32 @@ function summarizeActionWindows(outcomes, kind) {
   const windows = outcomes.filter(row => row.kind === kind).map(row => row.byteWindow);
   if (windows.some(row => row?.status !== "MEASURED" ||
       !Number.isSafeInteger(row.targetOriginApplicationBytes) ||
-      row.targetOriginApplicationBytes < 0)) throw new Error("Missing action-byte observation");
+      row.targetOriginApplicationBytes < 0 ||
+      !Number.isSafeInteger(row.otherOriginApplicationBytes) ||
+      row.otherOriginApplicationBytes < 0)) throw new Error("Missing action-byte observation");
+  const targetBytes = windows.reduce((sum, row) => sum + row.targetOriginApplicationBytes, 0);
+  const otherBytes = windows.reduce((sum, row) => sum + row.otherOriginApplicationBytes, 0);
+  if (!Number.isSafeInteger(targetBytes) || !Number.isSafeInteger(otherBytes))
+    throw new Error("Action-byte summary overflow");
   return {measuredWindows: windows.length,
     zeroByteWindows: windows.filter(row => row.targetOriginApplicationBytes === 0).length,
     positiveByteWindows: windows.filter(row => row.targetOriginApplicationBytes > 0).length,
-    totalTargetOriginApplicationBytes: windows.reduce((sum, row) => sum + row.targetOriginApplicationBytes, 0)};
+    positiveOtherOriginWindows: windows.filter(row => row.otherOriginApplicationBytes > 0).length,
+    totalTargetOriginApplicationBytes: targetBytes,
+    totalOtherOriginApplicationBytes: otherBytes};
 }
 function assessFirstPartyActionWindows(baseline, protectedArm, expected) {
   const baseOK = baseline && baseline.measuredWindows === expected &&
     baseline.positiveByteWindows === expected && baseline.zeroByteWindows === 0 &&
-    baseline.totalTargetOriginApplicationBytes > 0;
+    baseline.totalTargetOriginApplicationBytes > 0 &&
+    baseline.positiveOtherOriginWindows === 0 && baseline.totalOtherOriginApplicationBytes === 0;
   const protectedOK = protectedArm && protectedArm.measuredWindows === expected &&
     protectedArm.zeroByteWindows === expected && protectedArm.positiveByteWindows === 0 &&
-    protectedArm.totalTargetOriginApplicationBytes === 0;
+    protectedArm.totalTargetOriginApplicationBytes === 0 &&
+    protectedArm.positiveOtherOriginWindows === 0 && protectedArm.totalOtherOriginApplicationBytes === 0;
   return {status: Number.isSafeInteger(expected) && expected >= 2 && baseOK && protectedOK ? "PASS" : "NOT COVERED",
     detail: {baseline, protected: protectedArm, expected,
-      scope: "Only sampled controlled origin intervals; shared-origin or delayed bytes are not individually attributable."}};
+      scope: "Only isolated sampled origin intervals. Non-target origin bytes invalidate a zero-leakage claim; shared-origin and delayed bytes remain unattributed."}};
 }
 
 // A controlled deferred request is scheduled after the page action returns. Its
