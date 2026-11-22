@@ -22,7 +22,7 @@ test("positive shared-origin bytes cannot be assigned to a tracking request", ()
   const result = measureActionWindow(snap([row("publisher.test", 30000, 0)]),
     snap([row("publisher.test", 30000, 99)]), "publisher.test");
   assert.equal(result.targetOriginApplicationBytes, 99);
-  assert.match(result.scope, /not individually attributable/);
+  assert.match(result.scope, /cannot be assigned to this request/);
 });
 test("rejects forged routes, corrupt counters, rollbacks and overflowing evidence", () => {
   const start = snap([row("publisher.test", 30000, 1)]);
@@ -42,7 +42,7 @@ test("rejects unapproved origins and invalid floating, missing or negative count
     assert.throws(() => measureActionWindow(initial, snap([bad]), "publisher.test"));
 });
 test("positive receiver baseline and all protected zero-byte windows are mandatory", () => {
-  const outcome = (kind, bytes) => ({kind, byteWindow: {status: "MEASURED", targetOriginApplicationBytes: bytes}});
+  const outcome = (kind, bytes) => ({kind, byteWindow: {status: "MEASURED", targetOriginApplicationBytes: bytes, otherOriginApplicationBytes: 0}});
   const base = summarizeActionWindows([outcome("ga4", 12), outcome("ga4", 9), outcome("cart", 44)], "ga4");
   const active = summarizeActionWindows([outcome("ga4", 0), outcome("ga4", 0)], "ga4");
   assert.equal(assessFirstPartyActionWindows(base, active, 2).status, "PASS");
