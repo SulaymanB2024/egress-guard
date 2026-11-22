@@ -23,21 +23,32 @@
     {
       "kind": "scheduling",
       "detail": "Eight hourly passes bounded by2026-11-22T12:27:00Z; future environment/tool availability remains a dependency."
+    },
+    {
+      "kind": "implementation-pass",
+      "source_commit": "a474c1db5525dfaa92da6d8c8718f5dc18a3b05a",
+      "detail": "Added feed-review semantic changed-root inspection for domain/descendant and exact CNAME matching, reusing validated HostSet indexes. It is advisory-only and preserves existing feed approval/quarantine authority. Added 2 repository regression tests and strengthened same-count poison assertions."
+    },
+    {
+      "kind": "qualification-pass",
+      "detail": "This environment cannot fetch a GitHub checkout or run the full installed repo test suite. An isolated Python 3.13.5 mirror of the changed-root algorithm passed 10 targeted cases and 10,000 deterministic differential property checks (5,000 exact-host and 5,000 suffix). Reviewed GitHub patch and matched immutable tree. Real package integration, native browser and downstream deployed state remain NOT COVERED."
     }
   ],
   "next_actions": [
-    "Fetch fresh main and inspect this qualification before changing source; do not duplicate completed 0.11 work.",
-    "Prioritize bounded SDK/source-drift experiments, effect-based feed impact review and independent lifecycle cases with actual collector controls. Preserve existing full-action authority and residual observations.",
-    "Extend channel-specific byte attribution for first-party collectors before making first-party zero-byte claims. Keep all-channel opaque residual mandatory.",
-    "Native Chrome may run only on a separately permitted supported target. Do not retry or bypass the initial environment restriction; source-only checks remain distinct.",
-    "Use isolated branches if another pass holds a live lease. Test and merge bounded verified changes, update checkpoint, and stop new work at the program deadline."
+    "Re-fetch main; run the full Python/JS suite and integration tests on a supported checkout/CI target before treating the informational feed-review change as release-qualified. Do not claim prior 0.11 test numbers validate later modifications.",
+    "Continue source-pinned SDK drift and first-party collector channel attribution with positive controls and actual receiver bytes; retain all-channel linkability residual.",
+    "Explore bounded provider-aware policy diff and deterministic feed risk signals only with measured false-positive/compatibility controls. Preserve manual/threat rules and existing approval authority.",
+    "Do not retry native Chromium in the restricted environment; browser-native tests remain NOT COVERED.",
+    "Use isolated branches, expected-head merges, update checkpoint, and finish work by the fixed window deadline."
   ],
   "not_covered": [
     "native Chromium in the initial environment",
     "installed macOS service/routing/native messaging",
     "public-IP/WebRTC routing",
     "full website/SDK lifecycles",
-    "population-level linkability"
+    "population-level linkability",
+    "full repository regression suite after changed-root inspection",
+    "installed package integration for changed-root inspection"
   ],
   "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
 }

@@ -703,7 +703,9 @@ def review_feeds(state: Path, config: dict, feed_id: str | None = None) -> dict:
                                     "base_sha256": record.metadata["base_sha256"],
                                     "snapshot": _snapshot_summary(candidate), **assessment,
                                     "delta": feed_review.entry_delta(
-                                        current.verified.contents if current.verified else b"", candidate.contents)}
+                                        current.verified.contents if current.verified else b"", candidate.contents,
+                                        exact=feed.exact, previous_names=previous_names,
+                                        candidate_names=candidate.names)}
                 try:
                     _validate_transition(candidate, current.verified)
                 except ValueError as error:
