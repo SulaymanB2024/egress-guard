@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "kind": "post-freeze-source-validity-sensitivity",
+  "corpusSha256": "074d616ba05c929adb76007048b644dd1cc9ebf3fb5ac39ecd9f588061852423",
+  "errataSha256": "84a93dbe8faa80f589ac423fb1fd2f1197dfd104a33beddac3f93ee02b415840",
+  "baselineArtifactSha256": "74b70a5327c4a63e3b0934482b453e2a1fd51189628e1a096f0be8df4f20b0c0",
+  "candidateArtifactSha256": "5565431dace562ca101702443ab5409605a02360975b754e04d9ec75c835725d",
+  "sourceInputsSha256": "b2f4a7ff538b24b9bd757c286776bcefda5e55654a4c9f2b5b6292e673960ded",
+  "cases": [
+    {
+      "fixtureId": "prebid-setuid",
+      "originalRequest": {
+        "url": "https://publisher.example/setuid?bidder=sample&uid=synthetic-buyer",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "correctedRequest": {
+        "url": "https://publisher.example/setuid?bidder=pubmatic&uid=synthetic-buyer",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "baseline": {
+        "originalPrevented": false,
+        "corrected": {
+          "prevented": false,
+          "action": "none",
+          "winner": null,
+          "note": null
+        },
+        "unchanged": true
+      },
+      "candidate": {
+        "originalPrevented": true,
+        "corrected": {
+          "prevented": true,
+          "action": "block",
+          "winner": {
+            "ruleset": "fp-trackers",
+            "id": 33,
+            "priority": 6,
+            "action": "block",
+            "conditionSummary": {
+              "regexFilter": "^https?://[^/?#@]+/setuid\\?(?:(?:gdpr|gdpr_consent|gpp|gpp_sid|account|f)=[^&#]*&)*bidder=[a-z][a-z0-9_-]*&uid=[A-Za-z0-9][A-Za-z0-9_-]+(?:#|$)",
+              "isUrlFilterCaseSensitive": true,
+              "requestMethods": [
+                "get"
+              ],
+              "resourceTypes": [
+                "image",
+                "sub_frame"
+              ]
+            }
+          },
+          "note": null
+        },
+        "unchanged": true
+      }
+    }
+  ],
+  "originalComparison": {
+    "equalFamilyEscapeRateBefore": 0.5648148148148148,
+    "equalFamilyEscapeRateAfter": 0.3888888888888889,
+    "absoluteEscapeRateReduction": 0.17592592592592587,
+    "relativeEscapedRequestReduction": 0.31147540983606553,
+    "rawEscapedBefore": 21,
+    "rawEscapedAfter": 9,
+    "rawRelativeEscapedRequestReduction": 0.5714285714285714,
+    "newFalsePositives": [],
+    "regressions": [],
+    "metThirtyPercentTarget": true,
+    "scope": "Frozen challenge corpus only; no internet-wide prevalence or anonymity claim."
+  },
+  "sensitivityComparison": {
+    "equalFamilyEscapeRateBefore": 0.5648148148148148,
+    "equalFamilyEscapeRateAfter": 0.3888888888888889,
+    "absoluteEscapeRateReduction": 0.17592592592592587,
+    "relativeEscapedRequestReduction": 0.31147540983606553,
+    "rawEscapedBefore": 21,
+    "rawEscapedAfter": 9,
+    "rawRelativeEscapedRequestReduction": 0.5714285714285714,
+    "newFalsePositives": [],
+    "regressions": [],
+    "metThirtyPercentTarget": true,
+    "scope": "Frozen challenge corpus only; no internet-wide prevalence or anonymity claim."
+  },
+  "decisionsUnchanged": true,
+  "scoreUnchanged": true,
+  "scope": "Separate sensitivity replay only. Frozen v1 corpus and original reports are unchanged; synthetic shapes are not server-accepted or captured traffic."
+}

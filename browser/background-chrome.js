@@ -358,7 +358,7 @@
     const active = supported && recorded;
     return {state: !supported ? "unsupported" : policy.state === "degraded" ? "degraded" : requested && active && policy.state === "applied" ? "applied" : "pending",
       active, requested: Boolean(requested), revision: active ? applied.revision : null,
-      resourceScope: "cross-top-site-subresources", httpHeaders: ["cookie", "authorization", "referer", "set-cookie"],
+      resourceScope: "cross-top-site-subresources", httpHeaders: [...dnr.ISOLATION_REQUEST_HEADERS, "set-cookie"],
       navigationScope: "destination-site-headers", existingConnections: "not-revoked", reloadNeeded: true,
       ...(!supported ? {reason: "This public-suffix or wildcard-registry address cannot be isolated safely with Chrome's domain conditions."} : {})};
   }

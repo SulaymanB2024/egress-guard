@@ -115,12 +115,16 @@ class ConfigurationTests(unittest.TestCase):
         saved = application.policy().revision
         transport = {"profile": "compatible", "connect_ports": [443],
                      "address_guard": {"selected": False, "state": "disabled", "reason": None},
-                     "scope": "proxy-tcp", "applied": True}
+                     "scope": "proxy-tcp", "tunnel_policy": "per-forward", "applied": True}
+        old_transport = {key: value for key, value in transport.items() if key != "tunnel_policy"}
         for reported, applied, state in (
             (None, False, "unknown"),
             ({"revision": "0" * 64, "pending": False, "degraded": False}, False, "degraded"),
             ({"revision": saved, "pending": True, "degraded": False}, False, "degraded"),
             ({"revision": saved, "pending": False, "degraded": False}, False, "degraded"),
+            ({"revision": saved, "pending": False, "degraded": False, "transport": old_transport}, False, "degraded"),
+            ({"revision": saved, "pending": False, "degraded": False,
+              "transport": {**transport, "tunnel_policy": "initial-only"}}, False, "degraded"),
             ({"revision": saved, "pending": False, "degraded": False, "transport": transport}, True, "active"),
         ):
             with self.subTest(reported=reported), patch(
@@ -142,7 +146,7 @@ class ConfigurationTests(unittest.TestCase):
         saved = application.policy().revision
         runtime = {"profile": "compatible", "connect_ports": [443],
                    "address_guard": {"selected": True, "state": "unavailable", "reason": "self-test-failed"},
-                   "scope": "proxy-tcp", "applied": False}
+                   "scope": "proxy-tcp", "tunnel_policy": "per-forward", "applied": False}
         with patch("egress_guard.dashboard_app.proxy_health", return_value={"ready": False,
                    "policy": {"revision": saved, "pending": False, "degraded": False, "transport": runtime}}):
             result = application.status()

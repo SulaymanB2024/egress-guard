@@ -20,6 +20,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "browser");
 const dnr = require(path.join(SRC, "core/dnr.js"));
+const trackingProtocols = require(path.join(SRC, "core/tracking-protocols.js"));
 const abp = require(path.join(ROOT, "scripts/lib/abp-dnr.cjs"));
 const cosmetics = require(path.join(ROOT, "scripts/lib/cosmetic-compiler.cjs"));
 const parameters = require(path.join(ROOT, "scripts/lib/removeparam-compiler.cjs"));
@@ -329,6 +330,11 @@ export async function loadFilters(dir, {offline = false, allowMissing = false, l
 export function compileFilterRulesets(filters, {maxSuspicious = MAX_SUSPICIOUS} = {}) {
   const P = dnr.PRIORITY;
   const sets = {"fp-trackers": dnr.compileHand("fp-trackers"), easyprivacy: [], easylist: [], "filter-allow": [], replay: dnr.compileHand("replay")};
+  // Recognize source-backed wire formats even on a first-party, renamed route.
+  // These remain ordinary hand-filter blocks: no new permission, allow tier or
+  // runtime request inspection. The existing category toggle controls them.
+  const protocols = trackingProtocols.compile({firstId: sets["fp-trackers"].length + 1, priority: P.hand});
+  sets["fp-trackers"].push(...protocols.rules);
   const stats = {};
   const generic = (r) => r.condition.urlFilter && !r.condition.urlFilter.startsWith("||") && !r.condition.urlFilter.startsWith("|") && !r.condition.requestDomains;
   for (const spec of FILTER_LISTS) {
@@ -351,7 +357,7 @@ export function compileFilterRulesets(filters, {maxSuspicious = MAX_SUSPICIOUS} 
   for (const id of ["fp-trackers", "easyprivacy", "easylist"]) {
     for (const r of sets[id]) if (r.condition.requestDomains && !r.condition.initiatorDomains && !r.condition.urlFilter && !r.condition.regexFilter) trackerDomains.push(...r.condition.requestDomains);
   }
-  return {rulesets: sets, stats, trackerDomains};
+  return {rulesets: sets, stats, trackerDomains, protocols: {stats: protocols.stats, catalog: protocols.catalog}};
 }
 
 /** Host names from a "domains" list in the filter cache (already checked when cached). */
@@ -463,7 +469,7 @@ function chromeExtensionId(manifest) {
 const SHARED = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/dnr.js", "core/cosmetic-data.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/semantic.js",
   "vendor/PSL-NOTICE.md", "vendor/public_suffix_list.dat", "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const SURROGATE_FILES = [...new Set(dnr.SURROGATES.map((s) => `surrogates/${s.file}`))];
-const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", "semantic.html", "semantic.css", "semantic.js", "core/local-model.js", "privacy.html", "privacy.css", "privacy.js", "core/browser-privacy.js", ...SURROGATE_FILES];
+const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", "core/tracking-protocols.js", "semantic.html", "semantic.css", "semantic.js", "core/local-model.js", "privacy.html", "privacy.css", "privacy.js", "core/browser-privacy.js", ...SURROGATE_FILES];
 const CHROME_WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/browser-privacy.js"];
 export const GUARANTEED_STATIC_RULES = 30000;   // Chrome's GUARANTEED_MINIMUM_STATIC_RULES
 export const MAX_STATIC_REGEX_RULES = 1000;     // Chrome's MAX_NUMBER_OF_REGEX_RULES
@@ -486,7 +492,7 @@ export function joinNames(names) {
   return `${words[0].slice(0, common).join(" ")} ${words.map((w) => w.slice(common).join(" ")).join(" and ")}`;
 }
 
-function notice(lists, filters = {}) {
+function notice(lists, filters = {}, protocols = false) {
   const lines = ["Egress Guard Companion: bundled list data", "",
     "The extension code is MIT licensed. The rulesets in rules/ are generated from the lists below and keep",
     "their upstream licenses. HaGeZi lists are GPL-3.0: if you pass this build to anyone else, include this",
@@ -497,6 +503,8 @@ function notice(lists, filters = {}) {
     "Public Suffix List data is packaged in vendor/public_suffix_list.dat and compiled into core/psl-data.js.",
     "Its source notice, version and license (MPL-2.0) are preserved in vendor/PSL-NOTICE.md and the data header.",
     "Source: https://publicsuffix.org/list/public_suffix_list.dat", ""];
+  if (protocols) lines.push("The original protocol signatures in fp-trackers are MIT-licensed project code. Their source references",
+    "and documented limits are recorded in tracking-protocols.json; upstream SDK code is not bundled.", "");
   for (const data of Object.values(filters || {})) {
     const s = data.source;
     lines.push(`filters: ${s.name}`, `  source:  ${s.url}`, `  license: ${s.license.name} ${s.license.url}`,
@@ -590,8 +598,8 @@ export function buildCoverage(lists, filters, compilation = null, cosmeticData =
     ineffective, development, filterSyntax: "supported-subset", compilation: compilation || {},
     cosmetics: cosmeticCoverage,
     parameters: parameterCoverage,
-    capabilities: ["domain-blocking", "url-filtering", "maintained-parameter-cleaning", "named-site-isolation", "site-cosmetics", "indexed-generic-cosmetics", "bounded-relational-cosmetics", "local-ad-review", "optional-browser-privacy"],
-    compiler: "egress-guard-0.9"};
+    capabilities: ["domain-blocking", "url-filtering", "tracking-protocol-signatures", "maintained-parameter-cleaning", "named-site-isolation", "site-cosmetics", "indexed-generic-cosmetics", "bounded-relational-cosmetics", "local-ad-review", "optional-browser-privacy"],
+    compiler: "egress-guard-0.10"};
 }
 
 export function build({out = path.join(ROOT, "dist-browser"), lists = null, filters = null, requireComplete = false,
@@ -644,6 +652,10 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     fs.writeFileSync(path.join(chrome, "core/param-data.js"), parameterBody);
     summary.cosmetics = cosmeticData.stats;
     summary.parameters = compiledParams.stats;
+    const protocolBody = JSON.stringify({schema: 1, ...compiledFilters.protocols,
+      compiler_sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(SRC, "core/tracking-protocols.js"))).digest("hex")}) + "\n";
+    fs.writeFileSync(path.join(chrome, "tracking-protocols.json"), protocolBody);
+    summary.protocols = compiledFilters.protocols.stats;
     fs.mkdirSync(path.join(chrome, "rules"));
     const meta = {};
     const resources = [];
@@ -712,10 +724,13 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     hash.update(JSON.stringify(coverage));
     hash.update(cosmeticBody);
     hash.update(parameterBody);
+    hash.update(protocolBody);
     for (const f of [...SHARED, ...CHROME_ONLY, "background-chrome.js", "manifest.chrome.json"]) hash.update(fs.readFileSync(path.join(SRC, f)));
     const buildId = hash.digest("hex").slice(0, 32);
     fs.writeFileSync(path.join(chrome, "rules", "build.json"), JSON.stringify({build: buildId, built_at: Math.floor(Date.now() / 1000), coverage,
       cosmetics: cosmeticData.stats, parameters: compiledParams.stats,
+      tracking_protocols: compiledFilters.protocols.stats,
+      tracking_protocols_sha256: crypto.createHash("sha256").update(protocolBody).digest("hex"),
       parameter_policy_sha256: crypto.createHash("sha256").update(parameterBody).digest("hex"),
       psl_sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(SRC, "core/psl-data.js"))).digest("hex")}));
     summary.build = buildId;
@@ -724,7 +739,7 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
       `// ---- background-chrome.js\n${fs.readFileSync(path.join(SRC, "background-chrome.js"), "utf8")}`].join("\n");
     fs.writeFileSync(path.join(chrome, "background.js"), worker);
     fs.writeFileSync(path.join(chrome, "manifest.json"), JSON.stringify(chromeManifest, null, 2) + "\n");
-    fs.writeFileSync(path.join(chrome, "NOTICE.txt"), notice(lists || {}, filters || {}));
+    fs.writeFileSync(path.join(chrome, "NOTICE.txt"), notice(lists || {}, filters || {}, true));
 
     // ---- Firefox (user rules through blocking webRequest; built-in lists are Chrome-only for now) ----
     const firefox = path.join(stage, "firefox");

@@ -30,7 +30,7 @@ def valid_settings(value: object) -> bool:
 def runtime_receipt(value: object) -> dict | None:
     """Keep only the fixed transport schema from an authenticated policy report."""
     if not isinstance(value, dict) or set(value) != {
-        "profile", "connect_ports", "address_guard", "scope", "applied",
+        "profile", "connect_ports", "address_guard", "scope", "tunnel_policy", "applied",
     }:
         return None
     guard = value["address_guard"]
@@ -42,17 +42,20 @@ def runtime_receipt(value: object) -> dict | None:
     valid_guard = ((state == "disabled" and not selected and reason is None)
                    or (state == "active" and selected and reason is None)
                    or (state == "unavailable" and isinstance(reason, str) and reason in GUARD_REASONS))
-    if (not valid_guard or value["scope"] != "proxy-tcp" or type(value["applied"]) is not bool
+    if (not valid_guard or value["scope"] != "proxy-tcp" or value["tunnel_policy"] != "per-forward"
+            or type(value["applied"]) is not bool
             or (value["applied"] and state == "unavailable")
             or not valid_settings({"profile": value["profile"], "connect_ports": value["connect_ports"],
                                    "address_guard": selected})):
         return None
     return {"profile": value["profile"], "connect_ports": list(value["connect_ports"]),
-            "address_guard": dict(guard), "scope": "proxy-tcp", "applied": value["applied"]}
+            "address_guard": dict(guard), "scope": "proxy-tcp", "tunnel_policy": "per-forward",
+            "applied": value["applied"]}
 
 
 def applied(saved: dict, runtime: dict | None) -> bool:
-    return bool(runtime and runtime["applied"] and runtime["profile"] == saved["profile"]
+    return bool(runtime and runtime.get("tunnel_policy") == "per-forward"
+                and runtime["applied"] and runtime["profile"] == saved["profile"]
                 and runtime["connect_ports"] == saved["connect_ports"]
                 and runtime["address_guard"]["selected"] == saved["address_guard"]
                 and runtime["address_guard"]["state"] == ("active" if saved["address_guard"] else "disabled"))

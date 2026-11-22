@@ -158,6 +158,18 @@ test("build emits Chrome and Firefox from shared sources; Chrome gets rulesets, 
       "the worker reads only its own packaged files: the threat ruleset and the build stamp");
     const stamp = JSON.parse(fs.readFileSync(path.join(chrome, "rules/build.json"), "utf8"));
     assert.match(stamp.build, /^[0-9a-f]{32}$/);
+    const protocolBody = fs.readFileSync(path.join(chrome, "tracking-protocols.json"));
+    const protocolCatalog = JSON.parse(protocolBody);
+    assert.equal(stamp.tracking_protocols_sha256, require("node:crypto").createHash("sha256").update(protocolBody).digest("hex"));
+    assert.deepEqual(stamp.tracking_protocols, protocolCatalog.stats);
+    assert.ok(protocolCatalog.stats.regexRules > 0 && protocolCatalog.catalog.length > 0);
+    assert.equal(protocolCatalog.compiler_sha256, require("node:crypto").createHash("sha256")
+      .update(fs.readFileSync(path.join(chrome, "core/tracking-protocols.js"))).digest("hex"));
+    const firstParty = JSON.parse(fs.readFileSync(path.join(chrome, "rules/fp-trackers.json"), "utf8"));
+    assert.equal(new Set(firstParty.map(rule => rule.id)).size, firstParty.length, "protocol additions cannot collide with hand or imported rule IDs");
+    const protocolProbe = "https://publisher.example/renamed?tid=G-ABC1234567&extra=1&v=2";
+    assert.ok(firstParty.some(rule => rule.action.type === "block" && rule.priority === 6 && rule.condition.regexFilter &&
+      new RegExp(rule.condition.regexFilter, rule.condition.isUrlFilterCaseSensitive ? "" : "i").test(protocolProbe)), "the published artifact contains the first-party protocol defense at the hand-filter tier");
     assert.ok(worker.includes(`"build":"${stamp.build}"`), "the worker knows which build it is");
     assert.match(worker, /\^rules\\\/threats\(-\[0-9\]\+\)\?\\\.json\$/, "and only files named like a threat ruleset");
     assert.match(worker, /globalThis\.EGLists = /);
@@ -171,6 +183,7 @@ test("build emits Chrome and Firefox from shared sources; Chrome gets rulesets, 
     for (const f of [...fm.background.scripts, ...fm.content_scripts[0].js, "popup.html", "ui.css"]) assert.ok(fs.existsSync(path.join(firefox, f)), f);
     assert.equal(fs.existsSync(path.join(firefox, "warning.html")), false);
     assert.equal(fs.existsSync(path.join(firefox, "rules")), false);
+    assert.equal(fs.existsSync(path.join(firefox, "tracking-protocols.json")), false, "Firefox's manual-rule adapter does not claim the Chrome protocol catalog");
     // No lists: valid empty rulesets, parameter stripping still on.
     build({out, lists: null});
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(chrome, "rules/trackers.json"), "utf8")), []);

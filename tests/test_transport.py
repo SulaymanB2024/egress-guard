@@ -32,7 +32,8 @@ class TransportPolicyTests(unittest.TestCase):
     def test_runtime_receipt_never_turns_unavailable_or_unknown_fields_into_acknowledgment(self):
         saved = {"profile": "hardened", "connect_ports": [443], "address_guard": True}
         runtime = {"profile": "hardened", "connect_ports": [443], "address_guard": {
-            "selected": True, "state": "active", "reason": None}, "scope": "proxy-tcp", "applied": True}
+            "selected": True, "state": "active", "reason": None}, "scope": "proxy-tcp",
+            "tunnel_policy": "per-forward", "applied": True}
         self.assertTrue(applied(saved, runtime_receipt(runtime)))
         self.assertIsNone(runtime_receipt({**runtime, "private_peer": "must-not-escape"}))
         bad = {**runtime, "address_guard": {"selected": True, "state": "unavailable", "reason": "self-test-failed"}}
@@ -40,6 +41,16 @@ class TransportPolicyTests(unittest.TestCase):
         bad["applied"] = False
         self.assertFalse(applied(saved, runtime_receipt(bad)))
         self.assertIsNone(runtime_receipt({**runtime, "address_guard": {"selected": False, "state": "active", "reason": None}}))
+
+    def test_a_09_or_unknown_tunnel_capability_cannot_acknowledge_current_protection(self):
+        saved = {"profile": "compatible", "connect_ports": [443], "address_guard": False}
+        old = {"profile": "compatible", "connect_ports": [443], "address_guard": {
+            "selected": False, "state": "disabled", "reason": None}, "scope": "proxy-tcp", "applied": True}
+        for value in (old, {**old, "tunnel_policy": "initial-only"},
+                      {**old, "tunnel_policy": True}, {**old, "tunnel_policy": None}):
+            with self.subTest(value=value):
+                self.assertIsNone(runtime_receipt(value))
+                self.assertFalse(applied(saved, value))
 
 
 @unittest.skipUnless(fixtures.MITMDUMP, "mitmdump required for the real proxy test")

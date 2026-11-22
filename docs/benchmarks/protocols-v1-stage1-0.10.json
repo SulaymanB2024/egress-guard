@@ -1,0 +1,1535 @@
+{
+  "schema": 1,
+  "evaluation": "compiled-DNR model, not native Chrome or live traffic",
+  "corpusSha256": "074d616ba05c929adb76007048b644dd1cc9ebf3fb5ac39ecd9f588061852423",
+  "artifact": {
+    "version": "0.10.0",
+    "rules": 14130,
+    "enabledRulesets": [
+      "threats",
+      "threats-2",
+      "trackers",
+      "cname",
+      "params",
+      "links",
+      "gpc",
+      "referrer",
+      "beacons",
+      "cookies",
+      "bounce",
+      "surrogates",
+      "fp-trackers",
+      "easyprivacy",
+      "easylist",
+      "filter-allow",
+      "replay"
+    ],
+    "sha256": "eeb8d7f014355a86b7f58f520ea0dd9f22dafdc3a4e0fce390397a024a1ce6ee",
+    "files": [
+      {
+        "path": "manifest.json",
+        "sha256": "6f8b7cfe5646068be68090659e604b48f7498525222113aaf3d72d5be986e154"
+      },
+      {
+        "path": "rules/threats.json",
+        "sha256": "16264312ba1c6754ac968a40ec1e3340af9d28c91a22949162874ab7b9aec503",
+        "enabled": true,
+        "rules": 65
+      },
+      {
+        "path": "rules/threats-2.json",
+        "sha256": "2965e341aa88a6c17c3e73d46cebd333afd95a120fee67f06653afcf301d7e29",
+        "enabled": true,
+        "rules": 67
+      },
+      {
+        "path": "rules/trackers.json",
+        "sha256": "f6884a8b50896a8a97735ac10e52528da58e116a4747c7ae90a8b4581b2ec3ab",
+        "enabled": true,
+        "rules": 11
+      },
+      {
+        "path": "rules/cname.json",
+        "sha256": "8037690817575f40d624954e7b987e9225a29179bdd0e09497333a88bcfde1ad",
+        "enabled": true,
+        "rules": 8
+      },
+      {
+        "path": "rules/params.json",
+        "sha256": "233cfde3b8cf54c253220ff116e3a42e11912bc314bcc765479ab7d77dbdb0b1",
+        "enabled": true,
+        "rules": 801
+      },
+      {
+        "path": "rules/links.json",
+        "sha256": "2ff0e57f058e7486d142c9078048f1a05e620b036fc20ef2ee2f21e012c87cc8",
+        "enabled": true,
+        "rules": 26
+      },
+      {
+        "path": "rules/gpc.json",
+        "sha256": "6a51534b0f48c008e44a791c3c5a814fe2758988c806e8efd6c1bab6c34bbacd",
+        "enabled": true,
+        "rules": 1
+      },
+      {
+        "path": "rules/referrer.json",
+        "sha256": "97d6010aed52bff4004480cf2d476c93a66a15194b5bcdb0bdbd4b5af5d2143d",
+        "enabled": true,
+        "rules": 1
+      },
+      {
+        "path": "rules/beacons.json",
+        "sha256": "92e7b055a03631960ba6455186c571839cb6bdc05d4ef98efa6d178a175b8a1e",
+        "enabled": true,
+        "rules": 1
+      },
+      {
+        "path": "rules/cookies.json",
+        "sha256": "ba2c4cf7ade97e1eabf47db78674ef27d3c87f95dbddb0468d1274022f080a8c",
+        "enabled": true,
+        "rules": 4
+      },
+      {
+        "path": "rules/bounce.json",
+        "sha256": "74980fc4f5c27e7ac84465acfad4056fc00c24956c8ea3d46641fff8263ce4a2",
+        "enabled": true,
+        "rules": 2
+      },
+      {
+        "path": "rules/surrogates.json",
+        "sha256": "3b0ea1c87e5dcf1b4c6dfb3c544638411828cb1dbf67f53504123c47704f68e3",
+        "enabled": true,
+        "rules": 11
+      },
+      {
+        "path": "rules/fp-trackers.json",
+        "sha256": "1fa77c7733b52b068a4650b1cfba334c38aca7a0b0bfbb55607d3f0795423ff3",
+        "enabled": true,
+        "rules": 3530
+      },
+      {
+        "path": "rules/easyprivacy.json",
+        "sha256": "b44958877b5122bdcac6c842595359292f1fd47e31ab3f4c5d4516ef2857352d",
+        "enabled": true,
+        "rules": 4919
+      },
+      {
+        "path": "rules/easylist.json",
+        "sha256": "7afe8ae457ac04e34e8683adef49aa5f8dfc5ec4f90bb6e67fc60741343b902d",
+        "enabled": true,
+        "rules": 3314
+      },
+      {
+        "path": "rules/filter-allow.json",
+        "sha256": "51acd8824426a988999302bbdb20d456de50a9842200bc2ee04f4ac7dd329e16",
+        "enabled": true,
+        "rules": 1350
+      },
+      {
+        "path": "rules/replay.json",
+        "sha256": "56d8dc0f50ac9ca32f7a5993236505665925b181de121a8f18d74688897274b0",
+        "enabled": true,
+        "rules": 19
+      },
+      {
+        "path": "core/psl-data.js",
+        "sha256": "efbbcb792620be0ed433ca98c339304c9f05d4547247ef80110e7ab44478badb"
+      },
+      {
+        "path": "core/hosts.js",
+        "sha256": "6c4d6f936be0ffd72c2cd5505cb781075c093f8f1683326ff7f97a0730612d13"
+      }
+    ],
+    "inputs": [
+      {
+        "url": "https://easylist.to/easylist/easylist.txt",
+        "sha256": "67241d1a1fa2ba2c3405923e656e7bae0c7b06b220dd5ffb517b699ae2dcaf49"
+      },
+      {
+        "url": "https://easylist.to/easylist/easyprivacy.txt",
+        "sha256": "eb509a55651e499956103e83480585c3b02d66a8cf1e8d29dca8a9acc3148b37"
+      },
+      {
+        "url": "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-domains.txt",
+        "sha256": "8ea95e711280f070cfeb7c7894c8e4926ddc447afb69ad1378b9da56bc5a2827"
+      },
+      {
+        "url": "https://phishing.army/download/phishing-army-domains.txt",
+        "sha256": "495914a1ec7e1eafde8c5eda4ad6edf0e0fb34311e2447647dc30bc89feb25dd"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_ads_justdomains.txt",
+        "sha256": "5ac35b203dc4e8a33df5c1f9bcb5afec2746b750acbe515afc02880a2812202b"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_clickthroughs_justdomains.txt",
+        "sha256": "8eeaa753f30270bd47c05fb34f3e34b11eb55a086896796897946ec940c873d8"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_trackers_justdomains.txt",
+        "sha256": "8a238f6aa8db74c3707874211ba7a4fa83b3d9254c142524ef4858c84c4b6304"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus-onlydomains.txt",
+        "sha256": "5e8db44743b6e737f7e0d1ee10913f30930c95f5542a8a0e99df6ebff233d262"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt",
+        "sha256": "39c848db6ca32bdb5efe122502d089a5cf2ad7253a9bd2a23b556d3d72d5e834"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy-removeparam.txt",
+        "sha256": "c7d4e2295262e9e509a522ba689cada33119ce05ddffb2cd18a2af00a641bf53"
+      }
+    ],
+    "inputsSha256": "b2f4a7ff538b24b9bd757c286776bcefda5e55654a4c9f2b5b6292e673960ded",
+    "stage": "before-request; Standard; empty user state; all manifest-enabled static rules",
+    "nativeBrowserQualified": false
+  },
+  "summary": {
+    "trackingCases": 34,
+    "escaped": 11,
+    "prevented": 23,
+    "rawEscapeRate": 0.3235294117647059,
+    "equalFamilyEscapeRate": 0.4351851851851852,
+    "functionalCases": 34,
+    "functionalPrevented": [
+      "posthog-nested-value",
+      "prebid-path-suffix"
+    ],
+    "families": [
+      {
+        "family": "google",
+        "cases": 8,
+        "escaped": 1,
+        "escapeRate": 0.25,
+        "mechanisms": [
+          {
+            "mechanism": "vendor-endpoint",
+            "cases": 1,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "first-party-ga4-query",
+            "cases": 3,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "first-party-gtm-loader",
+            "cases": 3,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "opaque-encoded-route",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          }
+        ]
+      },
+      {
+        "family": "meta",
+        "cases": 4,
+        "escaped": 0,
+        "escapeRate": 0,
+        "mechanisms": [
+          {
+            "mechanism": "vendor-endpoint",
+            "cases": 1,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "first-party-pixel",
+            "cases": 3,
+            "escaped": 0,
+            "escapeRate": 0
+          }
+        ]
+      },
+      {
+        "family": "matomo",
+        "cases": 6,
+        "escaped": 2,
+        "escapeRate": 0.5,
+        "mechanisms": [
+          {
+            "mechanism": "canonical-endpoint",
+            "cases": 1,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "query-visible-visitor",
+            "cases": 3,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "optional-identity-absent",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          },
+          {
+            "mechanism": "body-only",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          }
+        ]
+      },
+      {
+        "family": "fingerprint",
+        "cases": 4,
+        "escaped": 1,
+        "escapeRate": 0.5,
+        "mechanisms": [
+          {
+            "mechanism": "v3-proxy-loader",
+            "cases": 3,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "v4-opaque-result",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          }
+        ]
+      },
+      {
+        "family": "posthog",
+        "cases": 2,
+        "escaped": 1,
+        "escapeRate": 0.5,
+        "mechanisms": [
+          {
+            "mechanism": "canonical-endpoint",
+            "cases": 1,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "body-only",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          }
+        ]
+      },
+      {
+        "family": "amplitude",
+        "cases": 2,
+        "escaped": 1,
+        "escapeRate": 0.5,
+        "mechanisms": [
+          {
+            "mechanism": "canonical-endpoint",
+            "cases": 1,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "body-only",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          }
+        ]
+      },
+      {
+        "family": "segment",
+        "cases": 2,
+        "escaped": 1,
+        "escapeRate": 0.5,
+        "mechanisms": [
+          {
+            "mechanism": "vendor-endpoint",
+            "cases": 1,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "body-only",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          }
+        ]
+      },
+      {
+        "family": "clarity",
+        "cases": 2,
+        "escaped": 1,
+        "escapeRate": 0.5,
+        "mechanisms": [
+          {
+            "mechanism": "vendor-endpoint",
+            "cases": 1,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "body-only",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          }
+        ]
+      },
+      {
+        "family": "prebid",
+        "cases": 4,
+        "escaped": 3,
+        "escapeRate": 0.6666666666666666,
+        "mechanisms": [
+          {
+            "mechanism": "auction-endpoint",
+            "cases": 1,
+            "escaped": 0,
+            "escapeRate": 0
+          },
+          {
+            "mechanism": "identity-sync",
+            "cases": 2,
+            "escaped": 2,
+            "escapeRate": 1
+          },
+          {
+            "mechanism": "body-only",
+            "cases": 1,
+            "escaped": 1,
+            "escapeRate": 1
+          }
+        ]
+      }
+    ]
+  },
+  "results": [
+    {
+      "id": "google-native",
+      "family": "google",
+      "mechanism": "vendor-endpoint",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "trackers",
+        "id": 5,
+        "priority": 17,
+        "action": "block",
+        "conditionSummary": {
+          "requestDomains": {
+            "entries": 25000,
+            "sha256": "6e82dca51608a3dd5dc18c59013d242535941a8a4ad10b1dbbc2af3efab67ba1",
+            "matchingDomains": [
+              "google-analytics.com"
+            ]
+          },
+          "resourceTypes": [
+            "sub_frame",
+            "stylesheet",
+            "script",
+            "image",
+            "font",
+            "object",
+            "xmlhttprequest",
+            "ping",
+            "csp_report",
+            "media",
+            "websocket",
+            "webtransport",
+            "webbundle",
+            "other"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "ga4-canonical",
+      "family": "google",
+      "mechanism": "first-party-ga4-query",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 10,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*v=2&(?:[^&#]*&)*tid=G-[A-Z0-9]{4,16}(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "ga4-reordered",
+      "family": "google",
+      "mechanism": "first-party-ga4-query",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 11,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*tid=G-[A-Z0-9]{4,16}&(?:[^&#]*&)*v=2(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "ga4-intervening",
+      "family": "google",
+      "mechanism": "first-party-ga4-query",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 10,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*v=2&(?:[^&#]*&)*tid=G-[A-Z0-9]{4,16}(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "gtm-canonical",
+      "family": "google",
+      "mechanism": "first-party-gtm-loader",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 1,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "urlFilter": ".js?id=GTM-",
+          "resourceTypes": [
+            "script"
+          ],
+          "isUrlFilterCaseSensitive": false
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "gtm-reordered",
+      "family": "google",
+      "mechanism": "first-party-gtm-loader",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 12,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*id=GTM-[A-Z0-9]{4,16}(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get"
+          ],
+          "resourceTypes": [
+            "script"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "gtm-renamed",
+      "family": "google",
+      "mechanism": "first-party-gtm-loader",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 12,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*id=GTM-[A-Z0-9]{4,16}(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get"
+          ],
+          "resourceTypes": [
+            "script"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "stape-opaque",
+      "family": "google",
+      "mechanism": "opaque-encoded-route",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "ga4-wrong-version",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "ga4-wrong-id",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "ga4-nested-value",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "gtm-wrong-type",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "gtm-nested-value",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "stape-functional-twin",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "meta-native",
+      "family": "meta",
+      "mechanism": "vendor-endpoint",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 9,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^/?#]+/(?:[^?#]*/)?tr/?\\?id=[0-9]{6,}&ev=",
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ],
+          "isUrlFilterCaseSensitive": false
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "meta-canonical",
+      "family": "meta",
+      "mechanism": "first-party-pixel",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 9,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^/?#]+/(?:[^?#]*/)?tr/?\\?id=[0-9]{6,}&ev=",
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ],
+          "isUrlFilterCaseSensitive": false
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "meta-reordered",
+      "family": "meta",
+      "mechanism": "first-party-pixel",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 14,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^/?#@]+/tr/?\\?(?:[^&#]*&)*ev=(?:PageView|ViewContent|AddToCart|Purchase)&(?:[^&#]*&)*id=[0-9]{5,}(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "meta-intervening",
+      "family": "meta",
+      "mechanism": "first-party-pixel",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 13,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^/?#@]+/tr/?\\?(?:[^&#]*&)*id=[0-9]{5,}&(?:[^&#]*&)*ev=(?:PageView|ViewContent|AddToCart|Purchase)(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "meta-path-suffix",
+      "family": "meta",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "meta-text-id",
+      "family": "meta",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "meta-ordinary-event",
+      "family": "meta",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "meta-nested-value",
+      "family": "meta",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "matomo-canonical",
+      "family": "matomo",
+      "mechanism": "canonical-endpoint",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 15,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*idsite=[1-9][0-9]*&(?:[^&#]*&)*rec=1&(?:[^&#]*&)*_id=[0-9a-f]{16}(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "matomo-piwik",
+      "family": "matomo",
+      "mechanism": "query-visible-visitor",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 15,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*idsite=[1-9][0-9]*&(?:[^&#]*&)*rec=1&(?:[^&#]*&)*_id=[0-9a-f]{16}(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "matomo-custom",
+      "family": "matomo",
+      "mechanism": "query-visible-visitor",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 15,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*idsite=[1-9][0-9]*&(?:[^&#]*&)*rec=1&(?:[^&#]*&)*_id=[0-9a-f]{16}(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "matomo-reordered",
+      "family": "matomo",
+      "mechanism": "query-visible-visitor",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 20,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*_id=[0-9a-f]{16}&(?:[^&#]*&)*rec=1&(?:[^&#]*&)*idsite=[1-9][0-9]*(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get",
+            "post"
+          ],
+          "resourceTypes": [
+            "image",
+            "xmlhttprequest",
+            "ping"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "matomo-no-visitor",
+      "family": "matomo",
+      "mechanism": "optional-identity-absent",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "matomo-body",
+      "family": "matomo",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "matomo-rec-off",
+      "family": "matomo",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "matomo-short-id",
+      "family": "matomo",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "matomo-missing-site",
+      "family": "matomo",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "matomo-functional-twin",
+      "family": "matomo",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "fingerprint-canonical",
+      "family": "fingerprint",
+      "mechanism": "v3-proxy-loader",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 21,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*apiKey=[A-Za-z0-9]{10,}&(?:[^&#]*&)*version=3&(?:[^&#]*&)*loaderVersion=[0-9]+(?:\\.[0-9]+)*(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get"
+          ],
+          "resourceTypes": [
+            "script"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "fingerprint-reordered",
+      "family": "fingerprint",
+      "mechanism": "v3-proxy-loader",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 25,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*loaderVersion=[0-9]+(?:\\.[0-9]+)*&(?:[^&#]*&)*apiKey=[A-Za-z0-9]{10,}&(?:[^&#]*&)*version=3(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get"
+          ],
+          "resourceTypes": [
+            "script"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "fingerprint-intervening",
+      "family": "fingerprint",
+      "mechanism": "v3-proxy-loader",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 21,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^?#]*\\?(?:[^&#]*&)*apiKey=[A-Za-z0-9]{10,}&(?:[^&#]*&)*version=3&(?:[^&#]*&)*loaderVersion=[0-9]+(?:\\.[0-9]+)*(?:[&#]|$)",
+          "isUrlFilterCaseSensitive": true,
+          "requestMethods": [
+            "get"
+          ],
+          "resourceTypes": [
+            "script"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "fingerprint-v4",
+      "family": "fingerprint",
+      "mechanism": "v4-opaque-result",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "fingerprint-no-key",
+      "family": "fingerprint",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "fingerprint-wrong-type",
+      "family": "fingerprint",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "fingerprint-wrong-version",
+      "family": "fingerprint",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "fingerprint-functional-twin",
+      "family": "fingerprint",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "posthog-canonical",
+      "family": "posthog",
+      "mechanism": "canonical-endpoint",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 6,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "regexFilter": "^https?://[^/?#]+/(?:[^?#]*/)?i/v0/e/",
+          "resourceTypes": [
+            "xmlhttprequest",
+            "ping"
+          ],
+          "isUrlFilterCaseSensitive": false
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "posthog-renamed",
+      "family": "posthog",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "posthog-functional-twin",
+      "family": "posthog",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "posthog-nested-value",
+      "family": "posthog",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 1285,
+        "priority": 3,
+        "action": "block",
+        "conditionSummary": {
+          "urlFilter": "/i/v0/e/",
+          "isUrlFilterCaseSensitive": false
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "posthog-feature-flags",
+      "family": "posthog",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "amplitude-canonical",
+      "family": "amplitude",
+      "mechanism": "canonical-endpoint",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "fp-trackers",
+        "id": 7,
+        "priority": 6,
+        "action": "block",
+        "conditionSummary": {
+          "urlFilter": "/2/httpapi",
+          "resourceTypes": [
+            "xmlhttprequest",
+            "ping"
+          ],
+          "isUrlFilterCaseSensitive": false
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "amplitude-renamed",
+      "family": "amplitude",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "amplitude-functional-twin",
+      "family": "amplitude",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "amplitude-device-api",
+      "family": "amplitude",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "amplitude-cache-api",
+      "family": "amplitude",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "segment-canonical",
+      "family": "segment",
+      "mechanism": "vendor-endpoint",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "trackers",
+        "id": 8,
+        "priority": 17,
+        "action": "block",
+        "conditionSummary": {
+          "requestDomains": {
+            "entries": 25000,
+            "sha256": "cacbaa8437bcad8667532332a7eb742767c765320d7ea23bd3ed1a642820a620",
+            "matchingDomains": [
+              "segment.io"
+            ]
+          },
+          "resourceTypes": [
+            "sub_frame",
+            "stylesheet",
+            "script",
+            "image",
+            "font",
+            "object",
+            "xmlhttprequest",
+            "ping",
+            "csp_report",
+            "media",
+            "websocket",
+            "webtransport",
+            "webbundle",
+            "other"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "segment-renamed",
+      "family": "segment",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "segment-functional-twin",
+      "family": "segment",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "segment-versioned-api",
+      "family": "segment",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "segment-key-api",
+      "family": "segment",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "clarity-canonical",
+      "family": "clarity",
+      "mechanism": "vendor-endpoint",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "trackers",
+        "id": 3,
+        "priority": 17,
+        "action": "block",
+        "conditionSummary": {
+          "requestDomains": {
+            "entries": 25000,
+            "sha256": "c6e36046d6a796d52115eb8bdc43b396c5a468941ea213591c231d9e8fd33fff",
+            "matchingDomains": [
+              "clarity.ms"
+            ]
+          },
+          "resourceTypes": [
+            "sub_frame",
+            "stylesheet",
+            "script",
+            "image",
+            "font",
+            "object",
+            "xmlhttprequest",
+            "ping",
+            "csp_report",
+            "media",
+            "websocket",
+            "webtransport",
+            "webbundle",
+            "other"
+          ]
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "clarity-renamed",
+      "family": "clarity",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "clarity-functional-twin",
+      "family": "clarity",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "clarity-project-api",
+      "family": "clarity",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "clarity-upload-api",
+      "family": "clarity",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "prebid-auction",
+      "family": "prebid",
+      "mechanism": "auction-endpoint",
+      "label": "tracking",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "easylist",
+        "id": 507,
+        "priority": 1,
+        "action": "block",
+        "conditionSummary": {
+          "resourceTypes": [
+            "xmlhttprequest"
+          ],
+          "urlFilter": "/openrtb2/auction^",
+          "isUrlFilterCaseSensitive": false
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "prebid-cookie-sync",
+      "family": "prebid",
+      "mechanism": "identity-sync",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "prebid-setuid",
+      "family": "prebid",
+      "mechanism": "identity-sync",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "prebid-renamed",
+      "family": "prebid",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "prebid-documentation",
+      "family": "prebid",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "prebid-path-suffix",
+      "family": "prebid",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": true,
+      "action": "block",
+      "winner": {
+        "ruleset": "easylist",
+        "id": 507,
+        "priority": 1,
+        "action": "block",
+        "conditionSummary": {
+          "resourceTypes": [
+            "xmlhttprequest"
+          ],
+          "urlFilter": "/openrtb2/auction^",
+          "isUrlFilterCaseSensitive": false
+        }
+      },
+      "note": null
+    },
+    {
+      "id": "prebid-functional-twin",
+      "family": "prebid",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    },
+    {
+      "id": "prebid-generic-event",
+      "family": "prebid",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "prevented": false,
+      "action": "none",
+      "winner": null,
+      "note": null
+    }
+  ],
+  "comparison": {
+    "equalFamilyEscapeRateBefore": 0.5648148148148148,
+    "equalFamilyEscapeRateAfter": 0.4351851851851852,
+    "absoluteEscapeRateReduction": 0.1296296296296296,
+    "relativeEscapedRequestReduction": 0.22950819672131142,
+    "rawEscapedBefore": 21,
+    "rawEscapedAfter": 11,
+    "rawRelativeEscapedRequestReduction": 0.47619047619047616,
+    "newFalsePositives": [],
+    "regressions": [],
+    "metThirtyPercentTarget": false,
+    "scope": "Frozen challenge corpus only; no internet-wide prevalence or anonymity claim."
+  }
+}

@@ -1,0 +1,298 @@
+{
+  "scope": "Public SDK source inspection only; no execution or collector requests",
+  "repositories": [
+    {
+      "repo": "PostHog/posthog-js",
+      "commit": "7babace5aa013d34a32e4595fec255a019cd8693",
+      "date": "2026-11-21T04:25:20Z",
+      "url": "https://github.com/PostHog/posthog-js/commit/7babace5aa013d34a32e4595fec255a019cd8693",
+      "truncated": false,
+      "files": [
+        {
+          "path": "packages/browser/package.json",
+          "bytes": 7998,
+          "sha256": "49a69df0a19efd0a04e935e729b304b6d1376b4558c9d97828303744a1c81f17",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/package.json"
+        },
+        {
+          "path": "packages/browser/src/__tests__/tracing-headers.test.ts",
+          "bytes": 36095,
+          "sha256": "ce7e9439ce77e7110b4b917691304390f417cdd9be9feb6976ddac310c2a8dc3",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/__tests__/tracing-headers.test.ts"
+        },
+        {
+          "path": "packages/browser/src/entrypoints/tracing-headers.ts",
+          "bytes": 18866,
+          "sha256": "f34cbbcf00bcc0e05cf24e67fc484e491f32afc08cb61d9840804b456b614343",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/entrypoints/tracing-headers.ts"
+        },
+        {
+          "path": "packages/browser/src/extensions/replay/session-recording.ts",
+          "bytes": 24517,
+          "sha256": "1db4be112cfaf2bc77790c5c41af3f95dab428a61af54e30515ad49c1dd3b02b",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/extensions/replay/session-recording.ts"
+        },
+        {
+          "path": "packages/browser/src/extensions/tracing-headers-types.ts",
+          "bytes": 769,
+          "sha256": "1be4b48365c9265f6c42414b83d531f8905d0ba293c960609eae754a61f744be",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/extensions/tracing-headers-types.ts"
+        },
+        {
+          "path": "packages/browser/src/extensions/tracing-headers.ts",
+          "bytes": 6144,
+          "sha256": "ee12926a08396f95d7a295a8537c70c9863109a6e9dded9b041de0d1360403b9",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/extensions/tracing-headers.ts"
+        },
+        {
+          "path": "packages/browser/src/posthog-core.ts",
+          "bytes": 227733,
+          "sha256": "50fc848bba8173337d8002d9ae78f72cf2e638284f1057f8ae08ff85d75cf9db",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/posthog-core.ts"
+        },
+        {
+          "path": "packages/browser/src/request.ts",
+          "bytes": 28820,
+          "sha256": "4bffaaa897c4deb800339869c8238a699accc01d78e495c4cc0700fcb302e6d2",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/request.ts"
+        },
+        {
+          "path": "packages/browser/src/utils/request-router.ts",
+          "bytes": 6589,
+          "sha256": "1de64aad868c55f014ed513d9ec0b5038af791588703fcc192692ea4c43f76ef",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/utils/request-router.ts"
+        },
+        {
+          "path": "packages/browser-next/src/platform/request.ts",
+          "bytes": 4718,
+          "sha256": "6eefdfecb7091d4aa95de0b6465d81cadc2106db077d2ff6aa7277ddafb7b107",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser-next/src/platform/request.ts"
+        },
+        {
+          "path": "packages/browser-next/src/products/analytics/delivery/capture-v1.ts",
+          "bytes": 35408,
+          "sha256": "bd7f6626d87613af53c9c50f3c186d8d746e9ab6ebea763c96a84cdd9c71508d",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser-next/src/products/analytics/delivery/capture-v1.ts"
+        },
+        {
+          "path": "packages/core/src/tracing-headers.ts",
+          "bytes": 3817,
+          "sha256": "e01ae8e44ebec58995a604a4fef906c1135bdeb93dc0025315405bab5b8a3a3e",
+          "url": "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/core/src/tracing-headers.ts"
+        }
+      ]
+    },
+    {
+      "repo": "amplitude/Amplitude-TypeScript",
+      "commit": "d656d16bea9aba05a7266f76b12fc6c15ca052d7",
+      "date": "2026-11-20T22:36:16Z",
+      "url": "https://github.com/amplitude/Amplitude-TypeScript/commit/d656d16bea9aba05a7266f76b12fc6c15ca052d7",
+      "truncated": false,
+      "files": [
+        {
+          "path": "packages/analytics-browser/src/transports/send-beacon.ts",
+          "bytes": 1386,
+          "sha256": "d4e78881a42d6e5e3788c4b7d38ca05f165880685f4c4eb8a034cbc12513d01c",
+          "url": "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/analytics-browser/src/transports/send-beacon.ts"
+        },
+        {
+          "path": "packages/analytics-core/src/config.ts",
+          "bytes": 4502,
+          "sha256": "f473d747f734bf6de82542abdc017a7c9f86218d51ce70c33343bd6758a5cef5",
+          "url": "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/analytics-core/src/config.ts"
+        },
+        {
+          "path": "packages/analytics-core/src/plugins/destination.ts",
+          "bytes": 14019,
+          "sha256": "d85570b485bbec40063e483822f9484f68009b975272a20730ea0fd54e69d6b7",
+          "url": "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/analytics-core/src/plugins/destination.ts"
+        },
+        {
+          "path": "packages/analytics-core/src/transports/fetch.ts",
+          "bytes": 1185,
+          "sha256": "151f3a427c5dd6e3b96ed0d126de5cac53ae7a57ad2d63219967e7bc1c28c988",
+          "url": "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/analytics-core/src/transports/fetch.ts"
+        },
+        {
+          "path": "packages/session-replay-browser/src/beacon-transport.ts",
+          "bytes": 4935,
+          "sha256": "f36215a025f609e6c9eee098ce0daecbfc947a12e844642ae9490a43c2537f9c",
+          "url": "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/session-replay-browser/src/beacon-transport.ts"
+        },
+        {
+          "path": "packages/session-replay-browser/src/constants.ts",
+          "bytes": 7022,
+          "sha256": "30d1e4f329333aa3d890ac4b7657c9af384988b61d4169eafe8b3452d79fa5b1",
+          "url": "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/session-replay-browser/src/constants.ts"
+        },
+        {
+          "path": "packages/session-replay-browser/src/helpers.ts",
+          "bytes": 3206,
+          "sha256": "4461917897915929c6b0140af4d983f62cdcccad16abac55009e73d51792fa6c",
+          "url": "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/session-replay-browser/src/helpers.ts"
+        },
+        {
+          "path": "packages/session-replay-browser/src/typings/session-replay.ts",
+          "bytes": 5480,
+          "sha256": "6f3c03347bc89a5159d41534e63c67cbb1da795fb2e3d09259ec73dbac0541b6",
+          "url": "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/session-replay-browser/src/typings/session-replay.ts"
+        }
+      ]
+    },
+    {
+      "repo": "fingerprintjs/cloudflare-worker-proxy",
+      "commit": "0d41a591f82b1f132c029a9a3e9d2ac8dfd9c524",
+      "committed": "2026-10-28T15:27:08Z",
+      "url": "https://github.com/fingerprintjs/cloudflare-worker-proxy/tree/0d41a591f82b1f132c029a9a3e9d2ac8dfd9c524",
+      "files": [
+        {
+          "path": "CHANGELOG.md",
+          "bytes": 10258,
+          "sha256": "8bcfd08ed4e2acf7d0aa0318b413c2759357e60158972e864fbac311373e030d",
+          "url": "https://github.com/fingerprintjs/cloudflare-worker-proxy/blob/0d41a591f82b1f132c029a9a3e9d2ac8dfd9c524/CHANGELOG.md"
+        },
+        {
+          "path": "README.md",
+          "bytes": 3022,
+          "sha256": "b97c752299e0ffe5c05440ec8d646205dcdf095dafe9923fbd885a8df721c2d5",
+          "url": "https://github.com/fingerprintjs/cloudflare-worker-proxy/blob/0d41a591f82b1f132c029a9a3e9d2ac8dfd9c524/README.md"
+        }
+      ]
+    },
+    {
+      "repo": "matomo-org/matomo",
+      "commit": "4cc2fa000b20f3c11eb0138fa782de89a3e5485e",
+      "date": "2026-11-21T11:05:15Z",
+      "url": "https://github.com/matomo-org/matomo/commit/4cc2fa000b20f3c11eb0138fa782de89a3e5485e",
+      "truncated": false,
+      "files": [
+        {
+          "path": "js/piwik.js",
+          "bytes": 337035,
+          "sha256": "49edb5d9c52c7b92d8db2783e7e8a64620b68bf08789fab63b5ca081fe07ac17",
+          "url": "https://github.com/matomo-org/matomo/blob/4cc2fa000b20f3c11eb0138fa782de89a3e5485e/js/piwik.js"
+        }
+      ]
+    },
+    {
+      "repo": "microsoft/clarity",
+      "commit": "5a596f36893d06fba4c4dfb9b4d05ffd04673162",
+      "date": "2026-11-20T00:24:24Z",
+      "url": "https://github.com/microsoft/clarity/commit/5a596f36893d06fba4c4dfb9b4d05ffd04673162",
+      "truncated": false,
+      "files": [
+        {
+          "path": "packages/clarity-js/src/core/config.ts",
+          "bytes": 663,
+          "sha256": "0005338e2ecf668ab833fbb9fc06de2e5e482089f548610e2a5aafe02a93239f",
+          "url": "https://github.com/microsoft/clarity/blob/5a596f36893d06fba4c4dfb9b4d05ffd04673162/packages/clarity-js/src/core/config.ts"
+        },
+        {
+          "path": "packages/clarity-js/src/data/envelope.ts",
+          "bytes": 1354,
+          "sha256": "35826da0c3671d3fd74c7a0205a25522784742944e1b359c57d91ddb93e5e28e",
+          "url": "https://github.com/microsoft/clarity/blob/5a596f36893d06fba4c4dfb9b4d05ffd04673162/packages/clarity-js/src/data/envelope.ts"
+        },
+        {
+          "path": "packages/clarity-js/src/data/upload.ts",
+          "bytes": 16105,
+          "sha256": "aa36151b7b867d27ebdb24d67e1f87f6aa2f42a01741e272775138010ae8a63d",
+          "url": "https://github.com/microsoft/clarity/blob/5a596f36893d06fba4c4dfb9b4d05ffd04673162/packages/clarity-js/src/data/upload.ts"
+        }
+      ]
+    },
+    {
+      "repo": "prebid/prebid-server",
+      "commit": "0f7916bfd975b82a185e9677d8196d94b2ea4dcc",
+      "committed": "2026-11-19T22:08:20Z",
+      "url": "https://github.com/prebid/prebid-server/tree/0f7916bfd975b82a185e9677d8196d94b2ea4dcc",
+      "files": [
+        {
+          "path": "endpoints/setuid.go",
+          "bytes": 14734,
+          "sha256": "4b2458977a2dc99329a8296bb823952a3ac1333cd997d5074905f2f215f565eb",
+          "url": "https://github.com/prebid/prebid-server/blob/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/endpoints/setuid.go"
+        },
+        {
+          "path": "endpoints/setuid_test.go",
+          "bytes": 64493,
+          "sha256": "df877e539f708c0115b601b5570a6fbf755654b73c7c91296f4544b9705251d5",
+          "url": "https://github.com/prebid/prebid-server/blob/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/endpoints/setuid_test.go"
+        },
+        {
+          "path": "usersync/cookie.go",
+          "bytes": 7112,
+          "sha256": "ae8d9712d1acbbfd61f701bcc8adb2d343c865daf1e543e4ec1f2e7b9d24a6e7",
+          "url": "https://github.com/prebid/prebid-server/blob/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/usersync/cookie.go"
+        }
+      ]
+    },
+    {
+      "repo": "rudderlabs/rudder-sdk-js",
+      "commit": "d9534c88c27c176d40f750fd7fcd226d15311e91",
+      "date": "2026-11-20T14:25:36Z",
+      "url": "https://github.com/rudderlabs/rudder-sdk-js/commit/d9534c88c27c176d40f750fd7fcd226d15311e91",
+      "truncated": false,
+      "files": [
+        {
+          "path": "packages/analytics-js/src/components/configManager/ConfigManager.ts",
+          "bytes": 7878,
+          "sha256": "d97b1f2d0c6643685af5f574db3e0e29f8d6d092456f23addff4e562c0c9b4d2",
+          "url": "https://github.com/rudderlabs/rudder-sdk-js/blob/d9534c88c27c176d40f750fd7fcd226d15311e91/packages/analytics-js/src/components/configManager/ConfigManager.ts"
+        },
+        {
+          "path": "packages/analytics-js/src/components/eventManager/RudderEventFactory.ts",
+          "bytes": 5019,
+          "sha256": "c452a90aa251f612233eaada199bb0c497930e06ba7af23bb61f04f22cb4fcde",
+          "url": "https://github.com/rudderlabs/rudder-sdk-js/blob/d9534c88c27c176d40f750fd7fcd226d15311e91/packages/analytics-js/src/components/eventManager/RudderEventFactory.ts"
+        },
+        {
+          "path": "packages/analytics-js/src/components/eventRepository/EventRepository.ts",
+          "bytes": 6034,
+          "sha256": "3bb35be11253106c064790f65f4c1b44623b63dcd59e76529f03073df98d8174",
+          "url": "https://github.com/rudderlabs/rudder-sdk-js/blob/d9534c88c27c176d40f750fd7fcd226d15311e91/packages/analytics-js/src/components/eventRepository/EventRepository.ts"
+        },
+        {
+          "path": "packages/analytics-js/src/services/HttpClient/HttpClient.ts",
+          "bytes": 3529,
+          "sha256": "94eba0928f4654252e0dd8fedbd7d5a825f12d18487e022fbf97505f4ff97108",
+          "url": "https://github.com/rudderlabs/rudder-sdk-js/blob/d9534c88c27c176d40f750fd7fcd226d15311e91/packages/analytics-js/src/services/HttpClient/HttpClient.ts"
+        }
+      ]
+    },
+    {
+      "repo": "segmentio/analytics-next",
+      "commit": "d549330ad9bda3a6765c36057eb1b2f4c72f640c",
+      "date": "2026-11-17T16:58:16Z",
+      "url": "https://github.com/segmentio/analytics-next/commit/d549330ad9bda3a6765c36057eb1b2f4c72f640c",
+      "truncated": false,
+      "files": [
+        {
+          "path": "packages/browser/src/plugins/segmentio/batched-dispatcher.ts",
+          "bytes": 9350,
+          "sha256": "592a44a96b40b4f5bd77808a0c4fedfbe170ee62304de6eaff88d3dea8d5577d",
+          "url": "https://github.com/segmentio/analytics-next/blob/d549330ad9bda3a6765c36057eb1b2f4c72f640c/packages/browser/src/plugins/segmentio/batched-dispatcher.ts"
+        },
+        {
+          "path": "packages/browser/src/plugins/segmentio/fetch-dispatcher.ts",
+          "bytes": 2471,
+          "sha256": "650cd964e28fb41268a93766fefda1fcc519ec835af2ec1d71d77042620a7594",
+          "url": "https://github.com/segmentio/analytics-next/blob/d549330ad9bda3a6765c36057eb1b2f4c72f640c/packages/browser/src/plugins/segmentio/fetch-dispatcher.ts"
+        },
+        {
+          "path": "packages/browser/src/plugins/segmentio/index.ts",
+          "bytes": 6977,
+          "sha256": "999a4d1734c98d65b8d070f57af3f03ffa58933c827093064d052a5eba4ca20f",
+          "url": "https://github.com/segmentio/analytics-next/blob/d549330ad9bda3a6765c36057eb1b2f4c72f640c/packages/browser/src/plugins/segmentio/index.ts"
+        },
+        {
+          "path": "packages/browser/src/plugins/segmentio/normalize.ts",
+          "bytes": 2097,
+          "sha256": "7cac770fd62f97ce00e83dff125615966d04bf22fa7875b6ec269df737cc0e4b",
+          "url": "https://github.com/segmentio/analytics-next/blob/d549330ad9bda3a6765c36057eb1b2f4c72f640c/packages/browser/src/plugins/segmentio/normalize.ts"
+        }
+      ]
+    }
+  ],
+  "retrieved_utc": "2026-11-22"
+}

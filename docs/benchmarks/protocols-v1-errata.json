@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "kind": "post-freeze-source-validity-correction",
+  "discoveredUtc": "2026-11-22",
+  "corpusSha256": "074d616ba05c929adb76007048b644dd1cc9ebf3fb5ac39ecd9f588061852423",
+  "scope": "The frozen corpus remains unchanged. Its fixtures are synthetic request shapes, not captured traffic or evidence of server acceptance.",
+  "corrections": [
+    {
+      "fixtureId": "prebid-setuid",
+      "field": "request.url",
+      "original": "https://publisher.example/setuid?bidder=sample&uid=synthetic-buyer",
+      "replacement": "https://publisher.example/setuid?bidder=pubmatic&uid=synthetic-buyer",
+      "reason": "The original bidder was a symbolic placeholder. Prebid validates bidder names against its supported bidders, so sample is not evidence of an accepted production synchronization. The pinned server tests use pubmatic. This correction changes only that name; it does not add a case, change weights, or claim that a synthetic ID was sent to a server.",
+      "sourceRevision": "0f7916bfd975b82a185e9677d8196d94b2ea4dcc",
+      "sources": [
+        "https://github.com/prebid/prebid-server/blob/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/endpoints/setuid.go#L321-L338",
+        "https://github.com/prebid/prebid-server/blob/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/endpoints/setuid_test.go#L35-L71"
+      ]
+    }
+  ]
+}

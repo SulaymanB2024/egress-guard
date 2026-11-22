@@ -1,0 +1,72 @@
+{
+  "baseline": {
+    "addon_sha256": "d2d51c33c030a27f1aee6488d4bd4ac3c741a83f31f2d58337ecaee01c98690a",
+    "grant_expiry_without_revision_change": {
+      "closed": false,
+      "origin_received_marker": true,
+      "post_change_origin_application_bytes": 12,
+      "response_bytes": 16
+    },
+    "manual_authority_deny": {
+      "closed": false,
+      "origin_received_marker": true,
+      "post_change_origin_application_bytes": 13,
+      "response_bytes": 17
+    },
+    "negative_control": {
+      "allowed_markers_received": 24,
+      "same_connection": true
+    },
+    "numeric_peer_deny_under_safety_hostname": {
+      "closed": false,
+      "origin_received_marker": true,
+      "post_change_origin_application_bytes": 11,
+      "response_bytes": 15
+    },
+    "original_certificate_verified": true,
+    "package_version": "0.9.0",
+    "source_tree_sha256": "74f77ce5c6fae0166d884980b721b674ce0c660819cf38495c8ab0c8f4212d4c"
+  },
+  "baseline_commit": "abe2b87b2bb8de298992045c8bb05d4f63554adc",
+  "candidate": {
+    "addon_sha256": "109e41db76e67d2337f5f234cc5ba69672405e3e0452efb843cb852c9b237d40",
+    "grant_expiry_without_revision_change": {
+      "closed": true,
+      "origin_received_marker": false,
+      "post_change_origin_application_bytes": 0,
+      "response_bytes": 0
+    },
+    "manual_authority_deny": {
+      "closed": true,
+      "origin_received_marker": false,
+      "post_change_origin_application_bytes": 0,
+      "response_bytes": 0
+    },
+    "negative_control": {
+      "allowed_markers_received": 24,
+      "same_connection": true
+    },
+    "numeric_peer_deny_under_safety_hostname": {
+      "closed": true,
+      "origin_received_marker": false,
+      "post_change_origin_application_bytes": 0,
+      "response_bytes": 0
+    },
+    "original_certificate_verified": true,
+    "package_version": "0.10.0",
+    "source_tree_sha256": "20f346748d7b8142768a8359fc7966b1ae9b8a030de0ab7e5c354bb432907c26"
+  },
+  "fixture_sha256": {
+    "test_addon.py": "5c546d16c292d5397d2dab24445c3247b263971e2c42cb55b8f9a09a83ff4f4d",
+    "test_tunnel.py": "234a24d505e9bf4ea1e0fa1e56d8046a68d9f6c70e917e1bfe7dd6f173f72221",
+    "test_tunnel_revocation.py": "f2861df5c4470c47201728abffc2288d44b7ec7bbcfd0621d1f0dada052d2b80"
+  },
+  "measurement": "all decrypted origin recv bytes after each change, through connection closure",
+  "mitmproxy": "12.3.1",
+  "protocol": "bounded newline-delimited synthetic markers; identical policy edits in both arms",
+  "python": "3.12.14",
+  "schema": 1,
+  "scope": "Three targeted established-tunnel cases, not a web-wide privacy percentage or browser measurement.",
+  "status": "passed",
+  "transport": "original-certificate TLS, loopback only"
+}

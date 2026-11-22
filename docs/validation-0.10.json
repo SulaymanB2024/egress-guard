@@ -1,0 +1,735 @@
+{
+  "schema": 2,
+  "date": "2026-11-21",
+  "date_timezone": "America/Chicago",
+  "version": "0.10.0",
+  "reviewed_base": "abe2b87b2bb8de298992045c8bb05d4f63554adc",
+  "qualification": "Alpha source revision; native Chrome and installed macOS/device routing remain unqualified.",
+  "tests": {
+    "python": {
+      "command": "PYTHONPATH=src python -B -m unittest discover -s tests -v",
+      "passed": 325,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 79.691,
+      "includes_real_loopback_proxy": true,
+      "new_tunnel_integration_cases": 8,
+      "total_proxy_integration_cases": 29
+    },
+    "node": {
+      "command": "node --test tests/browser/*.test.cjs",
+      "passed": 324,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "environment": "Compiler, worker, ChromeSetting, DOM, UI and request-rule models; no native Chrome"
+    }
+  },
+  "runtime": {
+    "python": "3.12.14",
+    "node": "24.22.3",
+    "mitmproxy": "12.3.1",
+    "platform": "Linux",
+    "hatchling": "1.33.0"
+  },
+  "research": {
+    "public_repositories": 8,
+    "inspected_source_files": 37,
+    "source_receipt": "benchmarks/tracking-source-receipts-0.10.json",
+    "production_sdk_execution": false,
+    "events_sent_to_advertising_services": false,
+    "personal_browsing_history_accessed": false
+  },
+  "protocol_benchmark": {
+    "corpus_sha256": "074d616ba05c929adb76007048b644dd1cc9ebf3fb5ac39ecd9f588061852423",
+    "tracking_cases": 34,
+    "functional_cases": 34,
+    "families": 9,
+    "predeclared_metric": "Relative reduction of escape fraction averaged within mechanisms, within families, then equally across nine families.",
+    "source_inputs_sha256": "b2f4a7ff538b24b9bd757c286776bcefda5e55654a4c9f2b5b6292e673960ded",
+    "identical_source_bytes_both_arms": true,
+    "baseline_artifact_sha256": "74b70a5327c4a63e3b0934482b453e2a1fd51189628e1a096f0be8df4f20b0c0",
+    "candidate_artifact_sha256": "5565431dace562ca101702443ab5409605a02360975b754e04d9ec75c835725d",
+    "baseline_prevented": 13,
+    "candidate_prevented": 25,
+    "comparison": {
+      "equalFamilyEscapeRateBefore": 0.5648148148148148,
+      "equalFamilyEscapeRateAfter": 0.3888888888888889,
+      "absoluteEscapeRateReduction": 0.17592592592592587,
+      "relativeEscapedRequestReduction": 0.31147540983606553,
+      "rawEscapedBefore": 21,
+      "rawEscapedAfter": 9,
+      "rawRelativeEscapedRequestReduction": 0.5714285714285714,
+      "newFalsePositives": [],
+      "regressions": [],
+      "metThirtyPercentTarget": true,
+      "scope": "Frozen challenge corpus only; no internet-wide prevalence or anonymity claim."
+    },
+    "stage1_comparison": {
+      "equalFamilyEscapeRateBefore": 0.5648148148148148,
+      "equalFamilyEscapeRateAfter": 0.4351851851851852,
+      "absoluteEscapeRateReduction": 0.1296296296296296,
+      "relativeEscapedRequestReduction": 0.22950819672131142,
+      "rawEscapedBefore": 21,
+      "rawEscapedAfter": 11,
+      "rawRelativeEscapedRequestReduction": 0.47619047619047616,
+      "newFalsePositives": [],
+      "regressions": [],
+      "metThirtyPercentTarget": false,
+      "scope": "Frozen challenge corpus only; no internet-wide prevalence or anonymity claim."
+    },
+    "remaining_functional_overblocks": [
+      "posthog-nested-value",
+      "prebid-path-suffix"
+    ],
+    "source_validity_erratum": "Frozen Prebid sample bidder replaced by source-tested pubmatic in a separate replay; corpus unchanged.",
+    "erratum_decisions_and_scores_unchanged": true,
+    "scope": "Exposed, source-backed synthetic request-shape development challenge; neither held-out nor captured/server-accepted traffic. Full enabled static artifact in Standard with empty user state.",
+    "native_browser_executed": false,
+    "internet_wide_percentage_claim": false,
+    "references": [
+      "benchmarks/protocols-v1.md",
+      "benchmarks/protocols-v1-candidate-0.10.json",
+      "benchmarks/protocols-v1-stage1-0.10.json",
+      "benchmarks/protocols-v1-errata-sensitivity.json"
+    ]
+  },
+  "tunnel_revocation": {
+    "receipt": "benchmarks/tunnel-revocation-0.10.json",
+    "measurement": "all decrypted origin recv bytes after each change, through connection closure",
+    "baseline_post_change_origin_bytes": {
+      "manual_authority_deny": 13,
+      "grant_expiry_without_revision_change": 12,
+      "numeric_peer_deny_under_safety_hostname": 11
+    },
+    "candidate_post_change_origin_bytes": {
+      "manual_authority_deny": 0,
+      "grant_expiry_without_revision_change": 0,
+      "numeric_peer_deny_under_safety_hostname": 0
+    },
+    "allowed_control_markers_each_arm": 24,
+    "original_certificates_verified": true,
+    "required_runtime_receipt": {
+      "tunnel_policy": "per-forward"
+    },
+    "scope": "Three targeted established-tunnel cases, not a web-wide privacy percentage or browser measurement."
+  },
+  "psl": {
+    "rules": 10470,
+    "version": "2026-11-20_10-39-09_UTC",
+    "source_sha256": "f3df783daf6bdf4c4d71759bc8a4b39f2d228a567078560a00e11f70df0703f4",
+    "generated_sha256": "efbbcb792620be0ed433ca98c339304c9f05d4547247ef80110e7ab44478badb",
+    "regeneration_matches": true
+  },
+  "source_validation": {
+    "upstream_feeds": "Same verified 0.9 source snapshots, deliberately held fixed for this comparison.",
+    "source_receipts_reference": "validation-0.9.json",
+    "fresh_feed_fetch_this_revision": false,
+    "publication_note": "AdGuard CNAME sources retain November 5 publisher times; recent retrieval does not change publication age.",
+    "application_direct_downloader_changed": false,
+    "application_direct_downloader_network_path_qualified": false
+  },
+  "browser_build": {
+    "build": "f9b394b490999442ef9b8a52b6a425ea",
+    "built_at_utc_epoch_seconds": 1795316641,
+    "required_sources_present": true,
+    "development_size_override": false,
+    "reviewed_parameter_quarantine": [
+      "analytics_trace_id"
+    ],
+    "complete_coverage": false,
+    "filter_syntax": "supported-subset",
+    "static_rules": 14086,
+    "static_regexes": 955,
+    "static_rule_budget": 30000,
+    "static_regex_budget": 1000,
+    "static_regex_headroom": 45,
+    "literal_union_slots_reclaimed": 56,
+    "source_alternatives_dropped_to_reclaim_slots": 0,
+    "tracking_protocols": {
+      "schema": 1,
+      "families": 5,
+      "signatures": 7,
+      "regexRules": 29,
+      "querySignatures": 7,
+      "pathSignatures": 0
+    },
+    "tracking_protocols_sha256": "162ec2191b71cef99a9a1777e6f652f21372ac0756910bd6f9e10d8455f2db2c",
+    "tracking_protocol_compiler_sha256": "ca201eaca19c018007e0534e96bca48849196f8f8c28daa505c2ad13d2273aa9",
+    "lists": {
+      "threats": {
+        "domains": 1628452,
+        "rules": 132,
+        "files": [
+          "rules/threats.json",
+          "rules/threats-2.json"
+        ],
+        "published_at": 1795248660,
+        "updated_at": 1795290990.2456255
+      },
+      "trackers": {
+        "domains": 257921,
+        "rules": 11,
+        "files": [
+          "rules/trackers.json"
+        ],
+        "published_at": 1795250940,
+        "updated_at": 1795290992.4817798
+      },
+      "cname": {
+        "domains": 178125,
+        "rules": 8,
+        "files": [
+          "rules/cname.json"
+        ],
+        "published_at": 1793893734,
+        "updated_at": 1795290993.9130847
+      }
+    },
+    "network_compilation": {
+      "easyprivacy": {
+        "lines": 57552,
+        "network": 56736,
+        "converted": 56724,
+        "rules": 9263,
+        "regex": 6,
+        "regexSplitFilters": 0,
+        "regexSplitRules": 0,
+        "countedRepeatBudget": 64,
+        "folded": 47653,
+        "dropped": {
+          "negated $document": 1,
+          "matches every request (no pattern and no domain)": 1,
+          "domain= entries DNR cannot express (entity or regex)": 2,
+          "$rewrite": 1,
+          "$csp": 2,
+          "$redirect-rule": 1,
+          "exception not anchored to a host": 3,
+          "regular expression exceeds supported counted-repetition expansion budget": 1
+        },
+        "suspicious": 3,
+        "suspiciousLines": [
+          "@@/cgi-bin/counter_module?action=list_models$subdocument,~third-party",
+          "@@||coremetrics.com*/eluminate.js",
+          "@@||media.foundit.*/trex/public/theme_3/dist/js/userTracking.js$script,~third-party"
+        ],
+        "exceptions": 852,
+        "blockingRules": 8423
+      },
+      "easylist": {
+        "lines": 79062,
+        "network": 53955,
+        "converted": 50228,
+        "rules": 3768,
+        "regex": 24,
+        "regexSplitFilters": 4,
+        "regexSplitRules": 16,
+        "countedRepeatBudget": 64,
+        "folded": 46625,
+        "dropped": {
+          "$document block (top-level navigations are never blocked)": 563,
+          "$popup only": 2969,
+          "$rewrite": 7,
+          "cosmetic-only exception ($elemhide, $generichide…)": 166,
+          "$csp": 4,
+          "exception not anchored to a host": 3,
+          "$document exception that is not a whole host": 3,
+          "exception scoped only to public suffixes": 1,
+          "regular expression exceeds supported counted-repetition expansion budget": 11
+        },
+        "suspicious": 7,
+        "suspiciousLines": [
+          "@@||cloudfront.net/js/common/invoke.js",
+          "@@||jokerly.com/Okidak/adSelectorDirect.htm?id=$document,subdocument",
+          "@@||jokerly.com/Okidak/vastChecker.htm$document,subdocument",
+          "@@||lastpass.com/ads.php$subdocument,domain=chrome-extension-scheme",
+          "@@/wp-content/plugins/blockalyzer-adblock-counter/*$image,script,~third-party,domain=~gaytube.com|~pornhub.com|~pornhubthbh7ap3u.onion|~redtube.com|~redtube.com.br|~tube8.com|~tube8.es|~tube8.fr|~xtub",
+          "@@||tab.gladly.io/newtab/|$document,subdocument",
+          "@@://xhamster.$script,~third-party"
+        ],
+        "exceptions": 535,
+        "blockingRules": 3258
+      }
+    },
+    "cosmetics": {
+      "lines": 25036,
+      "accepted": 9720,
+      "generic": 13079,
+      "relational": 482,
+      "entityScoped": 278,
+      "exceptions": 326,
+      "hideExceptions": 167,
+      "duplicate": 0,
+      "dropped": {
+        "procedural-or-scriptlet": 323,
+        "unsupported-selector": 934,
+        "unsupported-generic-selector": 479,
+        "unsupported-domain-scope": 8
+      },
+      "fallbacks": {}
+    },
+    "parameter_compilation": {
+      "sourceRows": 2749,
+      "removeparamRows": 2747,
+      "importedRules": 1977,
+      "exceptionRows": 80,
+      "effectiveNames": 1676,
+      "rules": 801,
+      "unsupported": 610,
+      "ignoredNonRemoval": 2,
+      "inactiveRows": 4,
+      "badfiltered": 0,
+      "keptRows": 25,
+      "coarsenedExceptions": 44,
+      "compatibilityExclusions": 3,
+      "quarantined": 1,
+      "coarsenedEntityPrefixes": [
+        {
+          "label": "aliexpress",
+          "prefix": "ali"
+        },
+        {
+          "label": "amazon",
+          "prefix": "ama"
+        },
+        {
+          "label": "audible",
+          "prefix": "aud"
+        },
+        {
+          "label": "google",
+          "prefix": "goo"
+        },
+        {
+          "label": "uploadnow",
+          "prefix": "upl"
+        }
+      ],
+      "prefixGroupFallbacks": 0,
+      "explicitlyDisabledNames": [],
+      "nativeEffectiveNames": 1674,
+      "reasons": {
+        "unrepresented-named-exception": 1,
+        "exception-outside-main-frame": 6,
+        "nonliteral-name": 64,
+        "url-pattern-unsupported": 481,
+        "remove-all-unsupported": 26,
+        "remover-outside-main-frame": 40,
+        "initiator-scope-unsupported": 39
+      }
+    },
+    "parameter_coverage": {
+      "available": true,
+      "reduced": true,
+      "disabled": false,
+      "quarantined": [
+        "analytics_trace_id"
+      ],
+      "supportedSyntax": "literal-query-names-v1",
+      "mainFrameGetOnly": true,
+      "unsafe": [],
+      "nativeDeferredNames": [
+        "__cft__[0]",
+        "__xts__[0]"
+      ],
+      "compilation": {
+        "sourceRows": 2749,
+        "removeparamRows": 2747,
+        "importedRules": 1977,
+        "exceptionRows": 80,
+        "effectiveNames": 1676,
+        "rules": 801,
+        "unsupported": 610,
+        "ignoredNonRemoval": 2,
+        "inactiveRows": 4,
+        "badfiltered": 0,
+        "keptRows": 25,
+        "coarsenedExceptions": 44,
+        "compatibilityExclusions": 3,
+        "quarantined": 1,
+        "coarsenedEntityPrefixes": [
+          {
+            "label": "aliexpress",
+            "prefix": "ali"
+          },
+          {
+            "label": "amazon",
+            "prefix": "ama"
+          },
+          {
+            "label": "audible",
+            "prefix": "aud"
+          },
+          {
+            "label": "google",
+            "prefix": "goo"
+          },
+          {
+            "label": "uploadnow",
+            "prefix": "upl"
+          }
+        ],
+        "prefixGroupFallbacks": 0,
+        "explicitlyDisabledNames": [],
+        "nativeEffectiveNames": 1674,
+        "reasons": {
+          "unrepresented-named-exception": 1,
+          "exception-outside-main-frame": 6,
+          "nonliteral-name": 64,
+          "url-pattern-unsupported": 481,
+          "remove-all-unsupported": 26,
+          "remover-outside-main-frame": 40,
+          "initiator-scope-unsupported": 39
+        }
+      },
+      "reviewedQuarantined": [
+        "analytics_trace_id"
+      ]
+    },
+    "parameter_policy_sha256": "237b694940bfecc06bd3fae687e817115d1301b9d1c23c46cfadcab1e30d8ab7",
+    "rulesets": [
+      {
+        "id": "threats",
+        "enabled": true,
+        "rules": 65,
+        "regexes": 32,
+        "bytes": 33194211,
+        "sha256": "16264312ba1c6754ac968a40ec1e3340af9d28c91a22949162874ab7b9aec503"
+      },
+      {
+        "id": "threats-2",
+        "enabled": true,
+        "rules": 67,
+        "regexes": 34,
+        "bytes": 33492877,
+        "sha256": "2965e341aa88a6c17c3e73d46cebd333afd95a120fee67f06653afcf301d7e29"
+      },
+      {
+        "id": "trackers",
+        "enabled": true,
+        "rules": 11,
+        "regexes": 0,
+        "bytes": 5584642,
+        "sha256": "f6884a8b50896a8a97735ac10e52528da58e116a4747c7ae90a8b4581b2ec3ab"
+      },
+      {
+        "id": "cname",
+        "enabled": true,
+        "rules": 8,
+        "regexes": 0,
+        "bytes": 4947510,
+        "sha256": "8037690817575f40d624954e7b987e9225a29179bdd0e09497333a88bcfde1ad"
+      },
+      {
+        "id": "params",
+        "enabled": true,
+        "rules": 801,
+        "regexes": 801,
+        "bytes": 747517,
+        "sha256": "233cfde3b8cf54c253220ff116e3a42e11912bc314bcc765479ab7d77dbdb0b1"
+      },
+      {
+        "id": "links",
+        "enabled": true,
+        "rules": 26,
+        "regexes": 26,
+        "bytes": 9667,
+        "sha256": "2ff0e57f058e7486d142c9078048f1a05e620b036fc20ef2ee2f21e012c87cc8"
+      },
+      {
+        "id": "gpc",
+        "enabled": true,
+        "rules": 1,
+        "regexes": 0,
+        "bytes": 323,
+        "sha256": "6a51534b0f48c008e44a791c3c5a814fe2758988c806e8efd6c1bab6c34bbacd"
+      },
+      {
+        "id": "referrer",
+        "enabled": true,
+        "rules": 1,
+        "regexes": 0,
+        "bytes": 414,
+        "sha256": "97d6010aed52bff4004480cf2d476c93a66a15194b5bcdb0bdbd4b5af5d2143d"
+      },
+      {
+        "id": "beacons",
+        "enabled": true,
+        "rules": 1,
+        "regexes": 0,
+        "bytes": 114,
+        "sha256": "92e7b055a03631960ba6455186c571839cb6bdc05d4ef98efa6d178a175b8a1e"
+      },
+      {
+        "id": "cookies",
+        "enabled": true,
+        "rules": 4,
+        "regexes": 0,
+        "bytes": 2075952,
+        "sha256": "ba2c4cf7ade97e1eabf47db78674ef27d3c87f95dbddb0468d1274022f080a8c"
+      },
+      {
+        "id": "bounce",
+        "enabled": true,
+        "rules": 2,
+        "regexes": 0,
+        "bytes": 848338,
+        "sha256": "74980fc4f5c27e7ac84465acfad4056fc00c24956c8ea3d46641fff8263ce4a2"
+      },
+      {
+        "id": "surrogates",
+        "enabled": true,
+        "rules": 11,
+        "regexes": 0,
+        "bytes": 2276,
+        "sha256": "3b0ea1c87e5dcf1b4c6dfb3c544638411828cb1dbf67f53504123c47704f68e3"
+      },
+      {
+        "id": "fp-trackers",
+        "enabled": true,
+        "rules": 3542,
+        "regexes": 31,
+        "bytes": 476889,
+        "sha256": "5871c1b99c1e4019a7504794f881e39923706b8315525a462eea6abad62680af"
+      },
+      {
+        "id": "easyprivacy",
+        "enabled": true,
+        "rules": 4919,
+        "regexes": 6,
+        "bytes": 1811947,
+        "sha256": "b44958877b5122bdcac6c842595359292f1fd47e31ab3f4c5d4516ef2857352d"
+      },
+      {
+        "id": "easylist",
+        "enabled": true,
+        "rules": 3258,
+        "regexes": 24,
+        "bytes": 1475125,
+        "sha256": "6d45cf440339aab31bbc083847ef115b7d5079e2b8331aff387757579dc5c70a"
+      },
+      {
+        "id": "filter-allow",
+        "enabled": true,
+        "rules": 1350,
+        "regexes": 0,
+        "bytes": 287814,
+        "sha256": "51acd8824426a988999302bbdb20d456de50a9842200bc2ee04f4ac7dd329e16"
+      },
+      {
+        "id": "replay",
+        "enabled": true,
+        "rules": 19,
+        "regexes": 1,
+        "bytes": 2984,
+        "sha256": "56d8dc0f50ac9ca32f7a5993236505665925b181de121a8f18d74688897274b0"
+      }
+    ],
+    "counts_are_efficacy_measurement": false,
+    "native_chrome_indexing_qualified": false
+  },
+  "regex_audit": {
+    "complete": true,
+    "encoding": "Latin1",
+    "engine": "google-re2",
+    "error_count": 0,
+    "error_counts_by_ruleset": {},
+    "errors": [],
+    "errors_omitted": 0,
+    "failed": 0,
+    "max_mem": 2048,
+    "native_chrome": false,
+    "package_version": "1.1.20251105",
+    "passed": 955,
+    "regexes": 955,
+    "rules": 14086,
+    "rulesets": 17,
+    "rulesets_read": 17,
+    "schema": 1,
+    "scope": "all-manifest-static-regexes-including-disabled",
+    "status": "passed"
+  },
+  "package_checks": {
+    "version": "0.10.0",
+    "fresh_wheel_target": true,
+    "private_initialization": true,
+    "default_history": "none",
+    "default_transport": {
+      "address_guard": false,
+      "connect_ports": [
+        443
+      ],
+      "profile": "compatible"
+    },
+    "empty_cache_start_refused": true,
+    "empty_cache_lookup_indeterminate": true,
+    "no_network_or_process_attempt_during_empty_cache_refusal": true,
+    "new_modules_and_dashboard_assets_packaged": true,
+    "wheel": {
+      "archive_entries": 35,
+      "bytes": 123238,
+      "console_entry_point": "egress-guard = egress_guard.cli:main",
+      "filename": "egress_guard-0.10.0-py3-none-any.whl",
+      "installed_files_verified": 30,
+      "package_file_sha256": {
+        "__init__.py": "e8bb2e5dea5cca353b52afd5510720cfaf19f0427c9c90c680c01c0cabea44c4",
+        "__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+        "addon.py": "109e41db76e67d2337f5f234cc5ba69672405e3e0452efb843cb852c9b237d40",
+        "address_guard.py": "c094afe059401fcbd7ef54f2a3207f1095565d57b6a66a62cd8865c71a86c01e",
+        "bounded_json.py": "ee8514ca4c6e0c747b51be4bb7b383c590767e8714dface22df50b5dffac5582",
+        "canaries.py": "89320f3fe55896f89157ab367872fab9a7b75bf25a93ea02be23f583363a36c6",
+        "cli.py": "83adff6200553d36f723810925d6f393e0c8572f8e3762efd5b14294f5987884",
+        "cname.py": "94fe0060cba932592890af25daebb0f228fcc61b145519b270289a0d2be159f3",
+        "config.py": "c9afebde9f8f3a4bf221e71f699e8b3a8a86cc513eb6b8112ff61e97b0bee464",
+        "dashboard_app.py": "b13d98f53744295e37af7011a132ee5d61aaa92958d17c47c38e307c4188c3cf",
+        "dashboard_http.py": "fdf367da7ca95361cf4d555e4395a854812c07e07d9c08932f0e2ba4b572d75f",
+        "default.toml": "3866ac225f871847280871ad4e1a11a4140615bf4468f5f3ccd2d52aa437a726",
+        "dnssd.py": "8afe1491139ffdb8b1d772f4d7209e1c83dedc354144220abca3448cd6ca63ad",
+        "feeds.py": "1721d140362cc9867e71e1bf59d352d0c0b6788115da4396241716ffc6771f60",
+        "health.py": "f9baed4da653a6948f5aee9fcd080b74b51e0a466c854293f52fe8a1be0b7382",
+        "heuristics.py": "fbed0d29515c5482657436beac7cecea987f111be5ddff40d484402f9a85718b",
+        "http_deadline.py": "8839f36af82bd31485f6b32ca5464fa4a334a9b0e4476730cc04df368aedfc16",
+        "insights.py": "30d18b0be5ad86e12ac20ce0b2f1a74e7eb9b09c0189ec99f094eb4f78e9ee77",
+        "ledger.py": "e2f6e1af731b4413edbf2026137a085e708dbfc5fb553b18927bc41146bbf86d",
+        "lockfile.py": "21b489e188ea27c3b7da41d8699cbe6e88913c73d551cf78a77e7fd20d2edcf7",
+        "macos.py": "d4587000caa8f687b337d11b77fda7c421e64dbdb6e230ec6ee11d356eaba337",
+        "native_host.py": "e3ce05bd2cc3146b42ebbe4d01679c6de5f00003fe94eddadf4620de1d487c16",
+        "paths.py": "ebd12163c327ad471c283091847101847e6799b9d2b72f420f65295f8dfbde26",
+        "policy.py": "d8e3f76dcfa686e937fa2f93533a1bc0d754815ed343997b00417c52e6879c8d",
+        "services.py": "698106952b7b53c1de2e6db656bba9c22ef30285dcfba3a89b6f238a69475486",
+        "sponsors.py": "67e703388b61b0c15614ac690f9a18d54649441994c8dc30392aa245a8e59062",
+        "transport_policy.py": "9a9f330edf86d98b27448884457f6992049da9b2397d19e2c08166fdf64ac13c",
+        "web/app.css": "ac432fa06dbc9abc12ceb28175d8febbe98dba0f7336e23c6f2d8659f5c9f49a",
+        "web/app.js": "da5c0e31a50325880c3d2c25f213c949f64fc17d25647fa7e8473a6490f5a849",
+        "web/index.html": "83cfdc9ff5ad43035057d1cf698e554328c69a05bc1b4f03bdca9082eb447375"
+      },
+      "packaged_files": [
+        "__init__.py",
+        "__main__.py",
+        "addon.py",
+        "address_guard.py",
+        "bounded_json.py",
+        "canaries.py",
+        "cli.py",
+        "cname.py",
+        "config.py",
+        "dashboard_app.py",
+        "dashboard_http.py",
+        "default.toml",
+        "dnssd.py",
+        "feeds.py",
+        "health.py",
+        "heuristics.py",
+        "http_deadline.py",
+        "insights.py",
+        "ledger.py",
+        "lockfile.py",
+        "macos.py",
+        "native_host.py",
+        "paths.py",
+        "policy.py",
+        "services.py",
+        "sponsors.py",
+        "transport_policy.py",
+        "web/app.css",
+        "web/app.js",
+        "web/index.html"
+      ],
+      "record_verified": true,
+      "requires_dist": [
+        "mitmproxy==12.3.1"
+      ],
+      "sha256": "4f627a6ffd4569c1d4c2b1db495702dff0f3b65d4a581ff5a31f56f296defa65",
+      "source_files_verified": 30
+    },
+    "pip_check": "passed",
+    "source_archive_required_assets_present": true,
+    "source_archive_matches_checkout": true,
+    "runtime_state_and_downloaded_feed_caches_excluded": true,
+    "source_archive_hash": "Recorded separately to avoid embedding an archive's own hash in its contents."
+  },
+  "dependency_review": {
+    "status": "Runtime and build pins unchanged; prior review retained.",
+    "fresh_online_scan": false,
+    "reference": "../requirements/README.md",
+    "optional_regex_auditor_dependency": "google-re2==1.1.20251105",
+    "optional_dependency_in_runtime": false,
+    "open_prior_matches": [
+      {
+        "name": "tornado",
+        "version": "6.5.10",
+        "advisories": [
+          "GHSA-5cjw-f85j-cv6r",
+          "GHSA-pcg2-g6cj-q92c",
+          "GHSA-pw9p-v7r6-gx4p",
+          "GHSA-r4j5-9xpp-3985"
+        ]
+      }
+    ]
+  },
+  "target_qualification": {
+    "chromium": "Not run; prior startup denied by process-singleton socket policy; restriction not retried or bypassed.",
+    "chrome_fixture_static_check": "tests/browser/chrome-0.8.mjs --check passed; no browser or listener",
+    "actual_browser_headers_redirects_and_settings": false,
+    "actual_model_inference": false,
+    "installed_browser_native_host": false,
+    "macos_service_lifecycle": "mocked only",
+    "system_proxy_activation": false,
+    "user_browser_firewall_or_trust_store_changed": false,
+    "firefox": "Existing manual HTTP/S rule support only; no Chrome protocol or Isolation feature qualification."
+  },
+  "material_limits": [
+    "Proxy controls require clients to use it; no device-wide routing, UDP or DNS containment guarantee.",
+    "Revocation operates at the next emitted forwarding command; already handed transport writes cannot be recalled and idle streams have no independent expiry timer.",
+    "Later encrypted authorities and payloads remain opaque; ordinary plaintext HTTP bodies already streaming are not continuously inspected.",
+    "Experimental address checking uses the actual connected numeric peer; selection changes still require a proxy restart.",
+    "Protocol signatures cover documented literal request shapes, not encoded fields, arbitrary body-only tracking, every custom route, account identity or public IP.",
+    "Isolated-mode identity-header removal covers three known PostHog fields; other custom headers, bodies and storage are outside this control.",
+    "Two existing imported-filter functional overblocks and nine escaped tracking shapes remain in the fixed evidence.",
+    "Parameter coverage stays reduced for analytics_trace_id; unsupported syntax and publisher age remain visible.",
+    "Standalone RE2 and modeled DNR do not establish native browser rule acceptance or SDK lifecycle behavior.",
+    "No held-out or internet-wide efficacy percentage, all-ad removal, anonymity or zero-leakage claim is made."
+  ],
+  "qualified_changed_source_sha256": {
+    "browser/background-chrome.js": "03689e6cc7f9d9004596b42145aa8237e2aebf1c93cff648b75116880a027cb9",
+    "browser/core/dnr.js": "a4470dc7a82c0db3b57c61b06816c143f90b518dc1ab7dd3548b3aa64e59520f",
+    "browser/core/tracking-protocols.js": "ca201eaca19c018007e0534e96bca48849196f8f8c28daa505c2ad13d2273aa9",
+    "browser/manifest.chrome.json": "27e19a8ff4a112c12bab3689532731479da6e91c5dbbdff199f8dc96ab43db32",
+    "browser/manifest.json": "3a632b5b4960f70ac8cd8990a7f3a0dab8a31286eefabb9f2525218980c7bde6",
+    "browser/popup.js": "1e9f1f11315926599d70a770cd49229e3869cf21d5511196806160e417d8e771",
+    "scripts/benchmark-browser-protocols.mjs": "14124ea3df9f433519c03f9f3b4550ad8c5687d4df7e1ad63ce64627e4952faa",
+    "scripts/build-browser.mjs": "77e4d17a4458025f5473546c75379afe1f5bc5ae084f76fcb08485a117023e5e",
+    "scripts/check-protocol-benchmark-errata.mjs": "c950a1e1746d482ea0b010cd22e7230b5333d84b639babc878f08c432154598d",
+    "scripts/compare-tunnel-revocation.py": "6844f27cd125cad6ee24a4973781b8620dd8330dfa3e8057a5fbe93d6ba422fb",
+    "scripts/lib/abp-dnr.cjs": "aeabdb8d5a4ff81dfd0d9bb6bbba4cecab1e96030c0291483960e0352fa0816c",
+    "scripts/lib/dnr-benchmark.cjs": "26c965933c0807443ebc3cd2d904512ebc04aa0b1eff41e14d6ad235229eda52",
+    "src/egress_guard/__init__.py": "e8bb2e5dea5cca353b52afd5510720cfaf19f0427c9c90c680c01c0cabea44c4",
+    "src/egress_guard/addon.py": "109e41db76e67d2337f5f234cc5ba69672405e3e0452efb843cb852c9b237d40",
+    "src/egress_guard/transport_policy.py": "9a9f330edf86d98b27448884457f6992049da9b2397d19e2c08166fdf64ac13c",
+    "tests/browser/abp-regex.test.cjs": "b71c53c5857df52ad0d60c13ea2934c0ea93022962829b54ffd0a32ac54d72eb",
+    "tests/browser/build.test.cjs": "36a4e191d9ee5f5b0970fb8f8d2fac6de43ded25548628f3bda1bb27b3366c3a",
+    "tests/browser/chrome-adapter.test.cjs": "b37df6708f1a5eed1b5471e0c7382836cf0c371c6de3c719fb5932ea52220050",
+    "tests/browser/chrome-privacy.mjs": "273528634a2e2d1ceda2c910a5156ec9f60d58e8b0be6c5a453c0510edda03c3",
+    "tests/browser/dnr.test.cjs": "265bcd444e382e10e807216594f7f7114336ffb3186ca94fe134fa6601f8a237",
+    "tests/browser/filters.test.cjs": "86eb8d72a23bee71803b785c2a3dbbc4bd9e820c59655adcfea2c53e37f18160",
+    "tests/browser/fixtures/protocols-v1.json": "074d616ba05c929adb76007048b644dd1cc9ebf3fb5ac39ecd9f588061852423",
+    "tests/browser/protocol-benchmark.test.cjs": "a152e6b941fcef1a57d430641618b8c24fbef625d7b2848db63cfe6367b582ed",
+    "tests/browser/tracking-protocols.test.cjs": "f99ca49cb7fbe0a05e1f1bbaf92ec2bd0b5fb991d27c517d5eaa666a62672464",
+    "tests/browser/ui-tokens.test.cjs": "92515ccf780f6c8b53a8d8ea9b00d3b6aa55aaec85961db22c164c7a87cec96d",
+    "tests/test_configuration.py": "300770f396f903b738ea876b793b0127e096489d5e54bbe77205f380aa594c29",
+    "tests/test_loopback_clients.py": "b4b165f82c760681046a9ae3f638986682d7c2414eb03d4bbdaa8d60b97a4475",
+    "tests/test_native_host.py": "cfb3c182ae0003c94238cd983f90bbe0f5e49130a45453a3fb81fa0930b722c6",
+    "tests/test_transport.py": "70b2690bc3362650738cdbb0719f3dbc501292f59ab1ef992e45372426e3f493",
+    "tests/test_tunnel.py": "234a24d505e9bf4ea1e0fa1e56d8046a68d9f6c70e917e1bfe7dd6f173f72221",
+    "tests/test_tunnel_revocation.py": "f2861df5c4470c47201728abffc2288d44b7ec7bbcfd0621d1f0dada052d2b80"
+  },
+  "evidence_file_sha256": {
+    "protocols-v1-baseline-0.9.json": "da74b2f374d3554e26c316609313fcf0dfbff0c4bbd1c28a5648f66f79d0c3ef",
+    "protocols-v1-candidate-0.10.json": "276c4c2be54930017d85112ac05e337dfe15da7e42467ba98238ca44e972212e",
+    "protocols-v1-errata-sensitivity.json": "e19ea1fe1301d5be7134035e5e4e0785e6a71b489f35d68ae1cb176b163dcee8",
+    "protocols-v1-errata.json": "84a93dbe8faa80f589ac423fb1fd2f1197dfd104a33beddac3f93ee02b415840",
+    "protocols-v1-stage1-0.10.json": "3a7d7f6e8882ec22da1ebcd16a98964115de43f0dc2d783b355528ee4a68aa86",
+    "tracking-source-receipts-0.10.json": "986cf6860a077de0a8a03bdcbdea5f9402c7ac74bc130a45af73ecb7a13dc276",
+    "tunnel-revocation-0.10.json": "48abaec37beafdc172258a041c65548ecfc8a65d58a7bb0978bde4a1d2087d16"
+  }
+}

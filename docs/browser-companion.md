@@ -1,6 +1,6 @@
-# Browser companion 0.9
+# Browser companion 0.10
 
-The companion supplies URL-level request rules, maintained tracking-parameter and cookie cleaning, named-site isolation, indexed generic and scoped page-element hiding, optional local review of sponsored cards, and explicit Chrome profile privacy controls. Chrome is the primary implementation. Firefox retains manual HTTP/S request/cosmetic rules; it does not have the Chrome built-in list, socket-deny, isolation, model or profile-control feature set.
+The companion supplies URL-level request rules, source-backed tracking-protocol signatures, maintained tracking-parameter and cookie cleaning, named-site isolation, indexed generic and scoped page-element hiding, optional local review of sponsored cards, and explicit Chrome profile privacy controls. Chrome is the primary implementation. Firefox retains manual HTTP/S request/cosmetic rules; it does not have the Chrome built-in list, protocol-signature, socket-deny, isolation, model or profile-control feature set.
 
 The extension remains an unsigned alpha. It works without the proxy. An optional read-only bridge can show the proxy's authenticated state in the popup; that connection does not route browser traffic or establish device-wide protection.
 
@@ -42,6 +42,8 @@ Normal builds require every selected source. A Medium fallback does not fulfill 
 
 The compiler supports a bounded subset of filter syntax. A complete source receipt means the selected required sources are present and produced the required output; it does **not** mean every upstream rule was implemented. Conversion and rejection counts are in the build output and receipt.
 
+Source-backed protocol signatures are compiled into the existing `fp-trackers` category at the hand-filter priority. They recognize selected exact URL fields and types even on publisher-owned routes; they do not inspect request bodies. The package includes `tracking-protocols.json` with source references and limits, a compiler hash, and a catalog hash in `rules/build.json`. See [the signatures](tracking-protocols-0.10.md) and [the fixed development benchmark](benchmarks/protocols-v1.md). Category toggles and explicit repair grants retain their existing authority. The category label is now **First-party tracking request** because these rules cover collection as well as scripts.
+
 The reviewed 0.9 URL Tracking Protection snapshot has one unrepresentable named exception for `analytics_trace_id`. It is preserved everywhere, including in overlapping built-in policy, rather than removed on an incorrectly guessed scope. After reviewing that documented tradeoff, build with:
 
 ```sh
@@ -79,6 +81,8 @@ Expiry uses scheduled worker reconciliation. Chrome does not provide a DNR rule 
 Choose **Isolated** under **Protection on this site** for a site whose cross-site network access you want to contain. It is separate from No scripts: first-party scripts may still execute, but new cross-site subresources in the covered page context are blocked across all resource types. Functional-provider allowlists, Strict allowances and ordinary temporary grants do not override the boundary. Activating the mode removes conflicting temporary permissions; Pause is unavailable until you explicitly choose another mode.
 
 The popup reports whether isolation rules have been read back as installed. A failed activation must not display an isolated page. If a later change fails while the previous isolation remains confirmed, that retained state is reported separately. Sites that cannot be represented safely by the existing PSL domain conditions remain unsupported rather than receiving an unsafe broad scope.
+
+Isolation removes HTTP cookies, authorization and referrers on covered requests, and response `Set-Cookie`. Version 0.10 also removes the source-verified `X-POSTHOG-DISTINCT-ID`, `X-POSTHOG-SESSION-ID` and `X-POSTHOG-WINDOW-ID` fields from ordinary application requests in that scope. These operations stay above ordinary grants and cover initial navigations to the isolated destination. They do not remove unknown custom headers, generic tracing headers or identifiers encoded in bodies. The [research record](adversarial-tracking-0.10.md#a-separate-request-is-not-required) explains this separate channel.
 
 Installing new rules does not terminate an existing WebSocket or WebTransport session. Use the browser's own Reload when appropriate. Isolation does not automatically reload, clear cookies, unregister workers or erase storage. First-party scripts can still read available storage and send identifiers to the first party. Outbound main-frame navigations, form submissions, popups, unrelated worker contexts, service-worker-generated responses, public IP and TLS identity need separate controls. This mode is a subresource boundary with HTTP header reduction, not an anonymous session. [Implementation and test contract](enforcement-0.9.md).
 
@@ -192,4 +196,4 @@ Optional real-browser fixture scripts remain in `tests/browser/`. They use throw
 
 The dedicated `tests/browser/chrome-0.8.mjs` adds native imported-CSS cases, Chrome's hypothetical Strict rule evaluator and an optional visible privacy-permission/setting check. Its `--check` mode only validates fixture contracts and launches no browser. See [commands and the remaining native matrix](releasing.md#focused-08-chrome-fixture).
 
-The [0.6 guide and measurements](browser-companion-0.6.md), [0.7 record](release-0.7.md) and [0.8 record](release-0.8.md) are historical evidence. Current checks and remaining target work are recorded in the [0.9 release notes](release-0.9.md).
+The [0.6 guide and measurements](browser-companion-0.6.md), [0.7 record](release-0.7.md), [0.8 record](release-0.8.md) and [0.9 record](release-0.9.md) are historical evidence. Current checks and remaining target work are recorded in the [0.10 release notes](release-0.10.md).
