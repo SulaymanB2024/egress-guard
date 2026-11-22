@@ -87,6 +87,10 @@ class FeedReviewTests(unittest.TestCase):
         self.assertEqual(candidate["state"], "held")
         self.assertEqual(candidate["reasons"], ["tracker-coverage-removed", "critical-infrastructure-added"])
         self.assertEqual((candidate["delta"]["entries_added"], candidate["delta"]["entries_removed"]), (1, 1))
+        impact = candidate["delta"]["semantic_coverage"]
+        self.assertEqual((impact["newly_covered_roots"], impact["no_longer_covered_roots"]), (1, 1))
+        self.assertEqual(impact["newly_covered_sample"], ["github.com"])
+        self.assertEqual(impact["no_longer_covered_sample"], ["google-analytics.com"])
         self.assertEqual(candidate["base_sha256"], feed_review.digest(original))
 
     def test_coverage_root_delta_distinguishes_redundancy_from_widening(self):
