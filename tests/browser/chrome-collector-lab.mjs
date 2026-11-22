@@ -25,6 +25,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const FIXTURE = path.join(ROOT, "tests/privacy_lab.py");
 const hardening = require("../../browser/core/privacy-hardening.js");
 const hosts = require("../../browser/core/hosts.js");
+const {measureActionWindow, summarizeActionWindows, assessFirstPartyActionWindows} = require("./collector-byte-windows.cjs");
 export const HOSTS = Object.freeze(["publisher.test", "shop.test", "tracker.test", "alias.test", "allowed.test", "blocked.test"]);
 export const CHANNELS = Object.freeze(["ga4", "opaque", "third-party", "image", "worker", "service-worker", "cart"]);
 export const EXPECTED_BLOCKED = Object.freeze(["ga4", "third-party", "image", "worker", "service-worker"]);
@@ -230,7 +231,8 @@ export function summarizeArm(snapshot, before, visits, outcomes) {
     channels[kind] = {receivedVisits: new Set(rows.map(row => row.visit)).size, events: rows.length,
       completedContexts: outcomes.filter(row => row.kind === kind && row.result.completed === true).length,
       bodyBytes: rows.reduce((sum, row) => sum + row.body_bytes, 0),
-      distinctIdentifierBytesSummedAcrossEvents: rows.reduce((sum, row) => sum + row.distinct_identifier_bytes, 0)};
+      distinctIdentifierBytesSummedAcrossEvents: rows.reduce((sum, row) => sum + row.distinct_identifier_bytes, 0),
+      actionWindows: summarizeActionWindows(outcomes, kind)};
   }
   return {visits: Object.keys(visits).length, channels, rawApplicationBytesDelta: snapshot.decrypted_origin_application_bytes - before.decrypted_origin_application_bytes,
     trackerHostApplicationBytes: connections.filter(row => row.host === HOSTS[2]).reduce((sum, row) => sum + row.application_bytes, 0),
@@ -260,6 +262,8 @@ export function assessDelivery(baseline, protectedArm, n) {
       {baselineReceivedVisits: a.receivedVisits, protectedReceivedVisits: b.receivedVisits, expectedVisits: n, baselineIdentifiable,
         evidenceScope: ["third-party", "image"].includes(channel) ? "Completed collector events; separate isolated-host check measures all application bytes." : "No completed semantic collector event; partial bytes on the shared first-party connection are not attributed to this channel."});
   }
+  const ga4Window = assessFirstPartyActionWindows(baseline.channels.ga4.actionWindows, protectedArm.channels.ga4.actionWindows, n);
+  record("sampled first-party GA4 receiver-byte window", ga4Window.status, ga4Window.detail);
   record("functional POST controls", [baseline, protectedArm].every(arm => arm.channels.cart.events === 2 * n && arm.channels.cart.completedContexts === 2 * n) ? "PASS" : "FAIL");
   record("opaque first-party body residual remains measured", [baseline, protectedArm].every(arm =>
     arm.channels.opaque.receivedVisits === n && arm.channels.opaque.completedContexts === n &&
@@ -276,7 +280,7 @@ export async function runNative(options) {
   const report = {schema: 1, mode: "native-collector", nativeAttempted: false, nativeExecuted: false, qualification: "NOT COVERED", checks, arms,
     scope: "Synthetic exact-identifier channels in disposable profiles; combined proxy+extension protection, not a population anonymity estimate.",
     observation: "Every attempted action has a bounded completion deadline; positive controls bracket each visit. Final collector snapshots follow browser closure. Timeouts receive no blocking credit.",
-    notCovered: ["HTML ping auditing (--no-pings helper baseline)", "public IP/VPN/Tor or WebRTC routing", "arbitrary trackers, SDKs, encrypted/encoded bodies", "partial-byte attribution for first-party GA4/worker channels sharing allowed connections", "worker JavaScript Client Hints restriction guarantee", "WSS live revocation", "optional Chrome privacy-permission handoff and ChromeSetting precedence"]};
+    notCovered: ["HTML ping auditing (--no-pings helper baseline)", "public IP/VPN/Tor or WebRTC routing", "arbitrary trackers, SDKs, encrypted/encoded bodies", "late arrivals and positive shared-origin byte deltas remain unattributed despite action-window samples", "worker/service-worker first-party partial bytes share functional script-loading origins", "worker JavaScript Client Hints restriction guarantee", "WSS live revocation", "optional Chrome privacy-permission handoff and ChromeSetting precedence"]};
   try {
     for (const key of ["chrome", "python"]) { fs.accessSync(options[key], fs.constants.X_OK); assert(fs.statSync(options[key]).isFile(), "Executable must be a file"); }
     output = fs.openSync(options.out, "wx", 0o600);
@@ -341,8 +345,11 @@ export async function runNative(options) {
             checkDeadline(); const targetHost = ["third-party", "image"].includes(kind) ? HOSTS[2] : row.site;
             const url = new URL(`${origin(targetHost)}/${kind === "image" ? "pixel.gif" : ["ga4", "worker", "service-worker"].includes(kind) ? "measure" : "api/fixture"}`);
             url.search = new URLSearchParams({visit: row.visit, case: kind, ...(["ga4", "worker", "service-worker"].includes(kind) ? {v: "2", tid: "G-LAB12345", cid: row.identifier} : kind === "image" ? {id: row.identifier} : {})});
+            const beforeAction = await fixture.rpc("snapshot");
             const result = await evaluate(page.sessionId, `(${action.toString()})(${JSON.stringify({kind, url: url.href, identifier: row.identifier})})`);
-            outcomes.push({visit: row.visit, kind, result});
+            const afterAction = await fixture.rpc("snapshot");
+            const byteWindow = measureActionWindow(beforeAction, afterAction, targetHost);
+            outcomes.push({visit: row.visit, kind, result, byteWindow});
           }
           await closePage(page);
         }
