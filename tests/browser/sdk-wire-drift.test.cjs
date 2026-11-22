@@ -61,6 +61,44 @@ test("functional control failure and missing delivery are both regressions", () 
   const invalidBase = receipt(rev1, {functional: {functional_succeeded: false}});
   assert.equal(compareReceipts(invalidBase, receipt(rev2)).status, "NOT COVERED");
 });
+test("persistent canary volume increase is a real observed regression", () => {
+  const before = receipt(rev1, {tracking: {received_canary_events: 1, received_application_bytes: 10}});
+  const after = receipt(rev2, {tracking: {received_canary_events: 3, received_application_bytes: 30}});
+  const out = compareReceipts(before, after);
+  assert.equal(out.status, "REGRESSION");
+  assert.deepEqual(out.increased_canary_event_counts, [{id: "query", before: 1, after: 3}]);
+  assert.deepEqual(out.increased_tracking_bytes, [{id: "query", before: 10, after: 30}]);
+  assert.deepEqual(out.persistent_canary_escapes, ["query"]);
+  assert.deepEqual(out.new_canary_escapes, []);
+});
+test("same canary volume with additional received tracking bytes cannot be credited clean", () => {
+  const before = receipt(rev1, {tracking: {received_canary_events: 1, received_application_bytes: 10}});
+  const after = receipt(rev2, {tracking: {received_canary_events: 1, received_application_bytes: 100}});
+  const out = compareReceipts(before, after);
+  assert.equal(out.status, "NOT COVERED");
+  assert.deepEqual(out.increased_canary_event_counts, []);
+  assert.deepEqual(out.increased_tracking_bytes, [{id: "query", before: 10, after: 100}]);
+  assert.deepEqual(out.unattributed_tracking_bytes, []);
+});
+test("unchanged SDK bytes are not accepted as evidence of source drift", () => {
+  const identical = receipt(rev1);
+  assert.throws(() => compareReceipts(identical, receipt(rev1)), /source bytes/);
+  const relabel = receipt(rev2); relabel.sdk.bundle_sha256 = identical.sdk.bundle_sha256;
+  assert.throws(() => compareReceipts(identical, relabel), /source bytes/);
+});
+test("CLI entrypoint executes when installed in a directory containing spaces", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eg-sdk spaced-"));
+  try {
+    const cloned = path.join(dir, "scripts", "compare-sdk-wire-drift.mjs");
+    const lib = path.join(dir, "scripts", "lib", "sdk-wire-drift.cjs");
+    fs.mkdirSync(path.dirname(lib), {recursive: true});
+    fs.copyFileSync(cli, cloned);
+    fs.copyFileSync(path.resolve(__dirname, "../../scripts/lib/sdk-wire-drift.cjs"), lib);
+    const p = spawnSync(process.execPath, [cloned, "--not-valid"], {encoding: "utf8", timeout: 10000});
+    assert.notEqual(p.status, 0, "CLI must reject invalid input, not silently exit 0");
+    assert.match(p.stderr, /sdk-wire-drift: invalid input/);
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});
 test("routing, positive controls, sender completion and native declaration are required", () => {
   const good = receipt(rev1);
   for (const evidence of [{origin_meter_valid: false}, {sender_completed: false},
