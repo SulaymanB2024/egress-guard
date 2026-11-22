@@ -56,14 +56,24 @@
     {
       "kind": "qualification-pass",
       "detail": "Node v22.16.0 isolated new deferred-first-party.test.cjs: 5/5 tests passed, zero failures/skips. Checked helper git blob IDs against locally executed bytes and parser compatibility of modified runner source. Full repository Node/Python and imported-runner integration NOT COVERED; actual native Chrome/proxy lab NOT RUN under earlier startup restriction."
+    },
+    {
+      "kind": "implementation-pass",
+      "detail": "Authored bounded offline SDK wire-drift comparator and CLI, exact SHA-256 verification of user-supplied local SDK bundles, frozen fixture/policy/extension/case controls, explicit canary-escape/functional regressions and positive opaque-byte abstention. No network fetch, SDK execution, policy authority, native browser launch or personal data.",
+      "evidence": "docs/sdk-wire-drift-0.11.md"
+    },
+    {
+      "kind": "qualification-pass",
+      "detail": "Executed 7 targeted pure-JS assertions against final comparator; 6 pure Node test callbacks were invoked via a JavaScript compatibility adapter and passed. The filesystem/child-process CLI test was authored, NOT EXECUTED. Complete installed Node/Python suites, CLI live Node invocation and native browser/proxy evidence remain NOT COVERED.",
+      "evidence": "tests/browser/sdk-wire-drift.test.cjs"
     }
   ],
   "next_actions": [
-    "Run complete installed repository Node/Python suites on a permitted checkout, covering earlier collector fixes and the new deferred-first-party test; source-only isolated checks are not an equivalent gate.",
-    "Run optional integrated Chrome + real proxy + controlled collector in an environment explicitly permitting native browser startup; do not retry the previously denied startup here.",
-    "Expand delayed-send/first-party multiplexing with exact per-request causal instrumentation only after native qualification, and keep positive same-origin bytes unattributed where causal data are absent.",
-    "Investigate pinned SDK protocol drift using locally redirected collectors and functional controls, avoiding real SDK production event destinations; no automatic policy promotion.",
-    "Preserve the opaque first-party cross-site identity linkability residual and record any post-close receiver bytes as bounded-window observations, not a lifetime guarantee."
+    "Run complete installed Node and Python suites on a permitted full checkout, including actual node --test tests/browser/sdk-wire-drift.test.cjs and earlier collector byte-window/deferred tests.",
+    "Exercise the offline SDK wire-drift CLI end-to-end against two real hash-pinned local fixture bundles; confirm independent checksum and exclusive-report paths.",
+    "In an explicitly permitted environment, run controlled real Chrome + existing Egress Guard proxy + TLS collector; establish source-pinned SDK receiver evidence without contacting production vendor endpoints.",
+    "Investigate cross-site identifier survival through opaque same-origin bodies; treat shared-connection positive bytes and delayed post-close traffic as unresolved unless causally attributed.",
+    "Preserve review-only discovery and original authority boundaries; do not infer population privacy efficacy from local case counts."
   ],
   "not_covered": [
     "native Chromium in the initial environment",
@@ -83,7 +93,12 @@
     "native Chrome deferred first-party timed sender and post-close receiver drain",
     "full installed test suite for controlled delayed-send changes",
     "arbitrary delayed/scheduled sends after the 300ms drain",
-    "multiplexed positive same-origin received-byte per-request causal attribution"
+    "multiplexed positive same-origin received-byte per-request causal attribution",
+    "installed full Node/Python regression suite for source-pinned SDK drift",
+    "actual Node child-process and filesystem test for compare-sdk-wire-drift CLI",
+    "native controlled SDK bundle replay in Chrome/proxy",
+    "independent attestation of externally supplied sdk-wire-drift receipt",
+    "real vendor protocol drift, live collector impact or production SDK behavior"
   ],
   "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
 }
