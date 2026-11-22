@@ -37,3 +37,9 @@ test("other-origin evidence is mandatory and bounded, not silently treated as ze
     {kind: "ga4", byteWindow: {status: "MEASURED", targetOriginApplicationBytes: 0, otherOriginApplicationBytes: 1}}
   ], "ga4"), /overflow/);
 });
+
+test("mislabeled tracker-host receiver windows cannot certify first-party GA4", () => {
+  const falseOrigin = {kind: "ga4", byteWindow: measureActionWindow(
+    snap([]), snap([row("tracker.test", 31000, 41)]), "tracker.test")};
+  assert.throws(() => summarizeActionWindows([falseOrigin], "ga4"), /first-party publisher/);
+});
