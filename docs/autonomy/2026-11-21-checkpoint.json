@@ -66,14 +66,28 @@
       "kind": "qualification-pass",
       "detail": "Executed 7 targeted pure-JS assertions against final comparator; 6 pure Node test callbacks were invoked via a JavaScript compatibility adapter and passed. The filesystem/child-process CLI test was authored, NOT EXECUTED. Complete installed Node/Python suites, CLI live Node invocation and native browser/proxy evidence remain NOT COVERED.",
       "evidence": "tests/browser/sdk-wire-drift.test.cjs"
+    },
+    {
+      "kind": "implementation-pass",
+      "detail": "SDK drift comparator now detects increased persistent canary deliveries as REGRESSION; treats unexplained tracking-byte growth as NOT COVERED, rejects identical SDK bundle source hashes and fixes CLI execution from filesystem paths with spaces. No live enforcement changes.",
+      "source_blob_shas": {
+        "comparator": "82a10dae743d960e2a11aeada2a12fa481f224a6",
+        "cli": "e800c9dbb0911cb658657cbf943007f2acc6b8a6",
+        "test": "cd8ebdfaa8d9310b65befb24d12f8b6853950c46"
+      },
+      "evidence": "docs/sdk-wire-drift-0.11.md"
+    },
+    {
+      "kind": "qualification-pass",
+      "detail": "Executed exact baseline files as genuine Node v22.16.0 test runner: 7/7 passed. Four newly added tests failed against baseline, proving old false-clean canary-volume, byte-growth and same-source claims plus path-with-spaces CLI silent exit. Modified exact blob-matched source and tests: 11/11 native node --test cases passed, 0 failures/skips; CLI child-process/hash/0600/exclusive output paths exercised. No full installed repository suite or Chrome used.",
+      "evidence": "tests/browser/sdk-wire-drift.test.cjs"
     }
   ],
   "next_actions": [
-    "Run complete installed Node and Python suites on a permitted full checkout, including actual node --test tests/browser/sdk-wire-drift.test.cjs and earlier collector byte-window/deferred tests.",
-    "Exercise the offline SDK wire-drift CLI end-to-end against two real hash-pinned local fixture bundles; confirm independent checksum and exclusive-report paths.",
-    "In an explicitly permitted environment, run controlled real Chrome + existing Egress Guard proxy + TLS collector; establish source-pinned SDK receiver evidence without contacting production vendor endpoints.",
-    "Investigate cross-site identifier survival through opaque same-origin bodies; treat shared-connection positive bytes and delayed post-close traffic as unresolved unless causally attributed.",
-    "Preserve review-only discovery and original authority boundaries; do not infer population privacy efficacy from local case counts."
+    "Run full installed Node and Python suites in an environment with complete checkout/dependencies; isolated SDK test suite now passes genuine node --test 11/11.",
+    "Obtain independent source-pinned local SDK collector observations with exact origin TLS/application-byte counters and fixed functional controls; do not treat comparator declarations as external attestation.",
+    "Investigate request-level source attribution on shared first-party TLS connections and unbounded delayed sends before awarding zero-leakage outcomes.",
+    "Preserve existing review-only rule discovery, source pins, feed rollback, manual/threat precedence and browser/OS authority boundaries; do not infer population privacy effect from local cases."
   ],
   "not_covered": [
     "native Chromium in the initial environment",
@@ -95,10 +109,11 @@
     "arbitrary delayed/scheduled sends after the 300ms drain",
     "multiplexed positive same-origin received-byte per-request causal attribution",
     "installed full Node/Python regression suite for source-pinned SDK drift",
-    "actual Node child-process and filesystem test for compare-sdk-wire-drift CLI",
     "native controlled SDK bundle replay in Chrome/proxy",
     "independent attestation of externally supplied sdk-wire-drift receipt",
-    "real vendor protocol drift, live collector impact or production SDK behavior"
+    "real vendor protocol drift, live collector impact or production SDK behavior",
+    "complete repository Node/Python suite for SDK drift count and CLI fixes",
+    "independent real-world attribution for tracking-byte growth"
   ],
   "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
 }

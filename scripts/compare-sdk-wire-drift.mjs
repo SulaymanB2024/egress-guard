@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
+import {fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
 const {validateReceipt, compareReceipts} = require("./lib/sdk-wire-drift.cjs");
@@ -50,7 +51,7 @@ function main(args) {
   } else process.stdout.write(serialized);
   return report;
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { main(process.argv.slice(2)); }
   catch { process.stderr.write("sdk-wire-drift: invalid input, source pin or output path\n"); process.exitCode = 1; }
 }
