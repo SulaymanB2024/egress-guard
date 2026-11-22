@@ -30,6 +30,39 @@ MAX_CLIENT_HELLO_BYTES = 32 * 1024
 MAX_CLIENT_HELLO_READS = 32
 
 
+class PolicyRelay(TCPLayer):
+    """Recheck opaque bytes immediately before the pinned relay sends them.
+
+    Inspecting emitted commands also covers data buffered inside TCPLayer while
+    OpenConnection was pending. Keep its ordinary half-close/error behavior and
+    ignore=True mode: no TLS decryption or retained TCP message history.
+    """
+
+    def __init__(self, context, *, admit: Callable[[], bool]) -> None:
+        super().__init__(context, ignore=True)
+        self._admit = admit
+        self._revoked = False
+
+    def handle_event(self, event):
+        if self._revoked:
+            return
+        for command in super().handle_event(event):
+            if isinstance(command, commands.SendData):
+                try:
+                    allowed = self._admit()
+                except Exception:
+                    # A failed policy check cannot become an unchecked relay.
+                    allowed = False
+                if not allowed:
+                    self._revoked = True
+                    self._paused = None
+                    self._paused_event_queue.clear()
+                    yield commands.CloseConnection(self.context.client)
+                    yield commands.CloseConnection(self.context.server)
+                    return
+            yield command
+
+
 class TunnelGuard(layer.Layer):
     """Inspect a bounded initial ClientHello before starting an opaque TCP relay.
 
@@ -40,10 +73,11 @@ class TunnelGuard(layer.Layer):
     """
 
     def __init__(self, context, *, require_tls: bool | Callable[[], bool], admit: Callable[[str | None], bool],
-                 invalid: Callable[[], None]) -> None:
+                 continue_tunnel: Callable[[str | None, bool], bool], invalid: Callable[[], None]) -> None:
         super().__init__(context)
         self._require_tls = require_tls
         self._admit = admit
+        self._continue_tunnel = continue_tunnel
         self._invalid = invalid
         self._buffer = bytearray()
         self._reads = 0
@@ -56,10 +90,11 @@ class TunnelGuard(layer.Layer):
             self._invalid()
         yield commands.CloseConnection(self.context.client)
 
-    def _relay(self, remainder: bytes):
+    def _relay(self, remainder: bytes, *, sni: str | None, tls: bool):
         data = bytes(self._buffer) + remainder
         self._buffer.clear()
-        child = TCPLayer(self.context, ignore=True)
+        continuation = self._continue_tunnel
+        child = PolicyRelay(self.context, admit=lambda: continuation(sni, tls))
         self._handle_event = child.handle_event
         yield from child.handle_event(events.Start())
         yield from child.handle_event(events.DataReceived(self.context.client, data))
@@ -85,7 +120,7 @@ class TunnelGuard(layer.Layer):
             if require_tls:
                 yield from self._refuse(invalid=True)
             elif self._admit(None):
-                yield from self._relay(remainder)
+                yield from self._relay(remainder, sni=None, tls=False)
             else:
                 yield from self._refuse()
             return
@@ -108,7 +143,7 @@ class TunnelGuard(layer.Layer):
                 yield from self._refuse(invalid=True)
             return
         if self._admit(sni):
-            yield from self._relay(remainder)
+            yield from self._relay(remainder, sni=sni, tls=True)
         else:
             yield from self._refuse()
 
@@ -201,12 +236,13 @@ class EgressGuard:
         selected = self.policy.transport if self.policy is not None else self._startup_transport
         return {"profile": selected["profile"], "connect_ports": list(selected["connect_ports"]),
                 "address_guard": self._address_guard.status(), "scope": "proxy-tcp",
+                "tunnel_policy": "per-forward",
                 "applied": self.policy is not None and self._address_guard.ready() and not self._closed}
 
-    def _transport_refusal(self, host: str, port: int, transport: str) -> str | None:
+    def _transport_refusal(self, policy: Policy, host: str, port: int, transport: str) -> str | None:
         if not self._address_guard.ready():
             return "address-guard-unavailable"
-        return transport_refusal(self.policy.transport, host, port, transport, loopback=is_loopback(host))
+        return transport_refusal(policy.transport, host, port, transport, loopback=is_loopback(host))
 
     def _require_tls(self, host: str) -> bool:
         # Evaluate at first bytes, so a delayed tunnel cannot retain an older,
@@ -244,15 +280,16 @@ class EgressGuard:
 
     def _apply(self, flow: http.HTTPFlow, transport: str) -> bool:
         host = flow.request.host
-        if self.policy is None or not self.policy.enforceable():
+        policy = self.policy
+        if policy is None or not policy.enforceable():
             self._deny(flow, 503, "Egress Guard policy unavailable.")
             return False
-        decision = self.policy.decision(host, flow.request.port)
+        decision = policy.decision(host, flow.request.port)
         if decision["decision"] == "blocked":
             self._event(host, "blocked", decision["source"], transport)
             self._deny(flow, 403, "Blocked by Egress Guard.")
             return False
-        if (reason := self._transport_refusal(normalize_host(host), flow.request.port, transport)) is not None:
+        if (reason := self._transport_refusal(policy, normalize_host(host), flow.request.port, transport)) is not None:
             self._event(host, "blocked", reason, transport)
             self._deny(flow, 503 if reason == "address-guard-unavailable" else 403,
                        "Egress Guard refused this transport. Use an admitted HTTPS destination.")
@@ -272,8 +309,11 @@ class EgressGuard:
     def _admit_tunnel(self, host: str, port: int, sni: str | None) -> bool:
         # Recheck the original authority at the handshake boundary as well: a grant
         # may have expired, or the live policy may have changed since CONNECT.
-        policy = self.policy
-        if policy is None or not policy.enforceable():
+        return self._tunnel_policy(self.policy, host, port, sni)
+
+    def _tunnel_policy(self, policy: Policy | None, host: str, port: int, sni: str | None) -> bool:
+        # Use one immutable policy generation throughout each admission decision.
+        if self._closed or policy is None or not policy.enforceable():
             self._event(host, "blocked", "not-ready", "connect")
             return False
         for candidate in dict.fromkeys((host, sni)):
@@ -283,9 +323,37 @@ class EgressGuard:
             if decision["decision"] == "blocked":
                 self._event(candidate, "blocked", decision["source"], "connect")
                 return False
-        if (reason := self._transport_refusal(host, port, "connect")) is not None:
+        if (reason := self._transport_refusal(policy, host, port, "connect")) is not None:
             self._event(host, "blocked", reason, "connect")
             return False
+        return True
+
+    def _admit_relay(self, host: str, port: int, sni: str | None, tls: bool,
+                     server: connection.Server) -> bool:
+        policy = self.policy
+        if not self._tunnel_policy(policy, host, port, sni):
+            return False
+        if not tls and not is_loopback(host) and (
+            policy.block_plaintext_credentials or policy.transport["profile"] == "hardened"
+        ):
+            self._event(host, "blocked", "non-tls-tunnel", "connect")
+            return False
+        if policy.transport["address_guard"]:
+            # The pinned connector sets peername from the actual socket before
+            # OpenConnectionCompleted. Never resolve again or substitute the
+            # requested hostname/server.address for this numeric peer evidence.
+            peer = server.peername
+            if (not isinstance(peer, tuple) or len(peer) not in (2, 4)
+                    or not isinstance(peer[0], str) or type(peer[1]) is not int
+                    or not 1 <= peer[1] <= 65535):
+                self._event(host, "blocked", "address-guard-unavailable", "connect")
+                return False
+            decision = policy.address_decision(peer[0])
+            if decision["decision"] == "blocked":
+                # Optional history retains only the original authority and reason;
+                # it does not acquire per-peer records or encrypted payload data.
+                self._event(host, "blocked", decision["source"], "connect")
+                return False
         return True
 
     def next_layer(self, nextlayer: layer.NextLayer) -> None:
@@ -296,10 +364,12 @@ class EgressGuard:
         authority = self._tunnels.pop(nextlayer.context.client.id, None)
         if authority is not None:
             host, port = authority
+            server = nextlayer.context.server
             nextlayer.layer = TunnelGuard(
                 nextlayer.context,
                 require_tls=lambda: self._require_tls(host),
                 admit=lambda sni: self._admit_tunnel(host, port, sni),
+                continue_tunnel=lambda sni, tls: self._admit_relay(host, port, sni, tls, server),
                 invalid=lambda: self._event(host, "blocked", "non-tls-tunnel", "connect"),
             )
 

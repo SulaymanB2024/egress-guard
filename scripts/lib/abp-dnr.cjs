@@ -43,6 +43,9 @@ const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]
 // audit: other constructs and the actual engine version still affect memory.
 const MAX_COUNTED_REPEAT_COST = 64;
 const MAX_ALTERNATIVE_BRANCHES = 32;
+// Small exact groups retain space for additional protocol and maintained-list
+// rules. Every final artifact still requires the real RE2 memory-budget audit.
+const ALTERNATIVES_PER_RULE = 4;
 
 /** Is `line` a cosmetic, scriptlet or HTML filter (not a network filter)? */
 function isCosmetic(line) {
@@ -150,7 +153,7 @@ function countedRepeatCost(source, caseSensitive = false) {
   return sequence().counted;
 }
 
-/** Exact disjunction of a flat, top-level, unquantified literal-alternative group.
+/** Exact disjunction of small groups from a flat, top-level literal alternative.
  * A quantified group is never split: (a|b)+ includes mixed strings that a+|b+
  * would lose. The bodies have no backreferences and carry no substitution.
  */
@@ -175,7 +178,12 @@ function splitRegexAlternatives(source) {
       if (!best || branches.length > best.branches.length) best = {start: group.start, end: i + 1, branches};
     }
   }
-  return best ? best.branches.map((branch) => source.slice(0, best.start) + "(?:" + branch + ")" + source.slice(best.end)) : [source];
+  if (!best) return [source];
+  const out = [];
+  for (let i = 0; i < best.branches.length; i += ALTERNATIVES_PER_RULE) {
+    out.push(source.slice(0, best.start) + "(?:" + best.branches.slice(i, i + ALTERNATIVES_PER_RULE).join("|") + ")" + source.slice(best.end));
+  }
+  return out;
 }
 
 /** Normalise an ABP URL pattern for DNR urlFilter. Returns {urlFilter} | {domain} | {error}. */

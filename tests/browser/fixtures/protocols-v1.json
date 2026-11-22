@@ -1,0 +1,1256 @@
+{
+  "schema": 1,
+  "name": "Publisher-hosted tracking challenge v1",
+  "frozenAgainst": "abe2b87b2bb8de298992045c8bb05d4f63554adc",
+  "date": "2026-11-22",
+  "mode": "Standard; all enabled production static rules; empty user grants and site modes",
+  "evaluation": "compiled-DNR model, not native Chrome or live traffic",
+  "weighting": "Mean escape fraction within each tracking mechanism; mean mechanisms within each family; mean across nine families. Functional controls are separate. No prevalence inference.",
+  "frozenBeforeProtocolImplementation": true,
+  "sources": {
+    "google-server": {
+      "urls": [
+        "https://developers.google.com/tag-platform/tag-manager/server-side/send-data",
+        "https://developers.google.com/tag-platform/learn/sst-fundamentals/6-testing",
+        "https://developers.google.com/static/tag-platform/learn/images/incoming-request.png"
+      ],
+      "supports": "Publisher-controlled collectors; image/fetch/XHR/iframe-service-worker transports; GA4 v=2 and tid=G- browser query."
+    },
+    "google-gtm": {
+      "urls": [
+        "https://developers.google.com/tag-platform/tag-manager/datalayer"
+      ],
+      "supports": "Script loader id=GTM- container identifier and optional l data-layer parameter."
+    },
+    "stape-opaque": {
+      "urls": [
+        "https://stape.io/helpdesk/documentation/custom-loader-power-up",
+        "https://stape.io/helpdesk/knowledgebase/ga4-ad-block-bypass-in-custom-loader",
+        "https://stape.io/helpdesk/documentation/how-to-use-same-origin-approach-for-server-gtm"
+      ],
+      "supports": "Encoded collector URLs and same-origin forwarding. The opaque fixture token is synthetic, not a captured production ciphertext."
+    },
+    "meta-pixel": {
+      "urls": [
+        "https://developers.facebook.com/documentation/meta-pixel/advanced"
+      ],
+      "supports": "GET image /tr with numeric id and PageView, ViewContent, AddToCart or Purchase."
+    },
+    "matomo": {
+      "revision": "4cc2fa000b20f3c11eb0138fa782de89a3e5485e",
+      "urls": [
+        "https://developer.matomo.org/api-reference/tracking-api",
+        "https://github.com/matomo-org/matomo/blob/4cc2fa000b20f3c11eb0138fa782de89a3e5485e/js/piwik.js"
+      ],
+      "supports": "Configurable tracker URL; idsite, rec=1, optional16-hex _id; SDK adds send_image and supports query/image/beacon and POST-body delivery."
+    },
+    "fingerprint": {
+      "revision": "0d41a591f82b1f132c029a9a3e9d2ac8dfd9c524",
+      "urls": [
+        "https://github.com/fingerprintjs/cloudflare-worker-proxy/blob/0d41a591f82b1f132c029a9a3e9d2ac8dfd9c524/CHANGELOG.md",
+        "https://docs.fingerprint.com/reference/migrating-from-v3-to-v4"
+      ],
+      "supports": "Maintained v3 compatibility includes arbitrary script-download path and apiKey/version/loaderVersion. V4 uses different opaque request protocol."
+    },
+    "posthog": {
+      "revision": "7babace5aa013d34a32e4595fec255a019cd8693",
+      "urls": [
+        "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/request.ts",
+        "https://github.com/PostHog/posthog-js/blob/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/posthog-core.ts",
+        "https://posthog.com/docs/libraries/js/config",
+        "https://posthog.com/docs/advanced/proxy"
+      ],
+      "supports": "POST capture-body contains API key/events; configurable proxy and rewriteRequestPath. Legacy ip/ver query is not required."
+    },
+    "amplitude": {
+      "revision": "d656d16bea9aba05a7266f76b12fc6c15ca052d7",
+      "urls": [
+        "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/analytics-core/src/plugins/destination.ts",
+        "https://github.com/amplitude/Amplitude-TypeScript/blob/d656d16bea9aba05a7266f76b12fc6c15ca052d7/packages/analytics-core/src/transports/fetch.ts",
+        "https://amplitude.com/docs/sdks/analytics/proxy-requests"
+      ],
+      "supports": "Configurable serverUrl; POST JSON api_key and events; ordinary renamed paths have no necessary URL discriminator."
+    },
+    "segment": {
+      "revision": "d549330ad9bda3a6765c36057eb1b2f4c72f640c",
+      "urls": [
+        "https://github.com/segmentio/analytics-next/blob/d549330ad9bda3a6765c36057eb1b2f4c72f640c/packages/browser/src/plugins/segmentio/index.ts",
+        "https://github.com/segmentio/analytics-next/blob/d549330ad9bda3a6765c36057eb1b2f4c72f640c/packages/browser/src/plugins/segmentio/fetch-dispatcher.ts"
+      ],
+      "supports": "Configurable apiHost plus event-type initial; POST JSON identity/event body and optional Basic Authorization."
+    },
+    "clarity": {
+      "revision": "5a596f36893d06fba4c4dfb9b4d05ffd04673162",
+      "urls": [
+        "https://github.com/microsoft/clarity/blob/5a596f36893d06fba4c4dfb9b4d05ffd04673162/packages/clarity-js/src/data/upload.ts",
+        "https://github.com/microsoft/clarity/blob/5a596f36893d06fba4c4dfb9b4d05ffd04673162/packages/clarity-js/src/data/envelope.ts",
+        "https://learn.microsoft.com/en-us/clarity/clarity-data"
+      ],
+      "supports": "Configurable upload URL; XHR/beacon POST compressed or JSON envelope containing project/user/session IDs."
+    },
+    "prebid": {
+      "urls": [
+        "https://docs.prebid.org/prebid-server/endpoints/pbs-endpoint-overview.html",
+        "https://docs.prebid.org/prebid-server/developers/pbs-cookie-sync"
+      ],
+      "supports": "POST /openrtb2/auction and /cookie_sync; GET /setuid bidder/uid cookie matching. Browser-originating fixtures only; excludes server-to-server SSAI."
+    }
+  },
+  "families": [
+    "google",
+    "meta",
+    "matomo",
+    "fingerprint",
+    "posthog",
+    "amplitude",
+    "segment",
+    "clarity",
+    "prebid"
+  ],
+  "limits": [
+    "Requests are synthetic and never sent. Browser transports only; server-side SSAI is outside scope.",
+    "Query permutations and publisher proxy paths are controlled transformations of documented wire formats, not asserted SDK default serialization.",
+    "Opaque/body-only cases remain in the primary denominator. Functional observable twins constrain broad blocking.",
+    "Canonical vendor routes and existing list matches remain in the score. All required-list snapshots are identical between versions.",
+    "No scores for cookie/header sanitation, visual hiding, native-proxy revocation, SDK retries, subsequent requests, or overall web privacy."
+  ],
+  "fixtures": [
+    {
+      "id": "google-native",
+      "family": "google",
+      "mechanism": "vendor-endpoint",
+      "label": "tracking",
+      "source": "google-server",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://www.google-analytics.com/g/collect?v=2&tid=G-12345678&cid=123456789.123456789&en=page_view",
+        "type": "ping",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "ga4-canonical",
+      "family": "google",
+      "mechanism": "first-party-ga4-query",
+      "label": "tracking",
+      "source": "google-server",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/measure?v=2&tid=G-12345678&cid=123456789.123456789&en=page_view",
+        "type": "ping",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "ga4-reordered",
+      "family": "google",
+      "mechanism": "first-party-ga4-query",
+      "label": "tracking",
+      "source": "google-server",
+      "variant": "controlled-query-permutation",
+      "request": {
+        "url": "https://publisher.example/measure?tid=G-12345678&cid=123456789.123456789&v=2&en=page_view",
+        "type": "ping",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "ga4-intervening",
+      "family": "google",
+      "mechanism": "first-party-ga4-query",
+      "label": "tracking",
+      "source": "google-server",
+      "variant": "controlled-query-permutation",
+      "request": {
+        "url": "https://publisher.example/measure?v=2&cid=123456789.123456789&tid=G-12345678&en=page_view",
+        "type": "ping",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "gtm-canonical",
+      "family": "google",
+      "mechanism": "first-party-gtm-loader",
+      "label": "tracking",
+      "source": "google-gtm",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/static/container.js?id=GTM-ABC123&l=customLayer",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "gtm-reordered",
+      "family": "google",
+      "mechanism": "first-party-gtm-loader",
+      "label": "tracking",
+      "source": "google-gtm",
+      "variant": "controlled-proxy-transformation",
+      "request": {
+        "url": "https://publisher.example/static/container.js?l=customLayer&id=GTM-ABC123",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "gtm-renamed",
+      "family": "google",
+      "mechanism": "first-party-gtm-loader",
+      "label": "tracking",
+      "source": "google-gtm",
+      "variant": "controlled-proxy-transformation",
+      "request": {
+        "url": "https://publisher.example/static/container?id=GTM-ABC123&l=customLayer",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "stape-opaque",
+      "family": "google",
+      "mechanism": "opaque-encoded-route",
+      "label": "tracking",
+      "source": "stape-opaque",
+      "variant": "documented-opaque-mechanism",
+      "request": {
+        "url": "https://publisher.example/metrics/eyJvcGFxdWUiOiJzeW50aGV0aWMifQ",
+        "type": "ping",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "Synthetic encoded analytics payload; identities are unavailable in URL conditions."
+    },
+    {
+      "id": "ga4-wrong-version",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "google-server",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/measure?tid=G-12345678&v=3",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "ga4-wrong-id",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "google-server",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/measure?tid=ORDER-12345678&v=2",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "ga4-nested-value",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "google-server",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/api/render?next=https%3A%2F%2Fcollector.example%2Fmeasure%3Fv%3D2%26tid%3DG-12345678",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "gtm-wrong-type",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "google-gtm",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/assets/container?id=GTM-ABC123",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "gtm-nested-value",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "google-gtm",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/assets/app.js?text=id%3DGTM-ABC123",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "stape-functional-twin",
+      "family": "google",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "stape-opaque",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/metrics/eyJvcGFxdWUiOiJzeW50aGV0aWMifQ",
+        "type": "ping",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Exact observable twin of opaque tracking fixture; functional keepalive body differs. URL rules cannot distinguish them."
+    },
+    {
+      "id": "meta-native",
+      "family": "meta",
+      "mechanism": "vendor-endpoint",
+      "label": "tracking",
+      "source": "meta-pixel",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://www.facebook.com/tr?id=123456789012345&ev=PageView",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "meta-canonical",
+      "family": "meta",
+      "mechanism": "first-party-pixel",
+      "label": "tracking",
+      "source": "meta-pixel",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/tr/?id=123456789012345&ev=PageView",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "meta-reordered",
+      "family": "meta",
+      "mechanism": "first-party-pixel",
+      "label": "tracking",
+      "source": "meta-pixel",
+      "variant": "controlled-query-permutation",
+      "request": {
+        "url": "https://publisher.example/tr/?ev=PageView&id=123456789012345",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "meta-intervening",
+      "family": "meta",
+      "mechanism": "first-party-pixel",
+      "label": "tracking",
+      "source": "meta-pixel",
+      "variant": "controlled-query-permutation",
+      "request": {
+        "url": "https://publisher.example/tr/?id=123456789012345&dl=https%3A%2F%2Fpublisher.example%2Fcheckout&ev=Purchase",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "meta-path-suffix",
+      "family": "meta",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "meta-pixel",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/tr/status?ev=Purchase&id=123456789012345",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "meta-text-id",
+      "family": "meta",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "meta-pixel",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/tr/?id=order-123456&ev=Purchase",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "meta-ordinary-event",
+      "family": "meta",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "meta-pixel",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/tr/?ev=Translate&id=123456789012345",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "meta-nested-value",
+      "family": "meta",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "meta-pixel",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/api/render?next=https://assets.example/tr/?id=123456789012345&ev=PageView",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Functional renderer receives a URL string as input. Existing unanchored filters may already overmatch; retain as a false-positive control."
+    },
+    {
+      "id": "matomo-canonical",
+      "family": "matomo",
+      "mechanism": "canonical-endpoint",
+      "label": "tracking",
+      "source": "matomo",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/matomo.php?idsite=1&rec=1&_id=0123456789abcdef&send_image=1",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "matomo-piwik",
+      "family": "matomo",
+      "mechanism": "query-visible-visitor",
+      "label": "tracking",
+      "source": "matomo",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/piwik.php?idsite=1&rec=1&_id=0123456789abcdef&send_image=1",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "matomo-custom",
+      "family": "matomo",
+      "mechanism": "query-visible-visitor",
+      "label": "tracking",
+      "source": "matomo",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/visit?idsite=1&rec=1&r=123456&url=https%3A%2F%2Fpublisher.example%2F&_id=0123456789abcdef&send_image=1",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "matomo-reordered",
+      "family": "matomo",
+      "mechanism": "query-visible-visitor",
+      "label": "tracking",
+      "source": "matomo",
+      "variant": "controlled-query-permutation",
+      "request": {
+        "url": "https://publisher.example/visit?_id=0123456789abcdef&url=https%3A%2F%2Fpublisher.example%2F&rec=1&idsite=1",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "matomo-no-visitor",
+      "family": "matomo",
+      "mechanism": "optional-identity-absent",
+      "label": "tracking",
+      "source": "matomo",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/visit?idsite=1&rec=1&action_name=Read&send_image=1",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Documented optional _id omitted; tracking remains valid."
+    },
+    {
+      "id": "matomo-body",
+      "family": "matomo",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "source": "matomo",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/visit",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "idsite=1&rec=1&_id=0123456789abcdef&action_name=Read"
+    },
+    {
+      "id": "matomo-rec-off",
+      "family": "matomo",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "matomo",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/visit?idsite=1&rec=0&_id=0123456789abcdef",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "matomo-short-id",
+      "family": "matomo",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "matomo",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/visit?idsite=1&rec=1&_id=order-42",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "matomo-missing-site",
+      "family": "matomo",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "matomo",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/visit?rec=1&_id=0123456789abcdef",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "matomo-functional-twin",
+      "family": "matomo",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "matomo",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/visit",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Exact observable twin of body-only tracking; functional visit-booking API has different body."
+    },
+    {
+      "id": "fingerprint-canonical",
+      "family": "fingerprint",
+      "mechanism": "v3-proxy-loader",
+      "label": "tracking",
+      "source": "fingerprint",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/identity/agent?apiKey=public123456789&version=3&loaderVersion=3.12.3",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "fingerprint-reordered",
+      "family": "fingerprint",
+      "mechanism": "v3-proxy-loader",
+      "label": "tracking",
+      "source": "fingerprint",
+      "variant": "controlled-query-permutation",
+      "request": {
+        "url": "https://publisher.example/identity/agent?loaderVersion=3.12.3&apiKey=public123456789&version=3",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "fingerprint-intervening",
+      "family": "fingerprint",
+      "mechanism": "v3-proxy-loader",
+      "label": "tracking",
+      "source": "fingerprint",
+      "variant": "controlled-query-permutation",
+      "request": {
+        "url": "https://publisher.example/identity/agent?apiKey=public123456789&region=eu&version=3&loaderVersion=3.12.3",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "fingerprint-v4",
+      "family": "fingerprint",
+      "mechanism": "v4-opaque-result",
+      "label": "tracking",
+      "source": "fingerprint",
+      "variant": "documented-opaque-mechanism",
+      "request": {
+        "url": "https://publisher.example/identity/?region=eu",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "Synthetic v4 opaque result payload; no v3 query signature."
+    },
+    {
+      "id": "fingerprint-no-key",
+      "family": "fingerprint",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "fingerprint",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/identity/agent?version=3&loaderVersion=3.12.3",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "fingerprint-wrong-type",
+      "family": "fingerprint",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "fingerprint",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/identity/image?apiKey=public123456789&version=3&loaderVersion=3.12.3",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "fingerprint-wrong-version",
+      "family": "fingerprint",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "fingerprint",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/identity/agent?loaderVersion=3.12.3&apiKey=public123456789&version=2",
+        "type": "script",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "fingerprint-functional-twin",
+      "family": "fingerprint",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "fingerprint",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/identity/?region=eu",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Exact observable twin of opaque v4 request; application identity API has a different body."
+    },
+    {
+      "id": "posthog-canonical",
+      "family": "posthog",
+      "mechanism": "canonical-endpoint",
+      "label": "tracking",
+      "source": "posthog",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/i/v0/e/",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "{api_key: synthetic,batch:[pageview],sent_at: synthetic}"
+    },
+    {
+      "id": "posthog-renamed",
+      "family": "posthog",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "source": "posthog",
+      "variant": "documented-configured-route",
+      "request": {
+        "url": "https://publisher.example/business-events",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "{api_key: synthetic,batch:[pageview],sent_at: synthetic}"
+    },
+    {
+      "id": "posthog-functional-twin",
+      "family": "posthog",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "posthog",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/business-events",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Exact observable twin; functional order notification body differs."
+    },
+    {
+      "id": "posthog-nested-value",
+      "family": "posthog",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "posthog",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/api/render?next=https://assets.example/i/v0/e/",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Functional renderer receives a URL string. Existing whole-URL filters may overmatch."
+    },
+    {
+      "id": "posthog-feature-flags",
+      "family": "posthog",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "posthog",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/flags?project=shop",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "amplitude-canonical",
+      "family": "amplitude",
+      "mechanism": "canonical-endpoint",
+      "label": "tracking",
+      "source": "amplitude",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/2/httpapi",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "{api_key: synthetic,events:[{event_type:pageview}]}"
+    },
+    {
+      "id": "amplitude-renamed",
+      "family": "amplitude",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "source": "amplitude",
+      "variant": "documented-configured-route",
+      "request": {
+        "url": "https://publisher.example/client-update",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "{api_key: synthetic,events:[{event_type:pageview}]}"
+    },
+    {
+      "id": "amplitude-functional-twin",
+      "family": "amplitude",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "amplitude",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/client-update",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Exact observable twin; functional user-preference update body differs."
+    },
+    {
+      "id": "amplitude-device-api",
+      "family": "amplitude",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "amplitude",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/api/device?device_id=42&session_id=3",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "amplitude-cache-api",
+      "family": "amplitude",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "amplitude",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/api/cache?api_key=public123456789",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "segment-canonical",
+      "family": "segment",
+      "mechanism": "vendor-endpoint",
+      "label": "tracking",
+      "source": "segment",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://api.segment.io/v1/t",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "{writeKey: synthetic,event:Page Viewed,anonymousId:synthetic}"
+    },
+    {
+      "id": "segment-renamed",
+      "family": "segment",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "source": "segment",
+      "variant": "documented-configured-route",
+      "request": {
+        "url": "https://publisher.example/v1/t",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "{writeKey: synthetic,event:Page Viewed,anonymousId:synthetic}"
+    },
+    {
+      "id": "segment-functional-twin",
+      "family": "segment",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "segment",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/v1/t",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Exact observable twin; functional versioned application API body differs."
+    },
+    {
+      "id": "segment-versioned-api",
+      "family": "segment",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "segment",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/v1/i",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "segment-key-api",
+      "family": "segment",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "segment",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/api/config?writeKey=public123456789",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "clarity-canonical",
+      "family": "clarity",
+      "mechanism": "vendor-endpoint",
+      "label": "tracking",
+      "source": "clarity",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://c.clarity.ms/collect",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "Synthetic Clarity JSON {e:[version,seq,start,duration,project,user,session,...],a:[],p:[]}"
+    },
+    {
+      "id": "clarity-renamed",
+      "family": "clarity",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "source": "clarity",
+      "variant": "documented-configured-route",
+      "request": {
+        "url": "https://publisher.example/client-state",
+        "type": "ping",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "Synthetic Clarity envelope and playback payload."
+    },
+    {
+      "id": "clarity-functional-twin",
+      "family": "clarity",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "clarity",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/client-state",
+        "type": "ping",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Exact observable twin; functional collaboration keepalive body differs."
+    },
+    {
+      "id": "clarity-project-api",
+      "family": "clarity",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "clarity",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/api/project?project=shop&session=42",
+        "type": "xmlhttprequest",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "clarity-upload-api",
+      "family": "clarity",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "clarity",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/upload",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "prebid-auction",
+      "family": "prebid",
+      "mechanism": "auction-endpoint",
+      "label": "tracking",
+      "source": "prebid",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/openrtb2/auction",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "Synthetic OpenRTB request {id,imp,site,user}."
+    },
+    {
+      "id": "prebid-cookie-sync",
+      "family": "prebid",
+      "mechanism": "identity-sync",
+      "label": "tracking",
+      "source": "prebid",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/cookie_sync",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "Synthetic bidder cookie-sync request {bidders,gdpr,gdpr_consent}."
+    },
+    {
+      "id": "prebid-setuid",
+      "family": "prebid",
+      "mechanism": "identity-sync",
+      "label": "tracking",
+      "source": "prebid",
+      "variant": "source-shaped",
+      "request": {
+        "url": "https://publisher.example/setuid?bidder=sample&uid=synthetic-buyer",
+        "type": "image",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      }
+    },
+    {
+      "id": "prebid-renamed",
+      "family": "prebid",
+      "mechanism": "body-only",
+      "label": "tracking",
+      "source": "prebid",
+      "variant": "controlled-proxy-transformation",
+      "request": {
+        "url": "https://publisher.example/rpc",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "bodySummary": "Synthetic OpenRTB request {id,imp,site,user}; publisher relay forwards to auction endpoint."
+    },
+    {
+      "id": "prebid-documentation",
+      "family": "prebid",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "prebid",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/openrtb2/auction",
+        "type": "main_frame",
+        "method": "get",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Documentation/navigation is not an auction POST."
+    },
+    {
+      "id": "prebid-path-suffix",
+      "family": "prebid",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "prebid",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/openrtb2/auction/status",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    },
+    {
+      "id": "prebid-functional-twin",
+      "family": "prebid",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "prebid",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/rpc",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Exact observable twin of renamed auction; functional application RPC body differs."
+    },
+    {
+      "id": "prebid-generic-event",
+      "family": "prebid",
+      "mechanism": "functional-controls",
+      "label": "functional",
+      "source": "prebid",
+      "variant": "synthetic-negative",
+      "request": {
+        "url": "https://publisher.example/event?id=42",
+        "type": "xmlhttprequest",
+        "method": "post",
+        "initiator": "https://publisher.example/",
+        "topUrl": "https://publisher.example/article",
+        "tabId": 7
+      },
+      "note": "Synthetic functional near-neighbor; not an actual tracking request."
+    }
+  ]
+}

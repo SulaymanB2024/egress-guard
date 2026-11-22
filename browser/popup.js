@@ -301,7 +301,7 @@
     const verified = receipt && receipt.state === "applied" && receipt.active === true;
     $("isolation-note").setAttribute("data-state", verified ? "neutral" : "reduced");
     $("isolation-note").textContent = verified
-      ? "Isolation rules are installed. New cross-site resource requests are blocked; HTTP cookies, authorization and referrers are removed. Existing connections are not forcibly closed. Reload for a fresh page. Sign-in may stop working. Site storage and your public IP remain visible to the site. Change modes to relax isolation."
+      ? "Isolation rules are installed. New cross-site resource requests are blocked; HTTP cookies, authorization, referrers and known PostHog identity headers are removed. Existing connections are not forcibly closed. Reload for a fresh page. Sign-in may stop working. Site storage and your public IP remain visible to the site. Change modes to relax isolation."
       : receipt && receipt.state === "unsupported"
       ? "Isolation cannot be applied safely to this address. This page is not confirmed isolated."
       : receipt && receipt.active === true
@@ -514,6 +514,7 @@
       text += " Saved transport: " + transport.saved.profile + ".";
       if (transport.runtime) {
         text += " Runtime transport: " + transport.runtime.profile + (transportApplied ? " (acknowledged)." : " (does not acknowledge saved settings).");
+        if (transportApplied) text += " Tunnel permissions are checked before each forwarding operation.";
         text += " Experimental address guard: " + transport.runtime.address_guard.state + ".";
         if (transport.runtime.address_guard.reason) text += " Guard status: " + transport.runtime.address_guard.reason + ".";
       } else text += " No runtime transport acknowledgment.";
@@ -539,9 +540,9 @@
         (index === 0 || value.connect_ports[index - 1] < port));
   }
   function validTransportRuntime(value) {
-    if (!exactKeys(value, ["profile", "connect_ports", "address_guard", "scope", "applied"]) ||
+    if (!exactKeys(value, ["profile", "connect_ports", "address_guard", "scope", "tunnel_policy", "applied"]) ||
         !exactKeys(value.address_guard, ["selected", "state", "reason"]) ||
-        value.scope !== "proxy-tcp" || typeof value.applied !== "boolean") return false;
+        value.scope !== "proxy-tcp" || value.tunnel_policy !== "per-forward" || typeof value.applied !== "boolean") return false;
     const guard = value.address_guard;
     if (!validTransportSettings({profile: value.profile, connect_ports: value.connect_ports, address_guard: guard.selected})) return false;
     return guard.state === "disabled" && guard.selected === false && guard.reason === null ||

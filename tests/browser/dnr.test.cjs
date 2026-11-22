@@ -310,7 +310,7 @@ test("Isolation uses PSL site ownership for top scopes, destinations and cold in
   const ownRepair = dnr.compileUserState([], [exception({site: "amazonaws.com", host: "amazonaws.com", path: "/resource", type: "image", tabId: 1})], NOW).rules;
   const own = {url: "https://amazonaws.com/resource", type: "image", top: "amazonaws.com", tabId: 1};
   const sanitizer = headers(own).find((r) => r.priority > best(ownRepair, own).priority);
-  assert.deepEqual(sanitizer.action.requestHeaders.map((h) => h.header).sort(), ["authorization", "cookie", "referer"]);
+  assert.deepEqual(sanitizer.action.requestHeaders.map((h) => h.header).sort(), ["authorization", "cookie", "referer", "x-posthog-distinct-id", "x-posthog-session-id", "x-posthog-window-id"]);
   assert.deepEqual(sanitizer.action.responseHeaders, [{header: "set-cookie", operation: "remove"}]);
   assert.ok(sanitizer.action.requestHeaders.every((h) => h.operation === "remove"));
 });
@@ -328,6 +328,28 @@ test("Isolation preserves threat/manual precedence and strips credentials after 
   const manual = dnr.compileUserState([userRule({site: "bad.example", host: "other-bad.example", path: "/resource", types: ["image"]})], [], NOW).rules;
   assert.equal(best([...all, ...manual], cross).priority, dnr.PRIORITY.userBlock);
   assert.equal(outcome(all, {...cross, url: "https://bad.example/resource"}), "block", "Continue never releases threat subresources");
+});
+
+test("Isolation removes source-verified analytics headers on ordinary same-site API calls above repair grants", () => {
+  const trackingHeaders = ["x-posthog-distinct-id", "x-posthog-session-id", "x-posthog-window-id"];
+  const req = {url: "https://shop.example/api/cart", type: "xmlhttprequest", method: "post", top: "shop.example", tabId: 1};
+  const repair = dnr.compileUserState([], [exception({site: "shop.example", host: "shop.example", path: "/api/cart", type: "xmlhttprequest", tabId: 1})], NOW).rules;
+  const removed = (all, request) => {
+    const winner = best(all, request);
+    return all.filter(rule => rule.action.type === "modifyHeaders" && matches(rule, request) &&
+      (!winner || rule.priority > winner.priority)).flatMap(rule => (rule.action.requestHeaders || [])
+        .filter(header => header.operation === "remove").map(header => header.header));
+  };
+  const isolated = [...dnr.compileModes({sites: {"shop.example": "isolated"}}).rules, ...repair];
+  assert.equal(outcome(isolated, req), "allow", "the functional same-site operation remains admitted");
+  for (const header of trackingHeaders) assert.ok(removed(isolated, req).includes(header), header);
+  for (const header of trackingHeaders) assert.ok(removed(isolated, {url: "https://shop.example/", type: "main_frame"}).includes(header), header);
+  assert.equal(removed(isolated, {...req, top: "unrelated.example"}).length, 0, "the opt-in site scope is retained");
+  for (const mode of ["standard", "strict", "relaxed"]) {
+    const headers = removed(dnr.compileModes({sites: {"shop.example": mode}}).rules, req);
+    assert.ok(trackingHeaders.every(header => !headers.includes(header)), mode);
+  }
+  assert.ok(!removed(isolated, req).includes("traceparent"), "generic application tracing is not guessed to be this vendor protocol");
 });
 
 test("extension id derivation matches Chrome's documented a-p mapping", () => {

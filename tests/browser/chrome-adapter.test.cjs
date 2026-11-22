@@ -1092,7 +1092,7 @@ test("Isolation activation removes cross-site repairs and a prior pause before t
   assert.equal(state.isolation.revision, state.policy.dynamicRevision);
   assert.equal(state.isolation.existingConnections, "not-revoked");
   assert.equal(state.isolation.reloadNeeded, true);
-  assert.deepEqual(state.isolation.httpHeaders, ["cookie", "authorization", "referer", "set-cookie"]);
+  assert.deepEqual(state.isolation.httpHeaders, ["cookie", "authorization", "referer", "x-posthog-distinct-id", "x-posthog-session-id", "x-posthog-window-id", "set-cookie"]);
   assert.equal((await w.page({type: "guard-config"})).mode, "isolated");
 });
 

@@ -123,7 +123,8 @@ class NativeHostTests(unittest.TestCase):
             runtime = {**first["logging"]["saved"], "applied": True,
                        "decisions": 99, "private_history": "must-never-leave"}
             transport = {**first["transport"]["saved"], "address_guard": {
-                "selected": False, "state": "disabled", "reason": None}, "scope": "proxy-tcp", "applied": True}
+                "selected": False, "state": "disabled", "reason": None}, "scope": "proxy-tcp",
+                "tunnel_policy": "per-forward", "applied": True}
             health.return_value = {"ready": True, "policy": {"revision": saved, "pending": False,
                                    "complete": True, "degraded": False, "logging": runtime, "transport": transport}}
             accepted = native_host.status_receipt()
@@ -142,7 +143,8 @@ class NativeHostTests(unittest.TestCase):
         with patch("egress_guard.policy.load_cached_feed", return_value=fixture), patch.object(
                 native_host, "proxy_health", return_value={"ready": False, "policy": None}) as health:
             first = native_host.status_receipt()
-            runtime = {"profile": "compatible", "connect_ports": [443], "scope": "proxy-tcp", "applied": True,
+            runtime = {"profile": "compatible", "connect_ports": [443], "scope": "proxy-tcp",
+                       "tunnel_policy": "per-forward", "applied": True,
                        "address_guard": {"selected": False, "state": "disabled", "reason": None}}
             reported = {"revision": first["policy"]["saved_revision"], "pending": False,
                         "complete": True, "degraded": False,
@@ -153,7 +155,9 @@ class NativeHostTests(unittest.TestCase):
             self.assertEqual(accepted["transport"]["runtime"]["address_guard"]["state"], "disabled")
             self.assertNotIn("never-forward", json.dumps(accepted))
             self.assertNotIn("private-host", json.dumps(accepted))
-            for change in (None, {**runtime, "applied": False}, {**runtime, "profile": "hardened"},
+            old_receipt = {key: value for key, value in runtime.items() if key != "tunnel_policy"}
+            for change in (None, old_receipt, {**runtime, "tunnel_policy": "initial-only"},
+                           {**runtime, "applied": False}, {**runtime, "profile": "hardened"},
                            {**runtime, "peer": "private-host.example"},
                            {**runtime, "address_guard": {**runtime["address_guard"], "exception": "/private/never-forward"}},
                            {**runtime, "connect_ports": [443, 8443]},
@@ -171,7 +175,8 @@ class NativeHostTests(unittest.TestCase):
         self.assertFalse(self.state.exists())
 
     def test_transport_receipt_refuses_malformed_or_contradictory_states(self):
-        valid = {"profile": "hardened", "connect_ports": [443], "scope": "proxy-tcp", "applied": True,
+        valid = {"profile": "hardened", "connect_ports": [443], "scope": "proxy-tcp",
+                 "tunnel_policy": "per-forward", "applied": True,
                  "address_guard": {"selected": True, "state": "active", "reason": None}}
         self.assertEqual(native_host.transport_policy.runtime_receipt(valid), valid)
         malformed = [None, [], {**valid, "profile": []}, {**valid, "scope": "device-wide"},

@@ -26,14 +26,14 @@ test("counted repetitions are bounded by expansion rather than short source leng
   assert.equal(result.block[0].condition.regexFilter, supported);
 });
 
-test("flat regex alternatives split exactly while retaining every non-pattern condition", () => {
+test("flat regex alternatives pack into small exact groups while retaining every non-pattern condition", () => {
   const line = "/" + SUFFIX_PATTERN + "/$script,third-party,domain=publisher.example|~account.publisher.example,method=get";
   const original = abp.parseLine(line), result = abp.compileFilters(line);
-  assert.equal(result.block.length, 8);
+  assert.equal(result.block.length, 2);
   assert.equal(result.stats.converted, 1, "converted counts original source rows");
   assert.equal(result.stats.regexSplitFilters, 1);
-  assert.equal(result.stats.regexSplitRules, 7, "split rules count additional outputs");
-  assert.equal(result.stats.regex, 8);
+  assert.equal(result.stats.regexSplitRules, 1, "split rules count additional outputs, without wasting one slot per literal");
+  assert.equal(result.stats.regex, 2);
   const {regexFilter, ...other} = original.condition;
   for (const rule of result.block) {
     const {regexFilter: split, ...rest} = rule.condition;
@@ -58,18 +58,31 @@ test("flat regex alternatives split exactly while retaining every non-pattern co
 
 test("regex expansion cannot silently discard a protecting exception or a partial branch set", () => {
   const line = "/" + SUFFIX_PATTERN + "/$script,domain=publisher.example";
-  const omitted = abp.compileFilters(line, {maxRegex: 7});
+  const omitted = abp.compileFilters(line, {maxRegex: 1});
   assert.equal(omitted.block.length, 0);
   assert.equal(omitted.stats.regex, 0);
   assert.equal(omitted.stats.dropped["over the regular-expression rule budget"], 1);
-  assert.throws(() => abp.compileFilters("@@" + line, {maxRegex: 7}), /Cannot omit a protecting regex exception/);
-  const exception = abp.compileFilters("@@" + line, {maxRegex: 8});
-  assert.equal(exception.allow.length, 8);
+  assert.throws(() => abp.compileFilters("@@" + line, {maxRegex: 1}), /Cannot omit a protecting regex exception/);
+  const exception = abp.compileFilters("@@" + line, {maxRegex: 2});
+  assert.equal(exception.allow.length, 2);
   assert.equal(exception.stats.exceptions, 1);
   const heavy = "@@/https?:\\/\\/collector\\.example/.{100,}/$script,domain=publisher.example";
   assert.throws(() => abp.compileFilters(heavy), /Cannot omit a protecting regex exception.*counted-repetition/);
   assert.equal(abp.compileFilters(heavy + "\n" + heavy + ",badfilter").allow.length, 0, "$badfilter runs before expansion checks");
   assert.equal(abp.compileFilters(line + "\n" + line + ",badfilter").block.length, 0, "$badfilter removes every would-be branch");
+});
+
+test("packed alternatives retain every remainder branch and end anchor", () => {
+  for (const count of [9, 14, 25, 31]) {
+    const words = Array.from({length: count}, (_, i) => `item${i}`);
+    const pattern = "^(?:" + words.join("|") + ")$";
+    const packed = abp.splitRegexAlternatives(pattern);
+    assert.equal(packed.length, Math.ceil(count / 4));
+    const original = new RegExp(pattern), parts = packed.map(value => new RegExp(value));
+    for (const word of [...words, "", "item", "item999", "item0suffix", "prefixitem0", ...words.map(value => value + "\n")]) {
+      assert.equal(parts.some(part => part.test(word)), original.test(word), `${count}: ${JSON.stringify(word)}`);
+    }
+  }
 });
 
 test("end-anchored host patterns retain their URL constraint and cannot become document-wide exceptions", () => {

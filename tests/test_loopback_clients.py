@@ -65,7 +65,7 @@ def endpoint(key, *, first=None, second=None, mode="fast", large=None, slow_phas
                 value = {"product": "egress-guard", "ready": True, "https_decryption": False, "proof": proof}
                 report = {"transport": {"profile": "compatible", "connect_ports": [443],
                           "address_guard": {"selected": False, "state": "disabled", "reason": None},
-                          "scope": "proxy-tcp", "applied": True}}
+                          "scope": "proxy-tcp", "tunnel_policy": "per-forward", "applied": True}}
                 if transport is False:
                     report = {}
                 elif transport is not None:
@@ -193,7 +193,7 @@ class LoopbackClientTests(unittest.TestCase):
     def test_health_requires_an_authenticated_applied_transport_receipt(self):
         unavailable = {"profile": "compatible", "connect_ports": [443], "address_guard": {
             "selected": True, "state": "unavailable", "reason": "self-test-failed"},
-            "scope": "proxy-tcp", "applied": False}
+            "scope": "proxy-tcp", "tunnel_policy": "per-forward", "applied": False}
         for value in (False, {"applied": True}, unavailable, {**unavailable, "applied": True}):
             with self.subTest(value=value), endpoint(self.key, transport=value) as server:
                 result = health.proxy_health(server.server_port, self.state)
@@ -203,6 +203,16 @@ class LoopbackClientTests(unittest.TestCase):
                     self.assertEqual(result["policy"]["transport"], unavailable)
                 else:
                     self.assertIsNone(result["policy"]["transport"])
+
+    def test_authenticated_09_transport_cannot_acknowledge_per_forward_enforcement(self):
+        old = {"profile": "compatible", "connect_ports": [443], "address_guard": {
+            "selected": False, "state": "disabled", "reason": None}, "scope": "proxy-tcp", "applied": True}
+        for value in (old, {**old, "tunnel_policy": "initial-only"}):
+            with self.subTest(value=value), endpoint(self.key, transport=value) as server:
+                result = health.proxy_health(server.server_port, self.state)
+                self.assertFalse(result["ready"])
+                self.assertIsInstance(result["policy"], dict)
+                self.assertIsNone(result["policy"]["transport"])
 
 
 if __name__ == "__main__":

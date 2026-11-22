@@ -4,7 +4,7 @@ Local ad, tracker and threat filtering for macOS, with a portable Python core.
 
 Egress Guard runs a loopback proxy and a private control dashboard. HTTPS keeps the origin server's certificate and encrypted contents. No root daemon, browser certificate trust, or account credentials are needed for filtering.
 
-**0.9.0 is alpha software.** This revision adds an explicit hardened proxy transport profile, an experimental check of the actual numeric address at socket connection time, named-site browser isolation, and maintained URL-tracking parameter data. New configurations retain no domain history by default. Read the [0.9 changes and qualification limits](docs/release-0.9.md).
+**0.10.0 is alpha software.** This revision recognizes documented tracking protocols behind first-party URLs, rechecks permissions while an opaque proxy tunnel is carrying data, and removes known PostHog identity headers in named-site Isolation. New configurations retain no domain history by default. Read the [0.10 changes, measured comparison and qualification limits](docs/release-0.10.md).
 
 The transport was previously exercised on macOS ARM64 with Python 3.12. The new transport work is qualified through isolated Linux tests and real loopback TLS fixtures; the experimental address guard requires a supported CPython selector loop and a successful startup self-test. Chrome's actual rule/setting APIs, macOS launchd, installed-browser native messaging and the local model still require target-device qualification. Windows dashboard authentication and verified health remain unavailable until a private ACL-backed identity store is implemented. Guided setup and native canary notifications are macOS features.
 
@@ -18,8 +18,10 @@ The transport was previously exercised on macOS ARM64 with Python 3.12. The new 
 - Refuses external plaintext HTTP requests carrying `Cookie` or `Authorization` headers before forwarding them, and closes a CONNECT tunnel to an external host unless its first bytes are a complete TLS ClientHello, so plaintext cannot travel through a tunnel unchecked. Other protocols over CONNECT, such as SSH, need `block_plaintext_credentials = false`. This is a guard against accidental plaintext credentials, not data-loss prevention: it reads only those two headers, never inspects encrypted traffic, and cannot stop a program that deliberately sends data elsewhere.
 - Checks an initial TLS ClientHello's visible server name independently of the CONNECT destination, including IP-address tunnels. Both must pass the current policy before upstream contact; a grant for one name does not permit another. Original TLS bytes and certificates are preserved. ECH-hidden names and later encrypted requests remain opaque. [Transport behavior and tests](docs/core-0.8.md).
 - Offers an explicit hardened transport profile that refuses external plaintext HTTP before forwarding a body, refuses non-loopback literal CONNECT targets, and restricts CONNECT ports. The independent experimental address guard checks each actual numeric TCP connection candidate against current IP policy without a second DNS lookup; a rejected address can fall back to an allowed candidate. [Configuration and qualification](docs/core-0.9.md).
+- Rechecks an admitted CONNECT tunnel's original authority, initial visible TLS name and current transport policy before forwarding either direction. Revoked permissions, expired grants and new denies stop later forwarding. With the address guard selected, current IP policy also applies to the connected peer. Data already forwarded cannot be recalled. [Live-tunnel boundary](docs/core-0.10.md).
 - Provides an authenticated local dashboard with decision explanations, temporary exact-host exceptions, ad-filter pauses, manual rules and local activity.
 - Adds an optional Chrome 145+ companion for request-level filtering, indexed generic and scoped cosmetic rules, deterministic sponsored-card hiding and user-reviewed local model suggestions. Default Strict holds scripts, frames, fonts and objects until a site's complete policy is installed. Its popup distinguishes saved policy from applied policy and reports incomplete coverage. [Build, recovery and compatibility costs](docs/browser-companion.md).
+- Compiles source-backed tracking-protocol signatures into the Chrome companion. Exact query keys, values, methods and resource types recognize supported collection and loader formats even when parameter order or endpoint names change. Encrypted/body-only payloads and arbitrary protocol rewrites retain explicit limits. [Source analysis and signatures](docs/tracking-protocols-0.10.md).
 - Adds an Isolated mode for a named browser site: new cross-site subresource requests are blocked across the covered page context, including images, fetches and socket handshakes, while HTTP identity headers are removed on site resources and navigations to that site. Ordinary grants and Pause cannot relax isolation. Existing connections, local site storage, outbound navigations and public IP exposure retain explicit limits. [Enforcement design](docs/enforcement-0.9.md).
 - Imports AdGuard/uBO URL Tracking Protection at browser build time. Network and click-time parameter cleaning share a bounded policy, source exceptions also narrow overlapping built-ins, and signed/authentication links are preserved. Unsupported source forms are counted and unsafe exception fallbacks reduce the build receipt. [Compiler behavior](docs/parameters-0.9.md).
 - Offers optional Chrome profile controls for speculative loading, non-proxied WebRTC UDP, third-party cookies, browser advertising APIs and selected remote browser services. Each control shows its actual value and owner. Explicit release removes only Egress Guard's override. [Controls and tradeoffs](docs/browser-privacy-0.8.md).
@@ -78,7 +80,7 @@ For recovery without the CLI, turn off the matching `127.0.0.1:18080` HTTP and H
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r requirements/runtime.lock
-python -m pip install --no-deps --no-index ./egress_guard-0.9.0-py3-none-any.whl
+python -m pip install --no-deps --no-index ./egress_guard-0.10.0-py3-none-any.whl
 python -m pip check
 egress-guard init
 egress-guard refresh
@@ -110,7 +112,7 @@ address_guard = true
 
 `address_guard` is a separate experimental setting, off by default, and needs a proxy restart after changing it. The process must pass its supported-runtime and socket self-test before reporting the guard active. When selected but unavailable, filtering traffic is refused and authenticated health still reports the reason. An active guard does not establish complete feeds or device-wide routing. Read [the address-guard lifecycle and limits](docs/core-0.9.md) before selecting it.
 
-After upgrading to 0.9, restart the proxy before trusting its new receipts. A running older proxy cannot acknowledge the transport fields required by the 0.9 dashboard and native bridge. Rebuild and reload the browser companion separately; new browser rules cannot revoke already established connections.
+After upgrading to 0.10, restart the proxy before trusting its new receipts. The dashboard and native bridge require the running proxy to acknowledge `tunnel_policy: "per-forward"`; a still-running 0.9 process cannot satisfy readiness. Rebuild and reload the browser companion separately. Browser rule changes do not forcibly close established browser connections; proxy tunnel checks apply only to traffic actually carried through the restarted proxy.
 
 ## Block reasons
 

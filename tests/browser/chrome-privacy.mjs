@@ -204,7 +204,7 @@ try {
   const tabId = await swEval(`chrome.tabs.query({url: "http://publisher.example/*"}).then((t) => t[0].id)`);
   const fpState = await popupState(tabId, P("/fp"));
   const cats = [...new Set(fpState.blocked.map((b) => b.list))].sort();
-  check("popup: blocks are attributed to named categories", ["beacons", "fp-trackers", "replay"].every((c) => cats.includes(c)) && fpState.categories["fp-trackers"] === "First-party tracker script", cats.join(","));
+  check("popup: blocks are attributed to named categories", ["beacons", "fp-trackers", "replay"].every((c) => cats.includes(c)) && fpState.categories["fp-trackers"] === "First-party tracking request", cats.join(","));
   // Relaxed: the escape hatch lifts URL filters on that site only; host lists stay.
   const relaxed = await popupAct(tabId, P("/fp"), {type: "set-mode", mode: "relaxed"});
   await navigate(page, P("/fp"));

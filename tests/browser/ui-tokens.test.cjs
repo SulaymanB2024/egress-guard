@@ -368,7 +368,7 @@ test("Chrome browser alias keeps review visible and native receipts are read onl
     status: {proxy_ready: true, policy: {applied: true, complete: true, pending: false, degraded: false, saved_revision: "a".repeat(64), applied_revision: "a".repeat(64)},
       logging: {saved: {history: "none", retention_days: 7, max_queue: 1000}, runtime: {history: "none", retention_days: 7, max_queue: 1000, applied: true}},
       transport: {saved: {profile: "hardened", connect_ports: [443], address_guard: true}, runtime: {
-        profile: "hardened", connect_ports: [443], address_guard: {selected: true, state: "active", reason: null}, scope: "proxy-tcp", applied: true}}}};
+        profile: "hardened", connect_ports: [443], address_guard: {selected: true, state: "active", reason: null}, scope: "proxy-tcp", tunnel_policy: "per-forward", applied: true}}}};
   const p = await popupWith(STATE, undefined, {chrome: true, native: receipt});
   assert.equal(p.$("semantic-item").hidden, false);
   assert.equal(p.$("native-group").hidden, false);
@@ -381,6 +381,7 @@ test("Chrome browser alias keeps review visible and native receipts are read onl
   assert.equal(messages[1].value.command, "status");
   assert.match(p.text("native-note"), /Runtime history: none \(acknowledged\)/);
   assert.match(p.text("native-note"), /Runtime transport: hardened \(acknowledged\)/);
+  assert.match(p.text("native-note"), /Tunnel permissions are checked before each forwarding operation/);
   assert.match(p.text("native-note"), /Experimental address guard: active/);
   assert.match(p.text("native-note"), /Browser routing and device-wide coverage are not verified/);
   const bad = await popupWith(STATE, undefined, {chrome: true, native: {...receipt, capabilities: {read_only: true, mutations: true}}});
@@ -406,13 +407,18 @@ test("Chrome browser alias keeps review visible and native receipts are read onl
     assert.match(waiting.text("native-note"), /Proxy not fully ready/);
     assert.doesNotMatch(waiting.text("native-note"), /^Proxy ready/);
   }
-  for (const runtime of [{...receipt.status.transport.runtime, connect_ports: [443, 443]},
+  const oldTransport = {...receipt.status.transport.runtime};
+  delete oldTransport.tunnel_policy;
+  for (const runtime of [oldTransport, {...receipt.status.transport.runtime, tunnel_policy: "initial-only"},
+    {...receipt.status.transport.runtime, tunnel_policy: true},
+    {...receipt.status.transport.runtime, connect_ports: [443, 443]},
     {...receipt.status.transport.runtime, address_guard: {selected: true, state: "unavailable", reason: "self-test-failed"}},
     {...receipt.status.transport.runtime, peer: "private.example"}]) {
     const altered = JSON.parse(JSON.stringify(receipt)); altered.status.transport.runtime = runtime;
     const invalid = await popupWith(STATE, undefined, {chrome: true, native: altered});
     userClick(invalid.$("native-check")); await new Promise(resolve => setImmediate(resolve));
     assert.match(invalid.text("native-note"), /incomplete receipt/);
+    assert.doesNotMatch(invalid.text("native-note"), /Tunnel permissions are checked|^Proxy ready/);
     assert.doesNotMatch(invalid.text("native-note"), /private\.example/);
   }
 });

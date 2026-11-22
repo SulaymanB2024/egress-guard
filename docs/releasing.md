@@ -71,3 +71,28 @@ The Python integration suite runs the real pinned proxy against local HTTP/TLS f
 | Receipts and recovery | Failed activation/readback never shows applied Isolation; saved transport changes remain pending until acknowledged; changing address-guard selection requires restart; an older proxy cannot satisfy 0.9 readiness. |
 
 The 0.8 runner's static `--check` mode remains useful but does not execute these new native cases. The implementation environment did not run Chrome because its prior startup was denied by socket policy. Source merge and local package verification are not an installed-release or target-device qualification.
+
+## Additional 0.10 gates
+
+Run the complete Python and Node suites, the actual artifact RE2 audit above, and the fixed browser protocol benchmark against the same upstream snapshots as its baseline:
+
+```sh
+node scripts/benchmark-browser-protocols.mjs \
+  --artifact /absolute/build/chrome \
+  --baseline docs/benchmarks/protocols-v1-baseline-0.9.json \
+  --out /absolute/qualification/protocol-comparison.json
+```
+
+The benchmark refuses different corpus or input-source hashes. Read both the equal-family reduction and compatibility/regression lists. Its corpus is visible to developers and is a reproducible development challenge, not a held-out generalization estimate. Header removal, proxy revocation and cosmetic hiding are separate results. An external percentage claim must retain that scope.
+
+The flat literal-alternative compiler now groups at most four alternatives into each output rule. This preserves the same Boolean union while reserving static regex capacity for protocol defenses and future list changes. It still refuses unsafe quantified/nested splits, partial branch sets and silent omission of protecting exceptions. Small groups are not a universal memory proof: every final generated regex must pass the independent 2 KiB RE2 gate, and the complete static set must remain under Chrome's count limit.
+
+| Boundary | Required target observation |
+| --- | --- |
+| Live proxy revocation | An allowed original-certificate TLS stream passes its control markers; a new authority/SNI/IP deny or expired grant stops the next forwarding in both directions, including queued connect data. Repeat on the intended macOS runtime. |
+| Running-version acknowledgment | A running 0.9 process cannot satisfy 0.10 health/dashboard/native readiness; the restarted proxy reports authenticated `tunnel_policy: "per-forward"`. |
+| Native protocol rules | Chrome accepts all actual static rules and reports supported regexes; controlled origins observe no recognized collection or loader request. Include reordered/interposed fields, typed resource distinctions and functional controls. |
+| Identity-header channel | Under Isolated mode, same-site application POSTs and destination navigations omit all three documented PostHog identity headers; ordinary repairs cannot restore them. Other modes retain their specified behavior. |
+| Lifecycle and compatibility | Exercise retries, alternate transports, cache/worker responses, first navigation, malformed/duplicate/encoded query fields and identity-removal requests. Do not infer SDK lifecycle prevention from isolated request matches. |
+
+Native Chrome execution remained unavailable in the implementation environment. A modeled DNR result or standalone RE2 success must not be labeled a passed installed-browser test. See [the 0.10 release evidence](release-0.10.md) and [tracking/ad-delivery analysis](adversarial-tracking-0.10.md).

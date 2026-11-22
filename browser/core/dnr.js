@@ -43,6 +43,11 @@
     websocket: "websocket", webtransport: "webtransport", webbundle: "webbundle", other: "other"});
   // Exceptions open exactly the type that was shown.
   const EXCEPTION_TYPE_MAP = Object.freeze({...TYPE_MAP, other: ["other"]});
+  // Isolated mode also removes analytics identity carried on ordinary application
+  // requests. PostHog's pinned browser SDK emits these tracing headers; arbitrary custom
+  // headers and identifiers in bodies remain outside this bounded control.
+  const ISOLATION_REQUEST_HEADERS = Object.freeze(["cookie", "authorization", "referer",
+    "x-posthog-distinct-id", "x-posthog-session-id", "x-posthog-window-id"]);
 
   // Tracking parameters live in core/params.js (shared with the click-time cleaner in page-guard.js).
   const TRACKING_PARAMS = params.GLOBAL;
@@ -63,7 +68,7 @@
     threats: {label: "Malware and phishing"},
     trackers: {label: "Ads and trackers"},
     cname: {label: "Disguised trackers"},
-    "fp-trackers": {label: "First-party tracker script"},
+    "fp-trackers": {label: "First-party tracking request"},
     easyprivacy: {label: "Tracking request"},
     easylist: {label: "Ad request"},
     replay: {label: "Fingerprinting or session replay"},
@@ -380,8 +385,7 @@
       // boundaries inside the otherwise same-site destination exclusion.
       if (nested.length) add("isolated", PRIORITY.isolation, {type: "block"},
         {...scope, requestDomains: nested, resourceTypes: [...SUBRESOURCE_TYPES]});
-      const sanitize = {type: "modifyHeaders", requestHeaders: [
-        {header: "cookie", operation: "remove"}, {header: "authorization", operation: "remove"}, {header: "referer", operation: "remove"}],
+      const sanitize = {type: "modifyHeaders", requestHeaders: ISOLATION_REQUEST_HEADERS.map(header => ({header, operation: "remove"})),
       responseHeaders: [{header: "set-cookie", operation: "remove"}]};
       add(null, PRIORITY.isolationHeaders, sanitize, {...scope, resourceTypes: [...SUBRESOURCE_TYPES]});
       // Destination-scoped: the first omnibox navigation is covered without a
@@ -566,11 +570,11 @@
       {urlFilter: "/static/array.full.js", resourceTypes: S},
       {urlFilter: "/array/phc_", resourceTypes: S},
       {urlFilter: "/e/?ip=", resourceTypes: X},
-      {urlFilter: "/i/v0/e/", resourceTypes: X},
+      {regexFilter: "^https?://[^/?#]+/(?:[^?#]*/)?i/v0/e/", resourceTypes: X},
       {urlFilter: "/2/httpapi", resourceTypes: X},
       // TikTok and Meta pixels proxied
       {urlFilter: "/events.js?sdkid=", resourceTypes: S},
-      {regexFilter: "/tr/?\\?id=[0-9]{6,}&ev=", resourceTypes: ["image", ...X]},
+      {regexFilter: "^https?://[^/?#]+/(?:[^?#]*/)?tr/?\\?id=[0-9]{6,}&ev=", resourceTypes: ["image", ...X]},
     ],
   });
 
@@ -611,7 +615,7 @@
     return info.quiet ? null : id;
   }
 
-  const api = Object.freeze({PRIORITY, FILTER_PRIORITY, SUBRESOURCE_TYPES, TYPE_MAP, CHROME_TO_CORE, EXCEPTION_TYPE_MAP, TRACKING_PARAMS, SCOPED_PARAMS, KEPT_PARAMS,
+  const api = Object.freeze({PRIORITY, FILTER_PRIORITY, SUBRESOURCE_TYPES, TYPE_MAP, CHROME_TO_CORE, EXCEPTION_TYPE_MAP, ISOLATION_REQUEST_HEADERS, TRACKING_PARAMS, SCOPED_PARAMS, KEPT_PARAMS,
     LIST_KINDS, CATEGORIES, DEFAULT_CHUNK, FUNCTIONAL_HOSTS, TRACKER_COOKIE_HOSTS, BOUNCE_HOSTS, EMBEDS, SITE_MODES, MODE_BASE, HAND_FILTERS, SURROGATES,
     endpointRegex, minimize, compileList, compileParams, compileLinks, scannerPassRule, compilePrivacy, compileHand, compileSurrogates, compileModes, embedRule, compileUserState, continueRules,
     parseWarning, extensionIdFromHex, categoryOf});

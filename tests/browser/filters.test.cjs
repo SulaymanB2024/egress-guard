@@ -249,6 +249,10 @@ test("hand-written fingerprinting, session-replay and first-party tracker filter
     "https://shop.example/events.js?sdkid=C1&lib=ttq"]) assert.ok(hit(url), url);
   assert.ok(hit("https://shop.example/fp/tags?org_id=abc&session_id=1", "image"));
   assert.ok(hit("https://shop.example/tr/?id=1234567890&ev=PageView", "image"));
+  assert.ok(hit("https://shop.example/proxy/tr?id=1234567890&ev=CustomVendorEvent", "ping"), "legacy custom event coverage is retained");
+  assert.ok(hit("https://shop.example/proxy/i/v0/e/?v=1", "xmlhttprequest"), "a collector under a proxy path is still blocked");
+  assert.ok(!hit("https://shop.example/preview?target=https://site.example/tr/?id=1234567890&ev=PageView", "image"), "tracker-looking query values are not actual collector paths");
+  assert.ok(!hit("https://shop.example/example?code=/i/v0/e/", "xmlhttprequest"), "documentation/query content is not an event request");
   for (const url of ["https://shop.example/static/app.js", "https://shop.example/s/fonts.js", "https://shop.example/api/event", "https://shop.example/tracking/order?id=1"]) assert.ok(!hit(url), url);
   for (const rule of rules) assert.equal(rule.priority, dnr.PRIORITY.hand);
 });
