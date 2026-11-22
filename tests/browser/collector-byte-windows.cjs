@@ -37,7 +37,14 @@ function measureActionWindow(before, after, host) {
     scope: "Receiver bytes inside sampled window; positive shared-origin bytes and later arrivals cannot be assigned to this request."};
 }
 function summarizeActionWindows(outcomes, kind) {
-  const windows = outcomes.filter(row => row.kind === kind).map(row => row.byteWindow);
+  const matched = outcomes.filter(row => row.kind === kind);
+  // The GA4 first-party gate cannot use bytes measured at a different fixture
+  // origin: calling a tracker-host window "ga4" would yield false credit.
+  if (kind === "ga4" && matched.some(row =>
+      !["publisher.test", "shop.test"].includes(row.byteWindow?.targetHost))) {
+    throw new Error("GA4 action window must measure a controlled first-party publisher");
+  }
+  const windows = matched.map(row => row.byteWindow);
   if (windows.some(row => row?.status !== "MEASURED" ||
       !Number.isSafeInteger(row.targetOriginApplicationBytes) ||
       row.targetOriginApplicationBytes < 0 ||
