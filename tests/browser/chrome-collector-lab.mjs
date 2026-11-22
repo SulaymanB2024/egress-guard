@@ -221,8 +221,11 @@ export function summarizeArm(snapshot, before, visits, outcomes) {
   const events = snapshot.events.filter(event => Object.hasOwn(visits, event.visit));
   assert(events.every(event => event.proxy_route_observed === true), "Every received event needs proxy-route correlation");
   assert(snapshot.connections.length >= before.connections.length, "Connection evidence must be append-only");
-  // A later connection can reuse a closed TCP source port. The fixture's array
-  // is monotonic; slicing its checkpoint avoids misclassifying that new route.
+  // Measure the complete connection ledger, not only connections created after
+  // the checkpoint. An already-open TLS tunnel can receive fresh application
+  // bytes in a later arm; omitting it would falsely qualify zero collector
+  // egress. The append-only ledger also distinguishes reused TCP source ports.
+  const receiverDelta = measureActionWindow(before, snapshot, HOSTS[2]);
   const connections = snapshot.connections.slice(before.connections.length);
   assert(connections.filter(row => row.application_bytes > 0).every(row => row.proxy_route_observed === true), "Unrouted origin bytes invalidate qualification");
   const channels = {};
@@ -234,9 +237,10 @@ export function summarizeArm(snapshot, before, visits, outcomes) {
       distinctIdentifierBytesSummedAcrossEvents: rows.reduce((sum, row) => sum + row.distinct_identifier_bytes, 0),
       actionWindows: summarizeActionWindows(outcomes, kind)};
   }
-  return {visits: Object.keys(visits).length, channels, rawApplicationBytesDelta: snapshot.decrypted_origin_application_bytes - before.decrypted_origin_application_bytes,
-    trackerHostApplicationBytes: connections.filter(row => row.host === HOSTS[2]).reduce((sum, row) => sum + row.application_bytes, 0),
-    connections: connections.length, connectionsClosed: connections.every(row => row.closed),
+  return {visits: Object.keys(visits).length, channels,
+    rawApplicationBytesDelta: receiverDelta.targetOriginApplicationBytes + receiverDelta.otherOriginApplicationBytes,
+    trackerHostApplicationBytes: receiverDelta.targetOriginApplicationBytes,
+    connections: connections.length, connectionsClosed: snapshot.connections.every(row => row.closed),
     transportDisconnectsDelta: snapshot.transport_disconnects - before.transport_disconnects,
     routeCorrelated: true, handlerErrors: snapshot.handler_errors, overflow: snapshot.overflow,
     gpc: {receivedHeaders: events.filter(row => row.gpc).length, receivedEvents: events.length},
