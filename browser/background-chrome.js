@@ -26,6 +26,7 @@
   // They must remain recoverable when the unrelated DNR queue is stalled.
   const browserPrivacy = root.EGBrowserPrivacy ? root.EGBrowserPrivacy.createController(C) : null;
   if (browserPrivacy) browserPrivacy.ready.catch(() => {});
+  const hardeningApi = root.EGPrivacyHardening || null;
 
   const store = new RuleStore({persist: {
     load: async () => (await C.storage.local.get(KEY))[KEY],
@@ -298,6 +299,8 @@
   const prewarmContexts = new Map(); // source tab id -> {site, expiresAt}
   const policy = {state: "pending", desiredRevision: null, savedRevision: null, appliedRevision: null,
     error: null, grantsPending: false, expirySemantics: "scheduled", warnings: [], topPartyCoverage: "unknown"};
+  let hardening = {schema: 1, revision: 0, enabled: false};
+  let hardeningLoaded = false, hardeningSaved = false, hardeningError = "";
   let syncing = Promise.resolve();
   const clone = (v) => JSON.parse(JSON.stringify(v));
   const canonical = (v) => JSON.stringify(v, function (key, value) {
@@ -319,6 +322,61 @@
     const run = syncing.catch(() => {}).then(fn);
     syncing = run;
     return run;
+  }
+
+  async function loadHardening() {
+    if (hardeningLoaded || !hardeningApi) return;
+    try {
+      const raw = (await C.storage.local.get(hardeningApi.KEY))[hardeningApi.KEY];
+      if (raw !== undefined) { hardening = hardeningApi.validateState(raw); hardeningSaved = true; }
+      hardeningLoaded = true; hardeningError = "";
+    } catch (error) {
+      hardeningError = String(error && error.message || error).slice(0, 300);
+      // Do not silently remove a previously installed restriction when its saved
+      // intent cannot be read. The normal policy failure path keeps last rules.
+      throw error;
+    }
+  }
+
+  async function hardeningStatus() {
+    if (!hardeningApi) return {error: "Client Hints control is unavailable in this build."};
+    await loadHardening().catch(() => {});
+    let observed = null, readError = "";
+    try { observed = (await C.declarativeNetRequest.getDynamicRules()).filter(rule => hardeningApi.ownsRuleId(rule.id)); }
+    catch (error) { readError = String(error && error.message || error).slice(0, 300); }
+    const enabledRules = hardeningApi.compile({enabled: true, priority: dnr.PRIORITY.clientHints});
+    const wanted = hardening.enabled ? enabledRules : [];
+    const rulesConfirmed = Boolean(!hardeningError && observed && sameRules(observed, wanted));
+    const installed = observed === null ? null : sameRules(observed, enabledRules);
+    const state = hardeningError || readError ? "degraded" : hardening.enabled
+      ? (installed ? "installed" : "pending") : observed.length ? "release-pending" : "inactive";
+    return {schema: 1, control: "high-entropy-client-hints", ...hardeningApi.CAPABILITIES,
+      saved: hardeningSaved, enabled: hardening.enabled, revision: hardening.revision,
+      appliedRevision: rulesConfirmed ? hardening.revision : null, state, rulesConfirmed, installed,
+      expectedRuleCount: wanted.length, observedRuleCount: observed === null ? null : observed.length,
+      verifiedRuleCount: observed === null ? null : enabledRules.filter(rule => observed.some(actual => canonical(actual) === canonical(rule))).length,
+      ruleIds: enabledRules.map(rule => rule.id), requestHeaders: [...hardeningApi.REQUEST_HEADERS],
+      error: hardeningError || readError || (!rulesConfirmed ? policy.error || "The requested Client Hints rules have not been confirmed." : ""),
+      policyState: policy.state, policyError: policy.error || ""};
+  }
+
+  async function setHardeningNow(enabled) {
+    if (!hardeningApi) return {error: "Client Hints control is unavailable in this build."};
+    hardeningApi.validateEnabled(enabled);
+    await loadHardening().catch(() => {}); // an explicit choice can replace corrupt saved intent
+    const replacement = {schema: 1, revision: Number.isSafeInteger(hardening.revision + 1) ? hardening.revision + 1 : 1, enabled};
+    await C.storage.local.set({[hardeningApi.KEY]: replacement});
+    hardening = replacement; hardeningSaved = hardeningLoaded = true; hardeningError = "";
+    // This runs ONLY inside the shared DNR queue. No second owner races the main
+    // reconciler; a saved checkbox cannot claim a successful rule installation.
+    await apply().catch(() => {});
+    return hardeningStatus();
+  }
+
+  async function retryHardeningNow() {
+    await loadHardening().catch(() => {});
+    if (hardeningSaved && !hardeningError) await apply().catch(() => {});
+    return hardeningStatus();
   }
 
   const safelyScopedSite = (site) => hosts.siteOf(site) === site && hosts.canScopeSite(site);
@@ -382,7 +440,7 @@
   }
 
   async function loadState() {
-    await Promise.all([store.load(), loadGenericOff(), loadModes(), loadPauses().then((ended) => { endedWhileAsleep = ended; }), retireNoise().catch(() => {})]);
+    await Promise.all([store.load(), loadGenericOff(), loadModes(), loadHardening(), loadPauses().then((ended) => { endedWhileAsleep = ended; }), retireNoise().catch(() => {})]);
     const [session, local] = await Promise.all([C.storage.session.get(GRANT_KEY), C.storage.local.get(CONTROLLER_KEY)]);
     journal = session[GRANT_KEY]; savedReceipt = local[CONTROLLER_KEY];
     if (savedReceipt && savedReceipt.schema === 2 && Number.isFinite(savedReceipt.observedAt)) lastWall = Math.max(savedReceipt.observedAt, Number(savedReceipt.clockHighWater) || 0);
@@ -601,10 +659,11 @@
       endpointGroups.push({id: exc.id, ruleId, exception: clone(exc)});
     }
     const siteModes = dnr.compileModes(requestedModes, {topSites});
-    const wantedDynamic = [...compiled.rules, ...siteModes.rules];
+    const hardeningRules = hardeningApi ? hardeningApi.compile({enabled: hardening.enabled, priority: dnr.PRIORITY.clientHints}) : [];
+    const wantedDynamic = [...compiled.rules, ...siteModes.rules, ...hardeningRules];
     const wantedSession = [...grants.flatMap(rulesForGrant), ...persistent.rules, ...endpointRules];
     const snapshot = {schema: 2, epoch: EPOCH, modes: clone(modes), effectiveModes: requestedModes, pauses: clone(pauses), rules: store.snapshot(), topSites,
-      preparationSchema: 1, preparationHold: siteModes.preparationHold, preparedSites: siteModes.preparedSites};
+      preparationSchema: 1, preparationHold: siteModes.preparationHold, preparedSites: siteModes.preparedSites, privacyHardening: clone(hardening)};
     const revision = await digest({...snapshot, grants, dynamic: wantedDynamic, session: wantedSession});
     policy.desiredRevision = revision;
     checkQuota(wantedDynamic, wantedSession);
@@ -625,7 +684,7 @@
     applied = {...snapshot, revision, dynamicDigest: await digest(checkedDynamic), observedAt: now, clockHighWater: lastWall};
     policy.dynamicRevision = revision; policy.appliedRevision = null;
     policy.topPartyCoverage = siteModes.preparationHold ? "closed-until-prepared" : "explicit-top-sites";
-    sources = compiled.sources; modeKinds = siteModes.kinds;
+    sources = compiled.sources; modeKinds = {...siteModes.kinds, ...Object.fromEntries(hardeningRules.map(rule => [rule.id, "client-hints"]))};
     allowIds = new Set(compiled.rules.filter((r) => r.action.type !== "block").map((r) => r.id));
 
     const intent = {schema: 2, epoch: EPOCH, phase: "intent", revision, observedAt: now, entries: clone(grants), endpoints: endpointGroups};
@@ -1240,6 +1299,17 @@
 
   async function handlePrivacy(message, sender) {
     if (!sender || sender.id !== C.runtime.id || sender.url !== `${OWN}privacy.html` || sender.frameId !== 0) return {error: "Browser privacy controls are available only from their settings page."};
+    if (message.type.startsWith("browser-privacy-hardening-")) {
+      const allowedKeys = message.type === "browser-privacy-hardening-apply" ? ["type", "enabled"] : ["type"];
+      if (Object.keys(message).some(key => !allowedKeys.includes(key))) return {error: "Client Hints messages accept only their fixed control choice."};
+      switch (message.type) {
+        case "browser-privacy-hardening-status": return serial(hardeningStatus);
+        case "browser-privacy-hardening-apply": return serial(() => setHardeningNow(message.enabled));
+        case "browser-privacy-hardening-retry": return serial(retryHardeningNow);
+        case "browser-privacy-hardening-release": return serial(() => setHardeningNow(false));
+        default: return {error: "Unknown Client Hints message."};
+      }
+    }
     if (!browserPrivacy) return {error: "Browser privacy controls are unavailable."};
     switch (message.type) {
       case "browser-privacy-status": return browserPrivacy.status();

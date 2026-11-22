@@ -96,3 +96,18 @@ The flat literal-alternative compiler now groups at most four alternatives into 
 | Lifecycle and compatibility | Exercise retries, alternate transports, cache/worker responses, first navigation, malformed/duplicate/encoded query fields and identity-removal requests. Do not infer SDK lifecycle prevention from isolated request matches. |
 
 Native Chrome execution remained unavailable in the implementation environment. A modeled DNR result or standalone RE2 success must not be labeled a passed installed-browser test. See [the 0.10 release evidence](release-0.10.md) and [tracking/ad-delivery analysis](adversarial-tracking-0.10.md).
+
+## Additional 0.11 gates
+
+Run both the ordinary complete build and the explicit `--optimize-regex --re2-python /absolute/python` build against identical verified source snapshots. The optional interpreter must already contain the pinned RE2 package; unavailable verification must fail the requested optimized build while preserving the previous artifact. Check every final regex, including disabled static rulesets and unchanged capture redirects, and compare the frozen protocol challenge with 0.10. Read the [proof boundary](compiler-0.11.md), including unspecified equal-priority redirect ties, rather than substituting finite test agreement for that boundary.
+
+Run the full Python suite, including feed review's actual child-process interruptions and the collector's broken-identifier-extractor regression. Inspect both [feed review](feed-review-0.11.md) and [controlled collector](privacy-lab-0.11.md) receipts. Publisher age, rollback holds, runtime acknowledgment, all-channel identity residuals and failures must remain visible.
+
+```sh
+python -B scripts/qualify-collector-lab.py --out /absolute/new-proxy-receipt.json
+node tests/browser/chrome-collector-lab.mjs --check
+```
+
+The second command is source-only. On a separately permitted native target, run the command in [the collector guide](privacy-lab-0.11.md#optional-native-browser-runner) with explicit Chrome, Python, built-extension and new-output paths. Require real certificate, route, context-completion, positive-extraction and functional evidence. A first-party channel with no completed collector event is not automatically a zero-byte result; its shared-origin partial-byte attribution remains uncovered.
+
+For Client Hints, exercise native request headers, eligible document API values and release, preserving existing policy headers. Missing baseline exposure gives no suppression credit. Add separate tests for duplicate/large policies, subframes, worker contexts, BFCache, site-access restrictions and competing extensions before broadening the qualified scope. Product receipts remain installed-rule observations rather than native behavior certification. The prior implementation-environment Chromium restriction must not be retried or bypassed.

@@ -1,0 +1,466 @@
+{
+  "schema": 1,
+  "experiment": "bounded-regex-compiler-0.11",
+  "dateUTC": "2026-11-22T04:54:46.688Z",
+  "status": "controlled compiler experiment; final release artifact may be rebuilt",
+  "nativeChrome": false,
+  "baselineCommit": "06e75c7c5927b373efae93db3ee57a8b3282b830",
+  "sameVerifiedInputDigest": "b2f4a7ff538b24b9bd757c286776bcefda5e55654a4c9f2b5b6292e673960ded",
+  "scope": "Static regex capacity and declared action-set preservation, not tracker-efficacy gain or Chrome activation qualification.",
+  "totals": {
+    "baseline": {
+      "rules": 14086,
+      "regex": 955,
+      "headroom": 45
+    },
+    "lowered": {
+      "rules": 14180,
+      "regex": 941,
+      "headroom": 59
+    },
+    "optimized": {
+      "rules": 14069,
+      "regex": 830,
+      "headroom": 170
+    }
+  },
+  "slotsSaved": 125,
+  "fractionRegexSlotsSaved": 0.13089005235602094,
+  "sourceAgreement": {
+    "easylist": {
+      "sameNetworkRows": true,
+      "sameConvertedRows": true,
+      "sameExceptionRows": true,
+      "sameDroppedReasons": true,
+      "loweredSourceRows": 2,
+      "loweredOutputRules": 108,
+      "eliminatedRegexSlots": 14
+    },
+    "easyprivacy": {
+      "sameNetworkRows": true,
+      "sameConvertedRows": true,
+      "sameExceptionRows": true,
+      "sameDroppedReasons": true,
+      "loweredSourceRows": 0,
+      "loweredOutputRules": 0,
+      "eliminatedRegexSlots": 0
+    }
+  },
+  "inventories": {
+    "baseline": [
+      {
+        "id": "threats",
+        "rules": 65,
+        "regex": 32,
+        "sha256": "16264312ba1c6754ac968a40ec1e3340af9d28c91a22949162874ab7b9aec503"
+      },
+      {
+        "id": "threats-2",
+        "rules": 67,
+        "regex": 34,
+        "sha256": "2965e341aa88a6c17c3e73d46cebd333afd95a120fee67f06653afcf301d7e29"
+      },
+      {
+        "id": "trackers",
+        "rules": 11,
+        "regex": 0,
+        "sha256": "f6884a8b50896a8a97735ac10e52528da58e116a4747c7ae90a8b4581b2ec3ab"
+      },
+      {
+        "id": "cname",
+        "rules": 8,
+        "regex": 0,
+        "sha256": "8037690817575f40d624954e7b987e9225a29179bdd0e09497333a88bcfde1ad"
+      },
+      {
+        "id": "params",
+        "rules": 801,
+        "regex": 801,
+        "sha256": "233cfde3b8cf54c253220ff116e3a42e11912bc314bcc765479ab7d77dbdb0b1"
+      },
+      {
+        "id": "links",
+        "rules": 26,
+        "regex": 26,
+        "sha256": "2ff0e57f058e7486d142c9078048f1a05e620b036fc20ef2ee2f21e012c87cc8"
+      },
+      {
+        "id": "gpc",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "6a51534b0f48c008e44a791c3c5a814fe2758988c806e8efd6c1bab6c34bbacd"
+      },
+      {
+        "id": "referrer",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "97d6010aed52bff4004480cf2d476c93a66a15194b5bcdb0bdbd4b5af5d2143d"
+      },
+      {
+        "id": "beacons",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "92e7b055a03631960ba6455186c571839cb6bdc05d4ef98efa6d178a175b8a1e"
+      },
+      {
+        "id": "cookies",
+        "rules": 4,
+        "regex": 0,
+        "sha256": "ba2c4cf7ade97e1eabf47db78674ef27d3c87f95dbddb0468d1274022f080a8c"
+      },
+      {
+        "id": "bounce",
+        "rules": 2,
+        "regex": 0,
+        "sha256": "74980fc4f5c27e7ac84465acfad4056fc00c24956c8ea3d46641fff8263ce4a2"
+      },
+      {
+        "id": "surrogates",
+        "rules": 11,
+        "regex": 0,
+        "sha256": "3b0ea1c87e5dcf1b4c6dfb3c544638411828cb1dbf67f53504123c47704f68e3"
+      },
+      {
+        "id": "fp-trackers",
+        "rules": 3542,
+        "regex": 31,
+        "sha256": "5871c1b99c1e4019a7504794f881e39923706b8315525a462eea6abad62680af"
+      },
+      {
+        "id": "easyprivacy",
+        "rules": 4919,
+        "regex": 6,
+        "sha256": "b44958877b5122bdcac6c842595359292f1fd47e31ab3f4c5d4516ef2857352d"
+      },
+      {
+        "id": "easylist",
+        "rules": 3258,
+        "regex": 24,
+        "sha256": "6d45cf440339aab31bbc083847ef115b7d5079e2b8331aff387757579dc5c70a"
+      },
+      {
+        "id": "filter-allow",
+        "rules": 1350,
+        "regex": 0,
+        "sha256": "51acd8824426a988999302bbdb20d456de50a9842200bc2ee04f4ac7dd329e16"
+      },
+      {
+        "id": "replay",
+        "rules": 19,
+        "regex": 1,
+        "sha256": "56d8dc0f50ac9ca32f7a5993236505665925b181de121a8f18d74688897274b0"
+      }
+    ],
+    "lowered": [
+      {
+        "id": "threats",
+        "rules": 65,
+        "regex": 32,
+        "sha256": "16264312ba1c6754ac968a40ec1e3340af9d28c91a22949162874ab7b9aec503"
+      },
+      {
+        "id": "threats-2",
+        "rules": 67,
+        "regex": 34,
+        "sha256": "2965e341aa88a6c17c3e73d46cebd333afd95a120fee67f06653afcf301d7e29"
+      },
+      {
+        "id": "trackers",
+        "rules": 11,
+        "regex": 0,
+        "sha256": "f6884a8b50896a8a97735ac10e52528da58e116a4747c7ae90a8b4581b2ec3ab"
+      },
+      {
+        "id": "cname",
+        "rules": 8,
+        "regex": 0,
+        "sha256": "8037690817575f40d624954e7b987e9225a29179bdd0e09497333a88bcfde1ad"
+      },
+      {
+        "id": "params",
+        "rules": 801,
+        "regex": 801,
+        "sha256": "233cfde3b8cf54c253220ff116e3a42e11912bc314bcc765479ab7d77dbdb0b1"
+      },
+      {
+        "id": "links",
+        "rules": 26,
+        "regex": 26,
+        "sha256": "2ff0e57f058e7486d142c9078048f1a05e620b036fc20ef2ee2f21e012c87cc8"
+      },
+      {
+        "id": "gpc",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "6a51534b0f48c008e44a791c3c5a814fe2758988c806e8efd6c1bab6c34bbacd"
+      },
+      {
+        "id": "referrer",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "97d6010aed52bff4004480cf2d476c93a66a15194b5bcdb0bdbd4b5af5d2143d"
+      },
+      {
+        "id": "beacons",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "92e7b055a03631960ba6455186c571839cb6bdc05d4ef98efa6d178a175b8a1e"
+      },
+      {
+        "id": "cookies",
+        "rules": 4,
+        "regex": 0,
+        "sha256": "ba2c4cf7ade97e1eabf47db78674ef27d3c87f95dbddb0468d1274022f080a8c"
+      },
+      {
+        "id": "bounce",
+        "rules": 2,
+        "regex": 0,
+        "sha256": "74980fc4f5c27e7ac84465acfad4056fc00c24956c8ea3d46641fff8263ce4a2"
+      },
+      {
+        "id": "surrogates",
+        "rules": 11,
+        "regex": 0,
+        "sha256": "3b0ea1c87e5dcf1b4c6dfb3c544638411828cb1dbf67f53504123c47704f68e3"
+      },
+      {
+        "id": "fp-trackers",
+        "rules": 3542,
+        "regex": 31,
+        "sha256": "5871c1b99c1e4019a7504794f881e39923706b8315525a462eea6abad62680af"
+      },
+      {
+        "id": "easyprivacy",
+        "rules": 4919,
+        "regex": 6,
+        "sha256": "b44958877b5122bdcac6c842595359292f1fd47e31ab3f4c5d4516ef2857352d"
+      },
+      {
+        "id": "easylist",
+        "rules": 3352,
+        "regex": 10,
+        "sha256": "b6e153086b9739103a22c2b5596de550bf8c6b211fe967dfa1b8efd90511c232"
+      },
+      {
+        "id": "filter-allow",
+        "rules": 1350,
+        "regex": 0,
+        "sha256": "51acd8824426a988999302bbdb20d456de50a9842200bc2ee04f4ac7dd329e16"
+      },
+      {
+        "id": "replay",
+        "rules": 19,
+        "regex": 1,
+        "sha256": "56d8dc0f50ac9ca32f7a5993236505665925b181de121a8f18d74688897274b0"
+      }
+    ],
+    "optimized": [
+      {
+        "id": "threats",
+        "rules": 65,
+        "regex": 32,
+        "sha256": "16264312ba1c6754ac968a40ec1e3340af9d28c91a22949162874ab7b9aec503"
+      },
+      {
+        "id": "threats-2",
+        "rules": 67,
+        "regex": 34,
+        "sha256": "2965e341aa88a6c17c3e73d46cebd333afd95a120fee67f06653afcf301d7e29"
+      },
+      {
+        "id": "trackers",
+        "rules": 11,
+        "regex": 0,
+        "sha256": "f6884a8b50896a8a97735ac10e52528da58e116a4747c7ae90a8b4581b2ec3ab"
+      },
+      {
+        "id": "cname",
+        "rules": 8,
+        "regex": 0,
+        "sha256": "8037690817575f40d624954e7b987e9225a29179bdd0e09497333a88bcfde1ad"
+      },
+      {
+        "id": "params",
+        "rules": 696,
+        "regex": 696,
+        "sha256": "e69c2124763a31265cd5dd44655e1e6b5ac3a0d6482a07859b5bcc6c31a0d4a4"
+      },
+      {
+        "id": "links",
+        "rules": 26,
+        "regex": 26,
+        "sha256": "2ff0e57f058e7486d142c9078048f1a05e620b036fc20ef2ee2f21e012c87cc8"
+      },
+      {
+        "id": "gpc",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "6a51534b0f48c008e44a791c3c5a814fe2758988c806e8efd6c1bab6c34bbacd"
+      },
+      {
+        "id": "referrer",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "97d6010aed52bff4004480cf2d476c93a66a15194b5bcdb0bdbd4b5af5d2143d"
+      },
+      {
+        "id": "beacons",
+        "rules": 1,
+        "regex": 0,
+        "sha256": "92e7b055a03631960ba6455186c571839cb6bdc05d4ef98efa6d178a175b8a1e"
+      },
+      {
+        "id": "cookies",
+        "rules": 4,
+        "regex": 0,
+        "sha256": "ba2c4cf7ade97e1eabf47db78674ef27d3c87f95dbddb0468d1274022f080a8c"
+      },
+      {
+        "id": "bounce",
+        "rules": 2,
+        "regex": 0,
+        "sha256": "74980fc4f5c27e7ac84465acfad4056fc00c24956c8ea3d46641fff8263ce4a2"
+      },
+      {
+        "id": "surrogates",
+        "rules": 11,
+        "regex": 0,
+        "sha256": "3b0ea1c87e5dcf1b4c6dfb3c544638411828cb1dbf67f53504123c47704f68e3"
+      },
+      {
+        "id": "fp-trackers",
+        "rules": 3539,
+        "regex": 28,
+        "sha256": "1a0380f76ba73e96455961eca3703de1194d72783f26ea3b60534d270141d46e"
+      },
+      {
+        "id": "easyprivacy",
+        "rules": 4919,
+        "regex": 6,
+        "sha256": "b44958877b5122bdcac6c842595359292f1fd47e31ab3f4c5d4516ef2857352d"
+      },
+      {
+        "id": "easylist",
+        "rules": 3349,
+        "regex": 7,
+        "sha256": "3966c94837c6fdfdf1dae7af39cf4112db1e6a58592a58d5308f32c27163c162"
+      },
+      {
+        "id": "filter-allow",
+        "rules": 1350,
+        "regex": 0,
+        "sha256": "51acd8824426a988999302bbdb20d456de50a9842200bc2ee04f4ac7dd329e16"
+      },
+      {
+        "id": "replay",
+        "rules": 19,
+        "regex": 1,
+        "sha256": "56d8dc0f50ac9ca32f7a5993236505665925b181de121a8f18d74688897274b0"
+      }
+    ]
+  },
+  "optimization": {
+    "enabled": true,
+    "nativeChrome": false,
+    "complete": true,
+    "engine": {
+      "name": "google-re2",
+      "packageVersion": "1.1.20251105",
+      "maxMem": 2048,
+      "encoding": "Latin1"
+    },
+    "algorithm": "exact-action-regex-union-v1",
+    "saved": 111,
+    "beforeRegexRules": 941,
+    "afterRegexRules": 830,
+    "planSha256": "56f6f81512a5710df4c0e014a47248026dfa6418b49cb5db8700bf23bb09e95f",
+    "certificateSha256": "8fd50680fe733cc41c47f12860bc3a12713585efd1d3c9e89845c06a6efe3187"
+  },
+  "artifactAudit": {
+    "complete": true,
+    "encoding": "Latin1",
+    "engine": "google-re2",
+    "error_count": 0,
+    "error_counts_by_ruleset": {},
+    "errors": [],
+    "errors_omitted": 0,
+    "failed": 0,
+    "max_mem": 2048,
+    "native_chrome": false,
+    "package_version": "1.1.20251105",
+    "passed": 830,
+    "regexes": 830,
+    "rules": 14069,
+    "rulesets": 17,
+    "rulesets_read": 17,
+    "schema": 1,
+    "scope": "all-manifest-static-regexes-including-disabled",
+    "status": "passed"
+  },
+  "proof": {
+    "mergedGroups": 78,
+    "sourceHashes": {
+      "lib/regex-language.cjs": "a361a7e77f292d00bf18416eac12bc26980f327e73ba7e14e842374b3e05aa72",
+      "lib/regex-optimization-plan.cjs": "56577e147f5bfecd5514aeeb8ccc36400838ef9024bb2ecb876b5b15aba6df23",
+      "lib/regex-optimizer.cjs": "53e07c966443860d59cb0832d419856a33c360da8fa7ec47453190f898e71ca0",
+      "optimize-browser-regex.cjs": "6b705846fc69f22a891478751f9f44b73a63293989a3828636e04efe00b8d853"
+    },
+    "planSha256": "56f6f81512a5710df4c0e014a47248026dfa6418b49cb5db8700bf23bb09e95f",
+    "certificateSha256": "8fd50680fe733cc41c47f12860bc3a12713585efd1d3c9e89845c06a6efe3187"
+  },
+  "differentialRE2": {
+    "schema": 1,
+    "nativeChrome": false,
+    "engine": "google-re2==1.1.20251105",
+    "max_mem": 2048,
+    "encoding": "Latin1",
+    "queries": 10283,
+    "groups": 78,
+    "comparisons": 802074,
+    "positiveComparisons": 4526,
+    "mismatches": [],
+    "rulesets": [
+      {
+        "ruleset": "easylist",
+        "groups": 1,
+        "positiveComparisons": 4
+      },
+      {
+        "ruleset": "fp-trackers",
+        "groups": 3,
+        "positiveComparisons": 4
+      },
+      {
+        "ruleset": "params",
+        "groups": 74,
+        "positiveComparisons": 4518
+      }
+    ],
+    "challengeSha256": "c62dabc741bf7c26fd39d27cb9c3d6a3d3aa168159e77b914331f1a7f0e647e5",
+    "elapsedSeconds": 4.029,
+    "scope": "RE2 differential regression over finite synthetic URLs; the algebra and restricted parser establish the declared equivalence envelope, not this sample count."
+  },
+  "fixedProtocolCorpus": {
+    "corpusSha256": "074d616ba05c929adb76007048b644dd1cc9ebf3fb5ac39ecd9f588061852423",
+    "baselineArtifactSha256": "5565431dace562ca101702443ab5409605a02360975b754e04d9ec75c835725d",
+    "candidateArtifactSha256": "a8aa8f85ca306d39c3eb3b079e64d44e20ad0c6a0d9eb61d2861a3aac8dbf9c8",
+    "trackingCases": 34,
+    "prevented": 25,
+    "escaped": 9,
+    "functionalCases": 34,
+    "functionalPrevented": [
+      "posthog-nested-value",
+      "prebid-path-suffix"
+    ],
+    "changedScore": 0,
+    "newFalsePositives": [],
+    "regressions": []
+  },
+  "qualifications": [
+    "Equivalent eligible priority/full-action pairs within the declared parser grammar; matching rule ids can change.",
+    "Chrome leaves equal-priority/equal-action redirect ordering unspecified; this is not a promise of identical undocumented tie winners.",
+    "Standalone RE2 package/options are pinned; they are not the embedded engine or full DNR APIs of the target Chrome build.",
+    "Existing unsupported-source rows, analytics_trace_id quarantine, and other baseline coverage limits are unchanged."
+  ]
+}

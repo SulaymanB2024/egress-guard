@@ -1,5 +1,7 @@
 # Optional Chrome profile privacy controls
 
+**Current extension update:** [Browser privacy 0.11](browser-privacy-0.11.md) retains this controller, separates seven current controls from three legacy advertising preferences, and adds a separate opt-in Client Hints experiment. The sections below describe the original 0.8 scope; the current UI calls its release action **Release profile settings**.
+
 Version 0.8 adds a separate page for managing ten fixed Chrome privacy settings. These settings address connections and browser features that ordinary page-request rules do not fully control. They apply to the current Chrome profile across sites. They do not install a network route, change the system proxy, hide the public IP address or verify that traffic uses Egress Guard.
 
 Open **Settings → Browser privacy → Manage browser privacy** in the Chrome popup. Review the choices, then select **Apply selected protections**. Chrome requests the optional `privacy` permission at that explicit action. Opening the page, checking a box, inspecting status or installing the extension does not apply an unsaved choice. The initial checked boxes are only a proposed selection. Applying them can produce a partial result, which the per-control receipts show.

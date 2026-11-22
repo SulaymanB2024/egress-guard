@@ -1,4 +1,4 @@
-# Browser companion 0.10
+# Browser companion 0.11
 
 The companion supplies URL-level request rules, source-backed tracking-protocol signatures, maintained tracking-parameter and cookie cleaning, named-site isolation, indexed generic and scoped page-element hiding, optional local review of sponsored cards, and explicit Chrome profile privacy controls. Chrome is the primary implementation. Firefox retains manual HTTP/S request/cosmetic rules; it does not have the Chrome built-in list, protocol-signature, socket-deny, isolation, model or profile-control feature set.
 
@@ -37,6 +37,8 @@ The browser extension itself reads packaged filter data. The build process downl
 | `--allow-small` | Development fixtures only; skip production feed-size checks. |
 | `--no-lists` / `--no-filters` | Explicitly leave out those sources; the result is reduced. |
 | `--accept-list-change ID` | Accept a reviewed large change in a named source's size, entries or exceptions. |
+| `--optimize-regex` | Run bounded same-action regex factoring with mandatory pinned verification and proof receipts. Ordinary builds still receive finite ABP lowering. |
+| `--re2-python PATH` | Select an existing interpreter with `google-re2==1.1.20251105`; valid only with `--optimize-regex`. No package is installed automatically. |
 
 Normal builds require every selected source. A Medium fallback does not fulfill a request for Full threat coverage. Choose Medium explicitly if that is the intended tier. Required network sources must produce blocking rules, and the parameter source must produce effective imported removers; having a source file alone is insufficient. Missing sources, ineffective compilation, development size overrides and conservative source-exception fallbacks are recorded in `rules/build.json`; the popup reports reduced coverage. Normal builds refuse unsafe ambiguous source exceptions. Explicit reduced builds remain available for review. Stale snapshots are also reported.
 
@@ -130,11 +132,11 @@ Cosmetic hiding changes display. It cannot undo a request, cookie write or impre
 
 ## Optional Chrome profile controls
 
-Open **Settings → Browser privacy → Manage browser privacy**. Review the ten fixed choices and click **Apply selected protections** to request Chrome's optional `privacy` permission. No settings are changed by opening the page. Choices cover speculative loading, non-proxied WebRTC UDP, link auditing, third-party cookies, exposed advertising APIs, search suggestions and selected remote browser services.
+Open **Settings → Browser privacy → Manage browser privacy**. Review the seven current choices and click **Apply selected protections** to request Chrome's optional `privacy` permission. Three legacy advertising preferences remain manageable for release and compatibility, are unchecked for new setup, and have a separate count. No settings change merely by opening the page. Current choices cover speculative loading, non-proxied WebRTC UDP, link auditing, third-party cookies, search suggestions and selected remote browser services.
 
 The page reports actual read-back values and ownership. Another extension or organization policy can prevent a requested setting from taking effect. **Release all controls** removes only Egress Guard's overrides; it never writes back a stale copy of previous user preferences. This controller has its own queue, so a stalled request-policy update does not block privacy-setting recovery.
 
-These are regular-profile controls with compatibility costs, not IP masking or verified routing. WebRTC may still use TCP and expose a public address; Chrome's cookie exemptions remain possible. No Safe Browsing or password-manager setting is changed. See [the setting catalog, ownership and recovery contract](browser-privacy-0.8.md).
+These are regular-profile controls with compatibility costs, not IP masking or verified routing. WebRTC may still use TCP and expose a public address; Chrome's cookie exemptions remain possible. No Safe Browsing or password-manager setting is changed. A separate **Limit high-entropy Client Hints · Experimental** choice installs two fixed DNR rules without a new permission. It starts off, preserves all existing Permissions-Policy headers, and reports rule installation separately from native behavior. See [the current catalog and Client Hints boundaries](browser-privacy-0.11.md).
 
 ## Optional local ad review
 
@@ -196,4 +198,4 @@ Optional real-browser fixture scripts remain in `tests/browser/`. They use throw
 
 The dedicated `tests/browser/chrome-0.8.mjs` adds native imported-CSS cases, Chrome's hypothetical Strict rule evaluator and an optional visible privacy-permission/setting check. Its `--check` mode only validates fixture contracts and launches no browser. See [commands and the remaining native matrix](releasing.md#focused-08-chrome-fixture).
 
-The [0.6 guide and measurements](browser-companion-0.6.md), [0.7 record](release-0.7.md), [0.8 record](release-0.8.md) and [0.9 record](release-0.9.md) are historical evidence. Current checks and remaining target work are recorded in the [0.10 release notes](release-0.10.md).
+The [0.6 guide and measurements](browser-companion-0.6.md), [0.7 record](release-0.7.md), [0.8 record](release-0.8.md), [0.9 record](release-0.9.md) and [0.10 record](release-0.10.md) are historical evidence. Current checks and remaining target work are recorded in the [0.11 release notes](release-0.11.md).

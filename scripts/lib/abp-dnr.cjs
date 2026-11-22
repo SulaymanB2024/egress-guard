@@ -17,6 +17,7 @@
  * a plain `allow` for requests made by that host's pages, at the list's own exception priority, so they lift only that
  * list's filters. `$all` exceptions allow requests to the host, nothing more. */
 const hosts = require("../../browser/core/hosts.js");
+const {lowerToUrlFilters} = require("./regex-language.cjs");
 
 const TYPES = Object.freeze({
   script: ["script"], image: ["image"], stylesheet: ["stylesheet"], css: ["stylesheet"], object: ["object"],
@@ -357,6 +358,7 @@ function badKey(line) {
 function compileFilters(text, {maxRegex = Infinity} = {}) {
   const lines = String(text).split(/\r?\n/);
   const stats = {lines: lines.length, network: 0, converted: 0, rules: 0, regex: 0, regexSplitFilters: 0, regexSplitRules: 0,
+    regexLoweredFilters: 0, regexLoweredRules: 0, regexLoweredSlots: 0,
     countedRepeatBudget: MAX_COUNTED_REPEAT_COST, folded: 0, dropped: {}, suspicious: 0, suspiciousLines: [], exceptions: 0};
   const drop = (reason) => { stats.dropped[reason] = (stats.dropped[reason] || 0) + 1; };
   const parsed = [];
@@ -383,13 +385,23 @@ function compileFilters(text, {maxRegex = Infinity} = {}) {
         drop(reason); continue;
       }
       const patterns = splitRegexAlternatives(p.condition.regexFilter);
-      if (regexUsed + patterns.length > maxRegex) {
-        if (p.exception) throw new Error("Cannot omit a protecting regex exception: over the regular-expression rule budget: " + p.line);
-        drop("over the regular-expression rule budget"); continue;
+      // Source authorization, $badfilter, and unsupported-repeat checks above
+      // run unchanged. Only a bounded exact URL-filter language is lowered;
+      // every other regex keeps the established split/budget behavior.
+      const lowered = lowerToUrlFilters(p.condition.regexFilter);
+      if (lowered) {
+        const {regexFilter, ...other} = p.condition;
+        conditions = lowered.map((urlFilter) => ({...other, urlFilter}));
+        stats.regexLoweredFilters++; stats.regexLoweredRules += lowered.length; stats.regexLoweredSlots += patterns.length;
+      } else {
+        if (regexUsed + patterns.length > maxRegex) {
+          if (p.exception) throw new Error("Cannot omit a protecting regex exception: over the regular-expression rule budget: " + p.line);
+          drop("over the regular-expression rule budget"); continue;
+        }
+        regexUsed += patterns.length;
+        if (patterns.length > 1) { stats.regexSplitFilters++; stats.regexSplitRules += patterns.length - 1; }
+        conditions = patterns.map((regexFilter) => ({...p.condition, regexFilter}));
       }
-      regexUsed += patterns.length;
-      if (patterns.length > 1) { stats.regexSplitFilters++; stats.regexSplitRules += patterns.length - 1; }
-      conditions = patterns.map((regexFilter) => ({...p.condition, regexFilter}));
     }
     stats.converted++;
     const bucket = p.exception ? "allow" : p.important ? "important" : "block";

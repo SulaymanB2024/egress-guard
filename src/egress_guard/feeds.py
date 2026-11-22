@@ -7,6 +7,7 @@ import hashlib
 import http.client
 import ipaddress
 import json
+import os
 import re
 import sqlite3
 import time
@@ -14,11 +15,14 @@ import urllib.error
 import urllib.request
 from array import array
 from bisect import bisect_right
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from egress_guard.paths import atomic_private, private_dir
 from egress_guard.http_deadline import DeadlineHTTPHandler, DeadlineHTTPSHandler, ResponseDeadline
+from egress_guard import feed_review
+from egress_guard.bounded_json import loads as bounded_json
 
 HAGEZI = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/"
 ADGUARD = "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/"
@@ -409,38 +413,206 @@ def read_cached_feed(state: Path, feed: Feed) -> set[str]:
     return set(verified[0].decode("ascii").splitlines()) if verified else set()
 
 
+@dataclass(frozen=True)
+class ReviewedSnapshot:
+    raw: bytes
+    contents: bytes
+    metadata: dict
+    names: HostSet
+    sha256: str
+
+
+@dataclass(frozen=True)
+class InstalledSnapshot:
+    raw: bytes | None
+    verified: ReviewedSnapshot | None
+    sha256: str | None
+
+
+def _reviewed_snapshot(raw: bytes, feed: Feed) -> ReviewedSnapshot:
+    """Fully validate a publication/review artifact outside the request hot path."""
+    boundary = raw.find(b"\n", 0, 4097)
+    if len(raw) > MAX_FEED_BYTES or boundary < 0 or not raw.startswith(b"# "):
+        raise ValueError("invalid feed snapshot framing")
+    metadata = bounded_json(raw[2:boundary], limit=4096, depth_limit=4)
+    if (not isinstance(metadata, dict) or set(metadata) != {"updated_at", "published_at", "entries", "sha256"}
+            or type(metadata["entries"]) is not int or not feed.minimum <= metadata["entries"] <= MAX_ENTRIES
+            or not feed_review.valid_digest(metadata["sha256"])
+            or not _valid_clock(metadata["updated_at"], time.time())
+            or (metadata["published_at"] is not None and not _valid_clock(metadata["published_at"], time.time()))):
+        raise ValueError("invalid feed snapshot metadata")
+    contents = raw[boundary + 1:]
+    if (not contents.isascii() or not contents.endswith(b"\n")
+            or contents.count(b"\n") != metadata["entries"]
+            or feed_review.digest(contents) != metadata["sha256"]):
+        raise ValueError("feed snapshot body does not match its metadata")
+    previous = b""
+    for line in feed_review.records(contents):
+        if line <= previous:
+            raise ValueError("feed snapshot records must be sorted and unique")
+        name = line.decode("ascii")
+        valid = dns_name(name, dotted=True) == name
+        if not valid and feed.ips and ip_literal(name) is not None:
+            # Read historical mapped-IPv6 entries as well as the current normalized
+            # IPv4 spelling. Policy already gives these one effective IP identity.
+            valid = ipaddress.ip_address(name).compressed == name
+        if not valid:
+            raise ValueError("feed snapshot contains an invalid record")
+        previous = line
+    return ReviewedSnapshot(raw, contents, metadata, HostSet(contents), feed_review.digest(raw))
+
+
+def _installed(state: Path, feed: Feed) -> InstalledSnapshot:
+    raw = feed_review.read_regular(feed.path(state), MAX_FEED_BYTES)
+    if raw is None:
+        return InstalledSnapshot(None, None, None)
+    try:
+        verified = _reviewed_snapshot(raw, feed)
+    except ValueError:
+        verified = None
+    return InstalledSnapshot(raw, verified, feed_review.digest(raw))
+
+
+def _validate_transition(candidate: ReviewedSnapshot, previous: ReviewedSnapshot | None) -> None:
+    """These download validators cannot be bypassed by approving a held candidate."""
+    if previous is None:
+        return
+    if candidate.metadata["entries"] * 2 < previous.metadata["entries"]:
+        raise ValueError("feed domain count fell by more than half")
+    old_published = previous.metadata["published_at"]
+    published = candidate.metadata["published_at"]
+    if old_published is not None and (published is None or published < old_published):
+        raise ValueError("feed is older than the installed snapshot")
+
+
+def _rollback_record(state: Path, feed: Feed, current: InstalledSnapshot, *, strict=False):
+    if current.verified is None:
+        return None
+    # A committed transition survives a crash before the final rename. Prefer it
+    # over the old rollback slot, which still describes the preceding generation.
+    for slot in ("transition", "rollback"):
+        try:
+            record = feed_review.read(state, feed, slot, MAX_FEED_BYTES)
+            if record is not None and record.metadata["base_sha256"] == current.sha256:
+                previous = _reviewed_snapshot(record.payload, feed)
+                return record, previous, slot
+        except (OSError, ValueError):
+            if strict:
+                raise ValueError("feed rollback state is unreadable or invalid; installed data was retained") from None
+            continue
+    return None
+
+
+def _publish(state: Path, feed: Feed, candidate: ReviewedSnapshot,
+             current: InstalledSnapshot, *, cause: str) -> dict:
+    """Publish one snapshot while retaining recoverable, digest-bound rollback.
+
+    An intent contains the previous bytes and the exact future active digest. It
+    is written before the active rename, while the prior rollback stays intact.
+    After the active rename, the intent itself is a usable rollback even if its
+    final rename is interrupted. Cooperative writers share the refresh lock.
+    """
+    if _installed(state, feed).sha256 != current.sha256:
+        raise ValueError("installed feed changed before publication")
+    prior = _rollback_record(state, feed, current, strict=True)
+    if prior is not None and prior[2] == "transition":
+        os.replace(feed_review.path(state, feed, "transition"), feed_review.path(state, feed, "rollback"))
+    backup = current.verified
+    backup_cause = cause
+    # Re-fetching unchanged domain data must not replace a useful previous
+    # generation with another copy of the same policy and a newer fetch time.
+    if backup is not None and backup.metadata["sha256"] == candidate.metadata["sha256"]:
+        backup = prior[1] if prior is not None else None
+        if prior is not None and cause == "refresh":
+            backup_cause = prior[0].metadata["cause"]
+    if backup is not None:
+        feed_review.write(state, feed, "transition", backup.raw, candidate.sha256,
+                          cause=backup_cause, limit=MAX_FEED_BYTES)
+    if _installed(state, feed).sha256 != current.sha256:
+        raise ValueError("installed feed changed before publication")
+    atomic_private(feed.path(state), candidate.raw)
+    recovery_pending = False
+    if backup is not None:
+        try:
+            os.replace(feed_review.path(state, feed, "transition"), feed_review.path(state, feed, "rollback"))
+        except OSError:
+            # The active snapshot is installed. Its intent is already a valid
+            # rollback; reporting this as an unapplied update would be false.
+            recovery_pending = True
+    return {"installed_sha256": candidate.sha256, "rollback_recovery_pending": recovery_pending,
+            "runtime_acknowledged": False}
+
+
+def _discard_candidate_file(state: Path, feed: Feed) -> bool:
+    try:
+        feed_review.path(state, feed, "candidate").unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def _stage(state: Path, feed: Feed, candidate: ReviewedSnapshot, current: InstalledSnapshot):
+    # Repeated downloads of an unchanged held update retain its review identity.
+    # The candidate's original timestamps are not rewritten into apparent freshness.
+    try:
+        pending = feed_review.read(state, feed, "candidate", MAX_FEED_BYTES)
+        if pending is not None and pending.metadata["base_sha256"] == current.sha256:
+            previous_candidate = _reviewed_snapshot(pending.payload, feed)
+            if (previous_candidate.metadata["sha256"] == candidate.metadata["sha256"]
+                    and previous_candidate.metadata["published_at"] == candidate.metadata["published_at"]):
+                return pending
+    except (OSError, ValueError):
+        pass
+    return feed_review.write(state, feed, "candidate", candidate.raw, current.sha256,
+                             cause="refresh", limit=MAX_FEED_BYTES)
+
+
+def _record_attempt(state: Path, feed: Feed, *, started: float, error=None, **details):
+    attempt = {"last_attempt": started, "error": error, **details}
+    atomic_private(_attempt_path(feed.path(state)), json.dumps(attempt, allow_nan=False).encode("ascii"))
+
+
+def _record_action_attempt(state: Path, feed: Feed, **details) -> bool:
+    # The cache publication/rollback journal is authoritative. Failure to write a
+    # display-only attempt record must not falsely report that publication failed.
+    try:
+        _record_attempt(state, feed, started=time.time(), **details)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def _refresh(state: Path, config: dict) -> dict:
     """Refresh each selected feed independently so a failed source keeps its cache."""
     feeds = selected_feeds(config)
     ok = True
     for feed in feeds:
-        path = feed.path(state)
         started = time.time()
         error = None
+        details = {}
         try:
             names, published = _parse_feed(_download(feed), feed)
-            previous = _read_meta(path, snapshot=True)
-            old_published = previous.get("published_at")
-            previous_clock_valid = _valid_clock(previous.get("updated_at"), started) and (
-                old_published is None or _valid_clock(old_published, started)
-            )
-            # Older releases could persist a future clock. Do not use it as a rollback floor.
-            if previous_clock_valid:
-                old_count = previous.get("entries")
-                if type(old_count) is int and len(names) * 2 < old_count:
-                    raise ValueError("feed domain count fell by more than half")
-                if old_published is not None and (published is None or published < old_published):
-                    raise ValueError("feed is older than the installed snapshot")
             content = _snapshot(names, published)
-            if len(content) > MAX_FEED_BYTES:
-                raise ValueError("normalized feed exceeds the size limit")
-            atomic_private(path, content)
+            candidate, current = _reviewed_snapshot(content, feed), _installed(state, feed)
+            _validate_transition(candidate, current.verified)
+            previous_names = current.verified.names if current.verified is not None else HostSet()
+            assessment = feed_review.assess(feed, previous_names, candidate.names)
+            prior = _rollback_record(state, feed, current, strict=True)
+            if prior is not None and prior[0].metadata["cause"] == "rollback":
+                assessment["reasons"].append("explicit-rollback-hold")
+            if assessment["reasons"]:
+                record = _stage(state, feed, candidate, current)
+                details = {"review_candidate_sha256": record.sha256,
+                           "review_reasons": assessment["reasons"]}
+                raise ValueError(f"feed update quarantined; run 'egress-guard feed-review {feed.id}' before approval")
+            details = _publish(state, feed, candidate, current, cause="refresh")
+            if not _discard_candidate_file(state, feed):
+                details["candidate_cleanup_pending"] = True
         except (OSError, ValueError) as failure:
             ok = False
             error = str(failure) if type(failure) is ValueError else "could not install feed"
-        attempt = {"last_attempt": started, "error": error}
         try:
-            atomic_private(_attempt_path(path), json.dumps(attempt).encode("ascii"))
+            _record_attempt(state, feed, started=started, error=error, **details)
         except OSError:
             ok = False
     return {"ok": ok, "feeds": feed_status(state, config)}
@@ -457,15 +629,163 @@ def _snapshot(names: set[str], published: float | None) -> bytes:
     return ("# " + json.dumps(metadata) + "\n").encode("ascii") + contents
 
 
-def update_feeds(state: Path, config: dict) -> dict:
-    """Serialize refreshes across processes and preserve the previous good cache."""
+class RefreshBusy(ValueError):
+    pass
+
+
+@contextmanager
+def _refresh_lock(state: Path):
     directory = private_dir(private_dir(state) / "blocklists")
     connection = sqlite3.connect(directory / ".refresh.sqlite3", timeout=0.1)
     try:
         try:
             connection.execute("BEGIN IMMEDIATE")
-        except sqlite3.OperationalError:
-            return {"ok": False, "feeds": feed_status(state, config), "error": "feed refresh lock unavailable"}
-        return _refresh(state, config)
+        except sqlite3.OperationalError as error:
+            raise RefreshBusy("feed refresh lock unavailable") from error
+        yield
     finally:
         connection.close()
+
+
+def update_feeds(state: Path, config: dict) -> dict:
+    """Serialize refreshes and review publications across processes."""
+    try:
+        with _refresh_lock(state):
+            return _refresh(state, config)
+    except RefreshBusy as error:
+        return {"ok": False, "feeds": feed_status(state, config), "error": str(error)}
+
+
+def _review_feed(config: dict, feed_id: str, *, selected=False) -> Feed:
+    enabled = {feed.id: feed for feed in selected_feeds(config)}
+    known = enabled if selected else {**{feed.id: feed for feed in ALL_FEEDS}, **enabled}
+    if not isinstance(feed_id, str) or feed_id not in known:
+        raise ValueError("choose a known enabled feed" if selected else "unknown fixed feed identifier")
+    return known[feed_id]
+
+
+def _snapshot_summary(snapshot: ReviewedSnapshot | None) -> dict | None:
+    if snapshot is None:
+        return None
+    clock = snapshot.metadata["published_at"]
+    if clock is None:
+        clock = snapshot.metadata["updated_at"]
+    return {"snapshot_sha256": snapshot.sha256, "body_sha256": snapshot.metadata["sha256"],
+            "entries": snapshot.metadata["entries"], "published_at": snapshot.metadata["published_at"],
+            "updated_at": snapshot.metadata["updated_at"], "stale": time.time() - clock > STALE_SECONDS}
+
+
+def review_feeds(state: Path, config: dict, feed_id: str | None = None) -> dict:
+    """Inspect bounded local artifacts without locks, downloads or state creation."""
+    selected = selected_feeds(config)
+    items = (_review_feed(config, feed_id),) if feed_id is not None else selected
+    enabled = {feed.id for feed in selected}
+    rows = []
+    for feed in items:
+        current = _installed(state, feed)
+        row = {"id": feed.id, "selected": feed.id in enabled, "source_url": feed.url,
+               "matching": "exact-host" if feed.exact else "domain-and-descendants",
+               "active": {"state": "verified" if current.verified else "invalid" if current.raw is not None else "missing",
+                          "snapshot_sha256": current.sha256, "snapshot": _snapshot_summary(current.verified)},
+               "candidate": None, "rollback": None}
+        raw = feed_review.read_regular(feed_review.path(state, feed, "candidate"),
+                                       MAX_FEED_BYTES + feed_review.MAX_HEADER_BYTES)
+        if raw is not None:
+            row["candidate"] = {"state": "invalid", "candidate_sha256": feed_review.digest(raw)}
+            try:
+                record = feed_review.decode(raw, feed, "candidate", MAX_FEED_BYTES)
+                candidate = _reviewed_snapshot(record.payload, feed)
+                state_name = ("already-current" if candidate.sha256 == current.sha256 else
+                              "held" if record.metadata["base_sha256"] == current.sha256 else "stale-base")
+                previous_names = current.verified.names if current.verified is not None else HostSet()
+                assessment = feed_review.assess(feed, previous_names, candidate.names)
+                row["candidate"] = {"state": state_name, "candidate_sha256": record.sha256,
+                                    "base_sha256": record.metadata["base_sha256"],
+                                    "snapshot": _snapshot_summary(candidate), **assessment,
+                                    "delta": feed_review.entry_delta(
+                                        current.verified.contents if current.verified else b"", candidate.contents)}
+                try:
+                    _validate_transition(candidate, current.verified)
+                except ValueError as error:
+                    row["candidate"]["state"] = "invalid-transition"
+                    row["candidate"]["error"] = str(error)
+            except ValueError as error:
+                row["candidate"]["error"] = str(error)
+        try:
+            prior = _rollback_record(state, feed, current, strict=True)
+        except ValueError as error:
+            prior = None
+            row["rollback"] = {"state": "invalid", "available": False, "error": str(error)}
+        if prior is not None:
+            record, previous, slot = prior
+            row["rollback"] = {"state": "available", "available": True,
+                               "current_sha256": current.sha256, "previous_sha256": previous.sha256,
+                               "snapshot": _snapshot_summary(previous), "recovery_pending": slot == "transition",
+                               "refresh_held": record.metadata["cause"] == "rollback"}
+            if (row["candidate"] is not None and row["candidate"].get("state") == "held"
+                    and record.metadata["cause"] == "rollback"):
+                row["candidate"]["reasons"].append("explicit-rollback-hold")
+        rows.append(row)
+    return {"schema": 1, "catalog_version": feed_review.CATALOG_VERSION,
+            "scope": "feed-cache review; running policy and browser routing are not verified", "feeds": rows}
+
+
+def approve_feed(state: Path, config: dict, feed_id: str, *, candidate_sha256: str,
+                 base_sha256: str | None) -> dict:
+    feed = _review_feed(config, feed_id, selected=True)
+    if not feed_review.valid_digest(candidate_sha256) or not feed_review.valid_digest(base_sha256, missing=True):
+        raise ValueError("approval requires exact candidate and base digests")
+    with _refresh_lock(state):
+        record = feed_review.read(state, feed, "candidate", MAX_FEED_BYTES)
+        if (record is None or record.sha256 != candidate_sha256
+                or record.metadata["base_sha256"] != base_sha256):
+            raise ValueError("candidate changed; review the current candidate before approval")
+        candidate, current = _reviewed_snapshot(record.payload, feed), _installed(state, feed)
+        if current.sha256 == candidate.sha256:
+            # Recovery after publication succeeded but candidate cleanup did not.
+            result = {"installed_sha256": current.sha256, "already_current": True,
+                      "runtime_acknowledged": False}
+        else:
+            if current.sha256 != base_sha256:
+                raise ValueError("installed feed changed; approval requires a new review")
+            _validate_transition(candidate, current.verified)
+            result = _publish(state, feed, candidate, current, cause="approval")
+        result["candidate_cleanup_pending"] = not _discard_candidate_file(state, feed)
+        result["attempt_recorded"] = _record_action_attempt(state, feed, **result)
+        return {"ok": True, "action": "approve", "feed_id": feed.id, **result}
+
+
+def discard_feed(state: Path, config: dict, feed_id: str, *, candidate_sha256: str) -> dict:
+    feed = _review_feed(config, feed_id)
+    if not feed_review.valid_digest(candidate_sha256):
+        raise ValueError("discard requires an exact candidate digest")
+    with _refresh_lock(state):
+        path = feed_review.path(state, feed, "candidate")
+        raw = feed_review.read_regular(path, MAX_FEED_BYTES + feed_review.MAX_HEADER_BYTES)
+        if raw is None or feed_review.digest(raw) != candidate_sha256:
+            raise ValueError("candidate changed; review the current candidate before discarding")
+        path.unlink()
+        recorded = _record_action_attempt(state, feed, error="feed update discarded; keeping the installed snapshot")
+        return {"ok": True, "action": "discard", "feed_id": feed.id,
+                "active_unchanged": True, "attempt_recorded": recorded}
+
+
+def rollback_feed(state: Path, config: dict, feed_id: str, *, current_sha256: str,
+                  previous_sha256: str) -> dict:
+    feed = _review_feed(config, feed_id, selected=True)
+    if not feed_review.valid_digest(current_sha256) or not feed_review.valid_digest(previous_sha256):
+        raise ValueError("rollback requires exact current and previous digests")
+    with _refresh_lock(state):
+        current = _installed(state, feed)
+        if current.sha256 != current_sha256:
+            raise ValueError("installed feed changed; review before rollback")
+        prior = _rollback_record(state, feed, current, strict=True)
+        if prior is None or prior[1].sha256 != previous_sha256:
+            raise ValueError("the specified previous feed generation is not available")
+        # Only this recorded previous generation can intentionally cross the
+        # publication-time rollback floor. Its bytes and original age are retained.
+        result = _publish(state, feed, prior[1], current, cause="rollback")
+        result["candidate_cleanup_pending"] = not _discard_candidate_file(state, feed)
+        result["attempt_recorded"] = _record_action_attempt(state, feed, update_hold="rollback", **result)
+        return {"ok": True, "action": "rollback", "feed_id": feed.id,
+                "refresh_held_until_approval": True, **result}

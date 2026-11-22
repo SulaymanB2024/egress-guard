@@ -14,19 +14,19 @@
       label: "Disable link-auditing pings", detail: "Stops HTML hyperlink auditing across this profile. Other tracking requests still need network rules."},
     {id: "third-party-cookies", group: "Website tracking", path: ["websites", "thirdPartyCookiesAllowed"], value: false,
       label: "Block third-party cookies", detail: "Applies Chrome's third-party cookie restriction. Sign-in and embeds can break; browser exemptions and Storage Access grants can still allow access."},
-    {id: "topics", group: "Website tracking", path: ["websites", "topicsEnabled"], value: false,
-      label: "Disable advertising Topics", detail: "Disables the Topics API where this browser exposes the control."},
-    {id: "ad-auctions", group: "Website tracking", path: ["websites", "fledgeEnabled"], value: false,
-      label: "Disable browser ad auctions", detail: "Disables the Fledge / Protected Audience API where supported."},
-    {id: "ad-measurement", group: "Website tracking", path: ["websites", "adMeasurementEnabled"], value: false,
-      label: "Disable ad measurement APIs", detail: "Disables Attribution Reporting and Private Aggregation where supported."},
+    {id: "topics", group: "Legacy advertising controls", path: ["websites", "topicsEnabled"], value: false, lifecycle: "legacy",
+      label: "Keep the legacy Topics preference disabled", detail: "Topics is being retired. This compatibility preference may still exist after its advertising API stops working; reading it back does not prove an additional privacy benefit."},
+    {id: "ad-auctions", group: "Legacy advertising controls", path: ["websites", "fledgeEnabled"], value: false, lifecycle: "legacy",
+      label: "Keep the legacy browser-auction preference disabled", detail: "Protected Audience / Fledge is being retired. Keep or release an existing override here; this switch is not counted as a current protection."},
+    {id: "ad-measurement", group: "Legacy advertising controls", path: ["websites", "adMeasurementEnabled"], value: false, lifecycle: "legacy",
+      label: "Keep the legacy ad-measurement preference disabled", detail: "Attribution Reporting and Private Aggregation are being retired. An exposed preference does not establish that those APIs still operate in this browser."},
     {id: "search-suggestions", group: "Browser services", path: ["services", "searchSuggestEnabled"], value: false,
       label: "Stop sending typed searches for suggestions", detail: "Disables search-provider suggestions while typing in the address bar. Searches you submit still go to the provider."},
     {id: "remote-spelling", group: "Browser services", path: ["services", "spellingServiceEnabled"], value: false,
       label: "Disable the online spelling service", detail: "Disables Chrome's remote spelling service; this does not disable local spell checking."},
     {id: "error-service", group: "Browser services", path: ["services", "alternateErrorPagesEnabled"], value: false,
       label: "Disable the navigation-error service", detail: "Stops Chrome's web service for resolving navigation errors."},
-  ].map(spec => Object.freeze({...spec, path: Object.freeze(spec.path)})));
+  ].map(spec => Object.freeze({lifecycle: "active", recommended: spec.lifecycle !== "legacy", ...spec, path: Object.freeze(spec.path)})));
   const IDS = new Set(CATALOG.map(spec => spec.id));
   const LEVELS = new Set(["not_controllable", "controlled_by_other_extensions", "controllable_by_this_extension", "controlled_by_this_extension"]);
   const IP_VALUES = new Set(["default", "default_public_and_private_interfaces", "default_public_interface_only", "disable_non_proxied_udp"]);
@@ -77,7 +77,7 @@
       const selected = new Set(state.selected), rows = [];
       for (const spec of CATALOG) {
         const wanted = selected.has(spec.id);
-        const row = {id: spec.id, selected: wanted, target: spec.value, supported: false, value: null,
+        const row = {id: spec.id, lifecycle: spec.lifecycle, selected: wanted, target: spec.value, supported: false, value: null,
           levelOfControl: null, effective: false, owned: false, state: permitted ? "unavailable" : "permission-required", error: ""};
         const setting = permitted && settingFor(C, spec);
         if (setting) {
@@ -103,9 +103,12 @@
       const needsRelease = rows.some(row => !row.selected && (row.owned || row.state === "release-pending"));
       const unreadable = rows.some(row => row.state === "unknown");
       const complete = permitted && !configError && !permissionError && !unreadable && !needsRelease && rows.filter(row => row.selected).every(row => row.effective);
+      const count = lifecycle => ({selected: rows.filter(row => row.lifecycle === lifecycle && row.selected).length,
+        confirmed: rows.filter(row => row.lifecycle === lifecycle && row.selected && row.effective).length});
       return {schema: 1, permission: permitted, scope: SCOPE, saved, revision: state.revision, selected: [...state.selected],
         state: configError || permissionError || unreadable ? "degraded" : !permitted && saved ? "permission-required" : !state.selected.length && !needsRelease ? "inactive" : complete ? "applied" : "degraded",
-        complete, error: configError || permissionError, rows};
+        complete, evidence: "chrome-setting-readback", behaviorVerified: false,
+        counts: {active: count("active"), legacy: count("legacy")}, error: configError || permissionError, rows};
     }
     async function reconcileNow() {
       await load();

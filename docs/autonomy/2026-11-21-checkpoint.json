@@ -3,32 +3,34 @@
   "program": "2026-11-21-program.md",
   "window_end_utc": "2026-11-22T12:27:00Z",
   "baseline_commit": "06e75c7c5927b373efae93db3ee57a8b3282b830",
-  "status": "active",
-  "active_work": {
-    "owner": "initial interactive session",
-    "lease_until_utc": "2026-11-22T05:20:00Z",
-    "planned_branch": "codex/privacy-0.11",
-    "areas": [
-      "controlled collector/proxy/browser lab",
-      "feed-change protection",
-      "DNR compiler capacity",
-      "browser privacy and GPC correctness"
-    ]
-  },
+  "status": "between-scheduled-passes",
+  "active_work": null,
   "completed": [
     {
       "kind": "baseline",
-      "detail": "Fresh remote main verified at 0.10.0; working checkout initially clean. Prior 0.10 qualification is retained but has not yet been rerun for new edits."
+      "detail": "Frozen 0.10 reproduced:325 Python and324 JavaScript tests, zero failures/skips."
+    },
+    {
+      "kind": "implementation",
+      "version": "0.11.0",
+      "qualification": "docs/validation-0.11.json",
+      "detail": "Feed quarantine/review/rollback, bounded compiler optimization, optional Client Hints/GPC correctness, real proxy/collector and optional native runner implemented and independently reviewed. This checkpoint is published with the reviewed source; repository history is authoritative for merge status."
+    },
+    {
+      "kind": "qualification",
+      "detail": "361 Python and377 JavaScript tests pass. Complete default941/941 and optimized830/830 RE2 audits pass. Same frozen protocol outcomes; new escape reduction0. Real four-identity collector retains aggregate4/4 linkability through opaque bodies."
     },
     {
       "kind": "scheduling",
-      "detail": "Eight hourly continuation passes requested, bounded by the program deadline. Future execution capabilities remain subject to available environment/tools."
+      "detail": "Eight hourly passes bounded by2026-11-22T12:27:00Z; future environment/tool availability remains a dependency."
     }
   ],
   "next_actions": [
-    "Complete implementation designs and source validation for the four initial workstreams.",
-    "Land bounded tested changes and replace this initial checkpoint with exact results.",
-    "Run real Chrome only in a separately authorized supported qualification environment; the denied initial environment must not be bypassed."
+    "Fetch fresh main and inspect this qualification before changing source; do not duplicate completed 0.11 work.",
+    "Prioritize bounded SDK/source-drift experiments, effect-based feed impact review and independent lifecycle cases with actual collector controls. Preserve existing full-action authority and residual observations.",
+    "Extend channel-specific byte attribution for first-party collectors before making first-party zero-byte claims. Keep all-channel opaque residual mandatory.",
+    "Native Chrome may run only on a separately permitted supported target. Do not retry or bypass the initial environment restriction; source-only checks remain distinct.",
+    "Use isolated branches if another pass holds a live lease. Test and merge bounded verified changes, update checkpoint, and stop new work at the program deadline."
   ],
   "not_covered": [
     "native Chromium in the initial environment",

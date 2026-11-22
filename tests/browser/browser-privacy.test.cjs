@@ -143,3 +143,23 @@ test("concurrent apply and release retain order and cannot resurrect stale choic
   unblock(); await applying; const final = await releasing;
   assert.equal(final.state, "inactive"); assert.equal(fake.controls.get("webrtc").own, undefined); assert.deepEqual(fake.data[privacy.KEY].selected, []);
 });
+
+test("retired advertising preferences remain supported and releasable without counting as current protections", async () => {
+  const legacy = ["topics", "ad-auctions", "ad-measurement"];
+  for (const spec of privacy.CATALOG) assert.equal(spec.recommended, !legacy.includes(spec.id));
+  const fake = browser({state: {schema: 1, revision: 8, selected: [...legacy, "webrtc"]}});
+  const controller = privacy.createController(fake.C);
+  const receipt = await controller.ready;
+  assert.equal(receipt.complete, true);
+  assert.deepEqual(receipt.selected, [...legacy, "webrtc"].sort());
+  assert.deepEqual(receipt.counts, {active: {selected: 1, confirmed: 1}, legacy: {selected: 3, confirmed: 3}});
+  assert.equal(receipt.evidence, "chrome-setting-readback"); assert.equal(receipt.behaviorVerified, false);
+  for (const id of legacy) assert.equal(fake.controls.get(id).own, false, "previously authorized intent is retained");
+  await controller.release();
+  for (const id of legacy) assert.equal(fake.controls.get(id).own, undefined);
+});
+
+test("browser privacy catalog has no write authority over DNT or fingerprint/device APIs", () => {
+  assert.equal(privacy.CATALOG.some(spec => /doNotTrack|sensor|camera|microphone|userAgent|clientHints/i.test(spec.path.join("."))), false);
+  assert.throws(() => privacy.validateSelection(["doNotTrackEnabled"]), /listed browser privacy/);
+});

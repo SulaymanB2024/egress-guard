@@ -1,0 +1,411 @@
+{
+  "arms": {
+    "baseline": {
+      "all_observed_channels_linkability": {
+        "attacker": "any-exact-observed-synthetic-token",
+        "ceiling_met_on_this_cohort": true,
+        "channel": "all",
+        "empirical_false_match_ceiling": 0.01,
+        "false_match_rate": 0.0,
+        "false_matches": 0,
+        "negative_pairs": 12,
+        "positive_pairs": 4,
+        "scope": "Synthetic exact-identifier channel only; finite cohort, no confidence or population linkability claim.",
+        "subjects": 4,
+        "threshold": 1,
+        "threshold_chosen_from_ground_truth": false,
+        "true_match_rate": 1.0,
+        "true_matches": 4,
+        "visits_without_observed_identifier": 0
+      },
+      "attempts": [
+        {
+          "case": "third-party",
+          "collector_application_bytes": 173,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 170,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 156,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 173,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 170,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 156,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 173,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 170,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 156,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 173,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 170,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 156,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 173,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 165,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 151,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 173,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 165,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 151,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 173,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 165,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 151,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 173,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 165,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 151,
+          "expected": "delivered",
+          "status": "PASS"
+        }
+      ],
+      "collector_application_bytes": 3952,
+      "origin_certificate_checked_on_each_completed_request": true,
+      "overflow": false,
+      "positive_identifier_controls_verified": true,
+      "received_events": 24,
+      "status": "PASS",
+      "third_party_linkability": {
+        "attacker": "any-exact-observed-synthetic-token",
+        "ceiling_met_on_this_cohort": true,
+        "channel": "third-party",
+        "empirical_false_match_ceiling": 0.01,
+        "false_match_rate": 0.0,
+        "false_matches": 0,
+        "negative_pairs": 12,
+        "positive_pairs": 4,
+        "scope": "Synthetic exact-identifier channel only; finite cohort, no confidence or population linkability claim.",
+        "subjects": 4,
+        "threshold": 1,
+        "threshold_chosen_from_ground_truth": false,
+        "true_match_rate": 1.0,
+        "true_matches": 4,
+        "visits_without_observed_identifier": 0
+      },
+      "unexpected_handler_errors": 0
+    },
+    "protected": {
+      "all_observed_channels_linkability": {
+        "attacker": "any-exact-observed-synthetic-token",
+        "ceiling_met_on_this_cohort": true,
+        "channel": "all",
+        "empirical_false_match_ceiling": 0.01,
+        "false_match_rate": 0.0,
+        "false_matches": 0,
+        "negative_pairs": 12,
+        "positive_pairs": 4,
+        "scope": "Synthetic exact-identifier channel only; finite cohort, no confidence or population linkability claim.",
+        "subjects": 4,
+        "threshold": 1,
+        "threshold_chosen_from_ground_truth": false,
+        "true_match_rate": 1.0,
+        "true_matches": 4,
+        "visits_without_observed_identifier": 0
+      },
+      "attempts": [
+        {
+          "case": "third-party",
+          "collector_application_bytes": 0,
+          "expected": "blocked",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 170,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 156,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 0,
+          "expected": "blocked",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 170,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 156,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 0,
+          "expected": "blocked",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 170,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 156,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 0,
+          "expected": "blocked",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 170,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 156,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 0,
+          "expected": "blocked",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 165,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 151,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 0,
+          "expected": "blocked",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 165,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 151,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 0,
+          "expected": "blocked",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 165,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 151,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "collector_application_bytes": 0,
+          "expected": "blocked",
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "collector_application_bytes": 165,
+          "expected": "delivered",
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "collector_application_bytes": 151,
+          "expected": "delivered",
+          "status": "PASS"
+        }
+      ],
+      "collector_application_bytes": 2568,
+      "origin_certificate_checked_on_each_completed_request": true,
+      "overflow": false,
+      "positive_identifier_controls_verified": true,
+      "received_events": 16,
+      "status": "PASS",
+      "third_party_linkability": {
+        "attacker": "any-exact-observed-synthetic-token",
+        "ceiling_met_on_this_cohort": true,
+        "channel": "third-party",
+        "empirical_false_match_ceiling": 0.01,
+        "false_match_rate": 0.0,
+        "false_matches": 0,
+        "negative_pairs": 12,
+        "positive_pairs": 4,
+        "scope": "Synthetic exact-identifier channel only; finite cohort, no confidence or population linkability claim.",
+        "subjects": 4,
+        "threshold": 1,
+        "threshold_chosen_from_ground_truth": false,
+        "true_match_rate": 0.0,
+        "true_matches": 0,
+        "visits_without_observed_identifier": 8
+      },
+      "unexpected_handler_errors": 0
+    }
+  },
+  "not_covered": [
+    "Native browser/extension execution",
+    "GA4 or other first-party browser protocol enforcement",
+    "Browser high-entropy hints or GPC",
+    "OS-wide routing",
+    "Population anonymity or fingerprint linkability"
+  ],
+  "registrable_sites": [
+    "publisher.test",
+    "shop.test"
+  ],
+  "residual": "Opaque admitted first-party bodies still deliver the stable identifier and keep aggregate exact-token linkability at 1.0.",
+  "runtime": {
+    "mitmproxy": "12.3.1",
+    "platform": "linux",
+    "python": "3.12.14"
+  },
+  "schema": 1,
+  "scope": "Real Python clients, pinned proxy and controlled collectors; fixture and proxy-boundary evidence only.",
+  "source_sha256": {
+    "scripts/qualify-collector-lab.py": "2a3b8bcf4777c37c3af2f1c9e10668bc6e63af84ebf4c51b1f4e5c90109961f2",
+    "src/egress_guard/addon.py": "109e41db76e67d2337f5f234cc5ba69672405e3e0452efb843cb852c9b237d40",
+    "src/egress_guard/feeds.py": "48e438e3c169e25a5374e2a58a92faa9ce35e2e303a118e69ceea544367fcb2a",
+    "src/egress_guard/policy.py": "d8e3f76dcfa686e937fa2f93533a1bc0d754815ed343997b00417c52e6879c8d",
+    "src/egress_guard/transport_policy.py": "9a9f330edf86d98b27448884457f6992049da9b2397d19e2c08166fdf64ac13c",
+    "tests/privacy_lab.py": "09603b2ce8d72090ca8934f972a5db8ec4d52dc843ac595b4e198100f1ad4ccf"
+  },
+  "status": "PASS",
+  "synthetic_subjects": 4
+}
