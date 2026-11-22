@@ -16,7 +16,7 @@ const fixture = JSON.parse(read("tests/browser/fixtures/publisher/rules.json"));
 const ID = dnr.extensionIdFromHex(crypto.createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex"));
 const EXT = `chrome-extension://${ID}/`;
 const START = Date.UTC(2026, 10, 20, 12, 0, 0);
-const WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/browser-privacy.js", "background-chrome.js"];
+const WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/browser-privacy.js", "core/privacy-hardening.js", "background-chrome.js"];
 const event = () => { const fns = []; return {addListener: (fn) => fns.push(fn), fns, fire: (...a) => Promise.all(fns.map((f) => f(...a)))}; };
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setImmediate); };
 
@@ -1224,4 +1224,153 @@ test("Isolation refuses unrepresentable addresses and never attests a parent mod
   const tenant = await w.popup({type: "popup-state", tabId: 1, tabUrl: "https://alice.s3.amazonaws.com/"});
   assert.equal(tenant.mode, "standard");
   assert.equal(tenant.isolation, null, "independent tenant is not the parent's site");
+});
+
+// ---- opt-in Client Hints: same authoritative dynamic-rule owner -----------------
+const hardening = require("../../browser/core/privacy-hardening.js");
+const privacyPage = (w, operation, extra = {}) => w.send({type: `browser-privacy-hardening-${operation}`, ...extra}, {url: `${EXT}privacy.html`, frameId: 0});
+const hintRules = w => w.dynamic().filter(rule => hardening.ownsRuleId(rule.id));
+
+test("Client Hints first-use status/retry is read-only, default off and does not claim browser behavior", async () => {
+  const w = await worker({stored: null});
+  const updates = w.dynamicUpdates.length;
+  for (const operation of ["status", "retry"]) {
+    const state = await privacyPage(w, operation);
+    assert.equal(state.enabled, false); assert.equal(state.saved, false);
+    assert.equal(state.state, "inactive"); assert.equal(state.rulesConfirmed, true);
+    assert.equal(state.installed, false); assert.equal(state.behaviorVerified, false);
+    assert.equal(state.experimental, true); assert.equal(state.evidence, "installed-rules-only");
+    assert.equal(state.documentPolicy, "only-when-permissions-policy-is-absent");
+    assert.equal(state.workerJavaScript, "not-qualified");
+  }
+  assert.equal(w.local[hardening.KEY], undefined);
+  assert.equal(w.dynamicUpdates.length, updates);
+  assert.deepEqual(hintRules(w), []);
+});
+
+test("Client Hints apply saves fixed intent before installation; normal policy reconciliation retains it", async () => {
+  const w = await worker({stored: null});
+  const update = w.chrome.declarativeNetRequest.updateDynamicRules;
+  w.chrome.declarativeNetRequest.updateDynamicRules = async request => {
+    if (request.addRules.some(rule => hardening.ownsRuleId(rule.id))) assert.equal(w.local[hardening.KEY].enabled, true);
+    return update(request);
+  };
+  const result = await privacyPage(w, "apply", {enabled: true});
+  assert.equal(result.state, "installed"); assert.equal(result.installed, true); assert.equal(result.rulesConfirmed, true);
+  assert.equal(result.expectedRuleCount, 2); assert.equal(result.verifiedRuleCount, 2);
+  assert.equal(result.appliedRevision, result.revision);
+  assert.deepEqual(hintRules(w), hardening.compile({enabled: true}));
+  assert.equal((await w.popup({type: "set-mode", tabUrl: "https://publisher.example/", mode: "relaxed"})).ok, true);
+  assert.deepEqual(hintRules(w), hardening.compile({enabled: true}), "Relaxed is not an implicit release of the profile control");
+  const restarted = await worker(restartOptions(w));
+  assert.equal((await privacyPage(restarted, "status")).state, "installed");
+});
+
+test("Client Hints refuses foreign/framed messages, unknown fields and non-Boolean choices without saving", async () => {
+  const w = await worker({stored: null});
+  const message = {type: "browser-privacy-hardening-apply", enabled: true};
+  for (const sender of [
+    {url: `${EXT}popup.html`, frameId: 0}, {url: `${EXT}privacy.html`, frameId: 1},
+    {url: `${EXT}privacy.html?spoof`, frameId: 0}, {url: "https://publisher.example/", frameId: 0, tab: {id: 1}},
+    {id: "foreign", url: `${EXT}privacy.html`, frameId: 0},
+  ]) assert.match((await w.send(message, sender)).error, /only from their settings page/);
+  for (const enabled of [undefined, null, "true", 1, [], {}]) assert.match((await privacyPage(w, "apply", {enabled})).error, /explicitly/);
+  assert.match((await privacyPage(w, "apply", {enabled: true, priority: 999})).error, /fixed control/);
+  assert.match((await privacyPage(w, "apply", {enabled: true, headers: ["cookie"]})).error, /fixed control/);
+  assert.match((await privacyPage(w, "status", {enabled: true})).error, /fixed control/);
+  assert.match((await privacyPage(w, "invented")).error, /Unknown/);
+  assert.equal(w.local[hardening.KEY], undefined); assert.deepEqual(hintRules(w), []);
+});
+
+test("Client Hints rejected persistence cannot authorize a DNR mutation", async () => {
+  const w = await worker({stored: null}); const updates = w.dynamicUpdates.length;
+  w.faults.localWrite = patch => Object.hasOwn(patch, hardening.KEY);
+  assert.match((await privacyPage(w, "apply", {enabled: true})).error, /localWrite/);
+  assert.equal(w.local[hardening.KEY], undefined);
+  assert.equal(w.dynamicUpdates.length, updates); assert.deepEqual(hintRules(w), []);
+  assert.equal((await privacyPage(w, "status")).enabled, false);
+});
+
+test("Client Hints failed rule install remains pending and can recover without inventing behavior proof", async () => {
+  const w = await worker({stored: null});
+  w.faults.dynamicUpdate = 1;
+  const result = await privacyPage(w, "apply", {enabled: true});
+  assert.equal(result.enabled, true); assert.equal(result.saved, true);
+  assert.equal(result.state, "pending"); assert.equal(result.rulesConfirmed, false); assert.equal(result.installed, false);
+  assert.equal(result.appliedRevision, null); assert.match(result.error, /dynamicUpdate/);
+  const retry = await privacyPage(w, "retry");
+  assert.equal(retry.state, "installed"); assert.equal(retry.rulesConfirmed, true);
+  assert.equal(retry.behaviorVerified, false);
+});
+
+test("Client Hints rejects quota exhaustion and partial or altered readback", async () => {
+  const w = await worker({stored: null});
+  w.chrome.declarativeNetRequest.MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES = 1;
+  assert.equal((await privacyPage(w, "apply", {enabled: true})).state, "pending");
+  assert.deepEqual(hintRules(w), []);
+  w.chrome.declarativeNetRequest.MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES = 5000;
+  const originalUpdate = w.chrome.declarativeNetRequest.updateDynamicRules;
+  w.chrome.declarativeNetRequest.updateDynamicRules = async request => originalUpdate({...request, addRules: request.addRules.filter(rule => rule.id !== hardening.FIRST_ID + 1)});
+  const partial = await privacyPage(w, "retry");
+  assert.equal(partial.rulesConfirmed, false); assert.equal(partial.installed, false); assert.equal(partial.verifiedRuleCount, 1);
+  assert.equal(partial.state, "pending");
+  w.chrome.declarativeNetRequest.updateDynamicRules = originalUpdate;
+  assert.equal((await privacyPage(w, "retry")).state, "installed");
+  const originalGet = w.chrome.declarativeNetRequest.getDynamicRules;
+  w.chrome.declarativeNetRequest.getDynamicRules = async () => (await originalGet()).map(rule => rule.id === hardening.FIRST_ID ? {...rule, priority: 1} : rule);
+  const altered = await privacyPage(w, "status");
+  assert.equal(altered.rulesConfirmed, false); assert.equal(altered.installed, false); assert.equal(altered.verifiedRuleCount, 1);
+});
+
+test("Client Hints unreadable DNR state is unknown, never an installed receipt", async () => {
+  const w = await worker({stored: null}); await privacyPage(w, "apply", {enabled: true});
+  w.faults.dynamicRead = true;
+  const result = await privacyPage(w, "status");
+  assert.equal(result.state, "degraded"); assert.equal(result.installed, null);
+  assert.equal(result.rulesConfirmed, false); assert.equal(result.observedRuleCount, null); assert.equal(result.appliedRevision, null);
+  w.faults.dynamicRead = false;
+  assert.equal((await privacyPage(w, "status")).state, "installed");
+});
+
+test("Client Hints release preserves other policy and a failed release remains visible across restart", async () => {
+  const w = await worker({stored: null});
+  assert.equal((await w.popup({type: "set-mode", tabUrl: "https://publisher.example/", mode: "isolated"})).ok, true);
+  await privacyPage(w, "apply", {enabled: true});
+  const other = JSON.stringify(w.dynamic().filter(rule => !hardening.ownsRuleId(rule.id)));
+  w.faults.dynamicUpdate = true;
+  const failed = await privacyPage(w, "release");
+  assert.equal(failed.enabled, false); assert.equal(failed.state, "release-pending"); assert.equal(failed.installed, true);
+  assert.equal(failed.rulesConfirmed, false);
+  const restarted = await worker(restartOptions(w, {faults: {dynamicUpdate: true}}));
+  assert.equal((await privacyPage(restarted, "status")).state, "release-pending");
+  restarted.faults.dynamicUpdate = false;
+  const released = await privacyPage(restarted, "retry");
+  assert.equal(released.state, "inactive"); assert.equal(released.rulesConfirmed, true); assert.deepEqual(hintRules(restarted), []);
+  assert.equal(JSON.stringify(restarted.dynamic()), other);
+});
+
+test("corrupt Client Hints intent preserves installed restrictions until explicit recovery", async () => {
+  const first = await worker({stored: null}); await privacyPage(first, "apply", {enabled: true});
+  const bad = await worker(restartOptions(first, {extraLocal: {...first.local, [hardening.KEY]: {schema: 1, revision: 2, enabled: "yes"}}}));
+  assert.deepEqual(hintRules(bad), hardening.compile({enabled: true}));
+  const state = await privacyPage(bad, "status");
+  assert.equal(state.state, "degraded"); assert.equal(state.rulesConfirmed, false); assert.match(state.error, /invalid/);
+  assert.equal((await privacyPage(bad, "release")).state, "inactive"); assert.deepEqual(hintRules(bad), []);
+});
+
+test("concurrent Client Hints apply/release shares the policy queue and cannot resurrect the older choice", async () => {
+  const w = await worker({stored: null});
+  const update = w.chrome.declarativeNetRequest.updateDynamicRules;
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  w.chrome.declarativeNetRequest.updateDynamicRules = async request => {
+    if (request.addRules.some(rule => hardening.ownsRuleId(rule.id))) await gate;
+    return update(request);
+  };
+  const enabling = privacyPage(w, "apply", {enabled: true});
+  await settle();
+  const releasing = privacyPage(w, "release");
+  assert.equal(w.local[hardening.KEY].enabled, true);
+  release(); await enabling;
+  assert.equal((await releasing).state, "inactive");
+  assert.equal(w.local[hardening.KEY].enabled, false); assert.deepEqual(hintRules(w), []);
 });

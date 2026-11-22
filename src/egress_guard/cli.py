@@ -10,7 +10,7 @@ import sys
 
 from . import __version__
 from .config import config_path, initialize, load_config
-from .feeds import feed_status, update_feeds
+from .feeds import approve_feed, discard_feed, feed_status, review_feeds, rollback_feed, update_feeds
 from .health import proxy_health
 from .paths import data_dir, private_dir
 from .policy import Policy
@@ -68,6 +68,19 @@ def main(argv=None) -> int:
         commands.add_parser(name, help=text)
     lookup = commands.add_parser("check", help="Explain the decision for a domain")
     lookup.add_argument("host")
+    review = commands.add_parser("feed-review", help="Inspect quarantined updates and the previous verified feed generation")
+    review.add_argument("feed_id", nargs="?", help="Known feed ID; defaults to all enabled feeds")
+    approve = commands.add_parser("feed-approve", help="Publish one reviewed update against its exact installed base")
+    approve.add_argument("feed_id")
+    approve.add_argument("--candidate", required=True, help="Exact candidate_sha256 from feed-review")
+    approve.add_argument("--base", required=True, help="Exact base_sha256, or none for a missing initial cache")
+    discard = commands.add_parser("feed-discard", help="Discard one exact quarantined candidate without changing active policy")
+    discard.add_argument("feed_id")
+    discard.add_argument("--candidate", required=True, help="Exact candidate_sha256 from feed-review")
+    rollback = commands.add_parser("feed-rollback", help="Restore the exact previous feed and hold updates for review")
+    rollback.add_argument("feed_id")
+    rollback.add_argument("--current", required=True, help="Exact current_sha256 from feed-review")
+    rollback.add_argument("--previous", required=True, help="Exact previous_sha256 from feed-review")
     aliases = commands.add_parser("cname-check", help="Inspect DNS aliases without changing live filtering")
     aliases.add_argument("host")
     aliases.add_argument("--answers-file", help="Read an offline JSON observation fixture instead of making DNS queries")
@@ -104,6 +117,19 @@ def main(argv=None) -> int:
             result = update_feeds(data_dir(), load_config())
             print(json.dumps(result, indent=2))
             return 0 if result.get("ok") else 1
+        elif args.command in {"feed-review", "feed-approve", "feed-discard", "feed-rollback"}:
+            state, config = data_dir(), load_config()
+            if args.command == "feed-review":
+                result = review_feeds(state, config, args.feed_id)
+            elif args.command == "feed-approve":
+                result = approve_feed(state, config, args.feed_id, candidate_sha256=args.candidate,
+                                      base_sha256=None if args.base == "none" else args.base)
+            elif args.command == "feed-discard":
+                result = discard_feed(state, config, args.feed_id, candidate_sha256=args.candidate)
+            else:
+                result = rollback_feed(state, config, args.feed_id, current_sha256=args.current,
+                                       previous_sha256=args.previous)
+            print(json.dumps(result, indent=2))
         elif args.command == "run":
             run_proxy()
         elif args.command == "check":

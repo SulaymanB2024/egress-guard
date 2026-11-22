@@ -26,6 +26,10 @@ Use [GitHub private vulnerability reporting](https://github.com/SulaymanB2024/eg
 - Native messaging accepts only exact-origin, bounded read-only receipt requests. It must not expose history, keys or paths, initialize missing identity state, or imply that a browser/profile is routed through the proxy.
 - Fresh configurations keep no domain history. Applied logging status requires writer acknowledgment; changing history mode must discard outstanding old-generation records.
 - Feed downloads must have fixed trusted origins, HTTPS verification, response limits and validation before replacement. A failed update must preserve the last good cache.
+- Quarantined feed approval binds the fixed source, exact candidate and exact active base. Hard validators remain mandatory. Rollback uses only the stored previous verified generation, retains its original age, and holds automatic replacement until explicit review. Cache publication must not claim live runtime acknowledgment.
+- Optional regex optimization preserves the eligible priority/full-action set and every other condition. Capture-sensitive redirects and repeated header effects stay outside the transformation. Requested optimization requires complete pinned verification of the staged artifact; failures preserve the previously published build.
+- Client Hints restrictions use fixed rules owned by the existing DNR reconciler. Existing document Permissions-Policy headers must not be blindly combined or weakened. Installed-rule receipts must not claim measured native behavior.
+- Collector qualification requires real delivery and extraction controls, complete pair denominators, route evidence and functional controls. Missing identifiers, incomplete observations or one blocked channel must not produce an all-channel privacy claim.
 - Native settings require explicit service selection and administrator authorization. Root must not execute user-writable project code. Restore must not overwrite newer foreign settings.
 - Private state and management credentials must not enter source archives, wheels, screenshots, HTTP logs or public diagnostics.
 

@@ -20,7 +20,7 @@
   const PRIORITY = Object.freeze({easylist: 1, easylistAllow: 2, easyprivacy: 3, easyprivacyAllow: 4, filterImportant: 5, hand: 6,
     mode: 7, embed: 8, params: 9, clean: 10, scanner: 11, scannerPass: 12, embedCookies: 13, relax: 14,
     list: 17, surrogate: 18, userAllow: 20, exception: 21, grantHeaders: 22, isolation: 24, threat: 30, continue: 31,
-    continueHeaders: 32, userBlock: 40, modeHeaders: 45, isolationHeaders: 46, gpc: 50});
+    continueHeaders: 32, userBlock: 40, modeHeaders: 45, isolationHeaders: 46, clientHints: 48, gpc: 50});
   // Each URL filter list's own block / exception pair.
   const FILTER_PRIORITY = Object.freeze({easylist: {block: PRIORITY.easylist, allow: PRIORITY.easylistAllow},
     easyprivacy: {block: PRIORITY.easyprivacy, allow: PRIORITY.easyprivacyAllow}});
@@ -81,7 +81,7 @@
     noscript: {label: "Scripts off for this site"},
     embeds: {label: "Embed held until clicked"},
     user: {label: "Your rules"},
-    params: {quiet: true}, gpc: {quiet: true}, referrer: {quiet: true}, "filter-allow": {quiet: true}, cookies: {quiet: true}, bounce: {quiet: true},
+    params: {quiet: true}, gpc: {quiet: true}, "client-hints": {quiet: true}, referrer: {quiet: true}, "filter-allow": {quiet: true}, cookies: {quiet: true}, bounce: {quiet: true},
   });
   const DEFAULT_CHUNK = 25000;
 

@@ -1,0 +1,96 @@
+{
+  "baseline_observation": {
+    "critical_parent_after": "blocked",
+    "entry_count_after": 4,
+    "entry_count_before": 4,
+    "fixture": "four synthetic tracker entries; minimum counts reduced only for isolated fixture feeds",
+    "initial_tracker": "google-analytics.com",
+    "policy_ready_before_and_after": true,
+    "replacement": "github.com",
+    "tracker_after": "allowed",
+    "update_accepted": true
+  },
+  "baseline_source_commit": "06e75c7c5927b373efae93db3ee57a8b3282b830",
+  "candidate_observation": {
+    "active_snapshot_unchanged": true,
+    "critical_parent_after": "allowed in fixture without another blocking component",
+    "policy_ready_before_and_after": true,
+    "policy_revision_unchanged": true,
+    "same_candidate_quarantined": true,
+    "tracker_after": "blocked"
+  },
+  "focused_runs": [
+    {
+      "command": "PYTHONPATH=src:tests python -B -m unittest -v test_feed_review test_feeds test_configuration test_config_recovery test_policy",
+      "errors": 0,
+      "failures": 0,
+      "note": "Production source was frozen at this run. One additional metadata test was added afterward.",
+      "seconds": 0.913,
+      "skips": 0,
+      "tests": 77
+    },
+    {
+      "command": "PYTHONPATH=src:tests python -B -m unittest -v test_feed_review.FeedReviewTests.test_malformed_review_metadata_cannot_be_approved",
+      "errors": 0,
+      "failures": 0,
+      "seconds": 0.007,
+      "skips": 0,
+      "tests": 1
+    }
+  ],
+  "limits": [
+    "finite catalog tripwires, not comprehensive poisoning detection",
+    "component deltas, not complete global decision differences",
+    "local private-file authority, not same-user malware containment or hardware signing",
+    "cache publication is distinct from authenticated live runtime acknowledgment",
+    "process interruption qualified on Linux; power-loss and native macOS lifecycle not qualified",
+    "rollback preserves original age and holds automatic publication until explicit approval",
+    "browser packaged rules are a separate publication path"
+  ],
+  "live_feeds_downloaded_for_tests": false,
+  "native_browser_or_os_settings_changed": false,
+  "new_guard_tests_in_final_tree": 25,
+  "no_new_dependencies": true,
+  "primary_sources": [
+    "https://theupdateframework.github.io/specification/latest/",
+    "https://developers.google.com/analytics/devguides/collection/protocol/ga4/reference",
+    "https://github.com/hagezi/dns-blocklists/blob/main/README.md"
+  ],
+  "qualified_failures": [
+    "actual child os._exit before active rename",
+    "actual child os._exit after active rename",
+    "candidate write failure",
+    "active write failure",
+    "journal finalization failure",
+    "transient journal read failure",
+    "candidate cleanup and display-only status failure",
+    "conflicting current base before and during preparation",
+    "malformed and duplicate review metadata",
+    "wrong fixed source identity",
+    "non-overridable snapshot, size-loss and publisher-clock validators"
+  ],
+  "schema": 1,
+  "source_files": {
+    "docs/feed-review-0.11.md": {
+      "bytes": 11563,
+      "sha256": "fad002dc8f2c10cdd1c66a446580f7a29eaaaeeb24cefb6f4055e27a6208713d"
+    },
+    "src/egress_guard/cli.py": {
+      "bytes": 12293,
+      "sha256": "141918014b0f1da0b270848d5bf4d4b6575ec401902060b700b8b9612a352278"
+    },
+    "src/egress_guard/feed_review.py": {
+      "bytes": 8984,
+      "sha256": "1ab5fcdf54682d8e7e66d3e63207078527baea6403eb9e3dca29b538f39ee5dc"
+    },
+    "src/egress_guard/feeds.py": {
+      "bytes": 37102,
+      "sha256": "48e438e3c169e25a5374e2a58a92faa9ce35e2e303a118e69ceea544367fcb2a"
+    },
+    "tests/test_feed_review.py": {
+      "bytes": 27530,
+      "sha256": "ab8e9c737a1db8e07376927b9f17c50842b6af9f67f21358238673d2c476c711"
+    }
+  },
+  "status": "passed"
+}

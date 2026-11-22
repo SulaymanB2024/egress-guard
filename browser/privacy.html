@@ -26,13 +26,35 @@
     </div>
   </form>
   <section aria-labelledby="release-heading">
-    <h2 id="release-heading" class="t-title">Return control to Chrome</h2>
+    <h2 id="release-heading" class="t-title">Return profile settings to Chrome</h2>
     <p>Release removes only Egress Guard’s setting overrides. Chrome then uses your current preferences, other extensions and organization policies. It does not write a saved copy of your old settings.</p>
-    <button type="button" class="btn quiet" id="release" disabled>Release all controls</button>
+    <button type="button" class="btn quiet" id="release" disabled>Release profile settings</button>
   </section>
   <p class="t-caption muted">Read-back values are shown per control. A selected checkbox is a request, not proof that Chrome accepted it. Safe Browsing and password-manager settings are outside this feature.</p>
+  <section aria-labelledby="hardening-heading">
+    <h2 id="hardening-heading" class="t-title">Limit high-entropy Client Hints · Experimental</h2>
+    <p>This optional control removes eight detailed User-Agent Client Hints from HTTP(S) requests visible to the extension. It also asks Chrome to restrict the document’s high-entropy JavaScript API when the response has no Permissions-Policy header.</p>
+    <p>Existing Permissions-Policy headers remain untouched. Documents with an existing policy may still expose detailed values to scripts. Worker JavaScript, cached or already-open documents, other extensions and browser-owned traffic have not been qualified. Browser version, operating-system family, IP address and other fingerprinting surfaces remain visible.</p>
+    <form id="hardening-choices" aria-label="Experimental Client Hints choice">
+      <label class="control"><input id="hardening-enabled" type="checkbox" aria-describedby="hardening-status"> Restrict high-entropy Client Hints</label>
+      <p id="hardening-status" role="status" aria-live="polite">Reading installed rules…</p>
+      <p id="hardening-error" class="inline-error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="submit" class="btn" id="hardening-apply" disabled>Apply Client Hints choice</button>
+        <button type="button" class="btn" id="hardening-retry" disabled>Retry saved choice</button>
+        <button type="button" class="btn quiet" id="hardening-refresh">Refresh rules</button>
+        <button type="button" class="btn quiet" id="hardening-release" disabled>Release Client Hints control</button>
+      </div>
+    </form>
+    <p class="t-caption muted">Off initially. No additional permission is requested. Reload a page after changing this choice; releasing it cannot undo a policy already attached to an open document. Installed-rule readback does not prove native browser behavior or that fingerprinting has stopped. Sites that choose downloads or compatibility workarounds from detailed UA data may behave differently.</p>
+  </section>
+  <section aria-labelledby="signals-heading">
+    <h2 id="signals-heading" class="t-title">Privacy signals and boundaries</h2>
+    <p>Egress Guard’s request rules send Sec-GPC: 1. Its document script supplies navigator.globalPrivacyControl only where no property already exists. An existing browser value is preserved; worker JavaScript is outside that script. This is an opt-out signal, not proof that a site honors it. Egress Guard does not change Do Not Track.</p>
+  </section>
 </main>
 <script src="core/browser-privacy.js"></script>
+<script src="core/privacy-hardening.js"></script>
 <script src="privacy.js"></script>
 </body>
 </html>

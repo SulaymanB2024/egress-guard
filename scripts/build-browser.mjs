@@ -8,13 +8,15 @@
 // here: SHA-256 of the body against its header, entry count, hostname syntax and the proxy's minimum
 // size. URL-filter downloads happen only at build time; --offline uses verified caches.
 // The extension itself never downloads filters or executable code.
-// Plain Node, no dependencies. Output is gitignored.
+// Ordinary builds need only Node. --optimize-regex explicitly requires the pinned
+// optional Python RE2 verifier; it never installs one. Output is gitignored.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import {createRequire} from "node:module";
 import {fileURLToPath} from "node:url";
+import {spawnSync} from "node:child_process";
 
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,6 +26,53 @@ const trackingProtocols = require(path.join(SRC, "core/tracking-protocols.js"));
 const abp = require(path.join(ROOT, "scripts/lib/abp-dnr.cjs"));
 const cosmetics = require(path.join(ROOT, "scripts/lib/cosmetic-compiler.cjs"));
 const parameters = require(path.join(ROOT, "scripts/lib/removeparam-compiler.cjs"));
+const regexProof = require(path.join(ROOT, "scripts/lib/regex-optimization-plan.cjs"));
+const REGEX_ENGINE = Object.freeze({name: "google-re2", packageVersion: "1.1.20251105", maxMem: 2048, encoding: "Latin1"});
+const MAX_OPTIMIZER_BYTES = 64 * 1024 * 1024;
+const sha256 = (data) => crypto.createHash("sha256").update(data).digest("hex");
+
+function optimizeRulesets(rulesets, python) {
+  const input = JSON.stringify({schema: 1, python, rulesets});
+  if (Buffer.byteLength(input) > MAX_OPTIMIZER_BYTES) throw new Error("Regex optimization input exceeds its bounded protocol size");
+  const run = spawnSync(process.execPath, [path.join(ROOT, "scripts/optimize-browser-regex.cjs")],
+    {input, encoding: "utf8", maxBuffer: MAX_OPTIMIZER_BYTES, timeout: 60000, windowsHide: true});
+  if (run.error || run.status !== 0) throw new Error("Requested regex optimization could not complete. It requires google-re2==1.1.20251105 in the selected Python interpreter; no optimized build was published.");
+  let result;
+  try { result = JSON.parse(run.stdout); } catch { throw new Error("Regex optimizer returned an incomplete result"); }
+  regexProof.validatePlan(rulesets, result.rulesets, result.plan);
+  const certificate = result.certificate;
+  if (!certificate || certificate.schema !== 1 || certificate.complete !== true || certificate.nativeChrome !== false ||
+      regexProof.canonicalJSON(certificate.engine) !== regexProof.canonicalJSON(REGEX_ENGINE) ||
+      certificate.beforeSha256 !== regexProof.digest(rulesets) || certificate.afterSha256 !== regexProof.digest(result.rulesets) ||
+      certificate.planSha256 !== regexProof.digest(result.plan) || regexProof.digest(certificate.sources) !== regexProof.digest(result.plan.sources) ||
+      certificate.checkedOutputRegexRules !== Object.values(result.rulesets).flat().filter(rule => typeof rule.condition?.regexFilter === "string").length) {
+    throw new Error("Regex optimization certificate does not cover its complete output");
+  }
+  const expectedSources = ["optimize-browser-regex.cjs", "lib/regex-language.cjs", "lib/regex-optimizer.cjs", "lib/regex-optimization-plan.cjs"];
+  if (JSON.stringify(Object.keys(certificate.sources || {}).sort()) !== JSON.stringify([...expectedSources].sort()) ||
+      expectedSources.some(name => certificate.sources[name] !== sha256(fs.readFileSync(path.join(ROOT, "scripts", name))))) {
+    throw new Error("Regex optimization sources changed during the build");
+  }
+  return result;
+}
+
+function auditOptimizedArtifact(chrome, resources, {python, staticRules, regexRules}) {
+  const fileHashes = () => resources.map(resource => ({id: resource.id, sha256: sha256(fs.readFileSync(path.join(chrome, resource.path)))}));
+  const before = fileHashes();
+  const script = path.join(ROOT, "scripts/audit-browser-regex.py");
+  const run = spawnSync(python, [script, chrome], {encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 60000, windowsHide: true});
+  let audit;
+  try { audit = JSON.parse(run.stdout); } catch { throw new Error("Optimized artifact RE2 verification did not complete; no build was published"); }
+  if (run.error || run.status !== 0 || audit.status !== "passed" || audit.complete !== true || audit.native_chrome !== false ||
+      audit.engine !== REGEX_ENGINE.name || audit.package_version !== REGEX_ENGINE.packageVersion || audit.max_mem !== REGEX_ENGINE.maxMem ||
+      audit.encoding !== REGEX_ENGINE.encoding || audit.rulesets_read !== resources.length || audit.rules !== staticRules ||
+      audit.regexes !== regexRules || audit.passed !== regexRules || audit.failed !== 0 || audit.error_count !== 0 ||
+      regexProof.digest(before) !== regexProof.digest(fileHashes())) {
+    throw new Error("Optimized artifact did not pass the complete pinned RE2 audit; no build was published");
+  }
+  return {rulesets: before, manifestSha256: sha256(fs.readFileSync(path.join(chrome, "manifest.json"))),
+    auditorSourceSha256: sha256(fs.readFileSync(script)), audit};
+}
 
 // Mirrors src/egress_guard/feeds.py (tests/browser/build.test.cjs checks they stay in sync).
 const HAGEZI = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/";
@@ -469,8 +518,8 @@ function chromeExtensionId(manifest) {
 const SHARED = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/decide.js", "core/store.js", "core/picker.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/dnr.js", "core/cosmetic-data.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/semantic.js",
   "vendor/PSL-NOTICE.md", "vendor/public_suffix_list.dat", "content.js", "popup.html", "popup.css", "popup.js", "ui.css"];
 const SURROGATE_FILES = [...new Set(dnr.SURROGATES.map((s) => `surrogates/${s.file}`))];
-const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", "core/tracking-protocols.js", "semantic.html", "semantic.css", "semantic.js", "core/local-model.js", "privacy.html", "privacy.css", "privacy.js", "core/browser-privacy.js", ...SURROGATE_FILES];
-const CHROME_WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/cookies.js", "core/dnr.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/browser-privacy.js"];
+const CHROME_ONLY = ["warning.html", "warning.css", "warning.js", "unwrap.html", "unwrap.css", "unwrap.js", "page-gpc.js", "page-guard.js", "offscreen.html", "offscreen.js", "core/cookies.js", "core/tracking-protocols.js", "semantic.html", "semantic.css", "semantic.js", "core/local-model.js", "privacy.html", "privacy.css", "privacy.js", "core/browser-privacy.js", "core/privacy-hardening.js", ...SURROGATE_FILES];
+const CHROME_WORKER = ["core/psl-data.js", "core/hosts.js", "core/selectors.js", "core/rules.js", "core/store.js", "core/links.js", "core/param-data.js", "core/param-policy.js", "core/params.js", "core/cookies.js", "core/privacy-hardening.js", "core/dnr.js", "core/cosmetic-selectors.js", "core/cosmetic.js", "core/browser-privacy.js"];
 export const GUARANTEED_STATIC_RULES = 30000;   // Chrome's GUARANTEED_MINIMUM_STATIC_RULES
 export const MAX_STATIC_REGEX_RULES = 1000;     // Chrome's MAX_NUMBER_OF_REGEX_RULES
 
@@ -603,7 +652,11 @@ export function buildCoverage(lists, filters, compilation = null, cosmeticData =
 }
 
 export function build({out = path.join(ROOT, "dist-browser"), lists = null, filters = null, requireComplete = false,
-  allowParameterQuarantine = [], chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES} = {}) {
+  allowParameterQuarantine = [], chunk = dnr.DEFAULT_CHUNK, maxRulesetBytes = MAX_RULESET_BYTES,
+  optimizeRegex = false, re2Python = "python3"} = {}) {
+  if (typeof optimizeRegex !== "boolean" || typeof re2Python !== "string" || !re2Python || re2Python.length > 4096 || re2Python.includes("\0")) {
+    throw new Error("Regex optimization requires an explicit Boolean option and a bounded Python executable name");
+  }
   if (!Array.isArray(allowParameterQuarantine) || allowParameterQuarantine.length > 128 ||
       allowParameterQuarantine.some(name => typeof name !== "string" || !/^[A-Za-z0-9_.~!$'()*+\[\]:@-]{1,128}$/.test(name))) {
     throw new Error("Parameter-quarantine acknowledgments must be bounded literal parameter names");
@@ -687,8 +740,10 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     // Everything that is not a host list: small rulesets, one per popup category, each one file.
     const unwrapUrl = `chrome-extension://${id}/unwrap.html`;
     const privacy = dnr.compilePrivacy({trackerDomains: compiledFilters.trackerDomains, bounceDomains: filterDomains(filters, "adguard-clickthroughs")});
-    const extra = {params: compiledParams.rules, links: dnr.compileLinks(unwrapUrl), gpc: privacy.gpc, referrer: privacy.referrer,
+    let extra = {params: compiledParams.rules, links: dnr.compileLinks(unwrapUrl), gpc: privacy.gpc, referrer: privacy.referrer,
       beacons: privacy.beacons, cookies: privacy.cookies, bounce: privacy.bounce, surrogates: dnr.compileSurrogates(), ...compiledFilters.rulesets};
+    const optimization = optimizeRegex ? optimizeRulesets(extra, re2Python) : null;
+    if (optimization) extra = optimization.rulesets;
     summary.filters = compiledFilters.stats;
     summary.rulesets = {};
     for (const [rid, rules] of Object.entries(extra)) {
@@ -698,6 +753,7 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     }
     if (resources.length > MAX_ENABLED_RULESETS) throw new Error(`${resources.length} rulesets exceed Chrome's limit of ${MAX_ENABLED_RULESETS} enabled rulesets`);
     chromeManifest.declarative_net_request.rule_resources = resources;
+    fs.writeFileSync(path.join(chrome, "manifest.json"), JSON.stringify(chromeManifest, null, 2) + "\n");
     // Every static rule counts against the guaranteed minimum; a host list is a handful of rules however long it is.
     let staticRules = 0, regexRules = 0;
     for (const r of resources) {
@@ -709,9 +765,22 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     if (regexRules > MAX_STATIC_REGEX_RULES) throw new Error(`${regexRules} regular-expression rules exceed Chrome's limit of ${MAX_STATIC_REGEX_RULES}`);
     summary.staticRules = staticRules;
     summary.regexRules = regexRules;
+    let optimizationPlanBody = "", optimizationCertificateBody = "";
+    summary.regexOptimization = {enabled: false, nativeChrome: false};
+    if (optimization) {
+      optimization.certificate.artifact = auditOptimizedArtifact(chrome, resources, {python: re2Python, staticRules, regexRules});
+      optimizationPlanBody = regexProof.canonicalJSON(optimization.plan);
+      optimizationCertificateBody = regexProof.canonicalJSON(optimization.certificate);
+      fs.writeFileSync(path.join(chrome, "rules/regex-optimization-plan.json"), optimizationPlanBody);
+      fs.writeFileSync(path.join(chrome, "rules/regex-optimization-certificate.json"), optimizationCertificateBody);
+      const saved = Object.values(optimization.plan.rulesets).reduce((sum, entry) => sum + entry.stats.saved, 0);
+      summary.regexOptimization = {enabled: true, nativeChrome: false, complete: true, engine: REGEX_ENGINE,
+        algorithm: optimization.plan.algorithm, saved, beforeRegexRules: regexRules + saved, afterRegexRules: regexRules,
+        planSha256: sha256(optimizationPlanBody), certificateSha256: sha256(optimizationCertificateBody)};
+    }
     const sourceOf = (fid) => filters && filters[fid] ? filters[fid].source : null;
     meta.filters = {label: "URL filters", name: joinNames(FILTER_LISTS.filter((f) => sourceOf(f.id) && f.kind !== "domains").map((f) => f.name)),
-      rules: Object.entries(compiledFilters.rulesets).reduce((n, [, r]) => n + r.length, compiledParams.rules.length), domains: 0,
+      rules: Object.keys(compiledFilters.rulesets).reduce((n, rid) => n + extra[rid].length, extra.params.length), domains: 0,
       sources: FILTER_LISTS.filter((f) => sourceOf(f.id)).map((f) => ({name: f.name, url: f.url, license: f.license.name, version: sourceOf(f.id).version,
         sha256: sourceOf(f.id).sha256 || null, last_modified: sourceOf(f.id).last_modified || null})),
       published_at: null, updated_at: Math.min(...FILTER_LISTS.map((f) => (sourceOf(f.id) || {}).fetched_at || Infinity)) || null};
@@ -725,11 +794,14 @@ export function build({out = path.join(ROOT, "dist-browser"), lists = null, filt
     hash.update(cosmeticBody);
     hash.update(parameterBody);
     hash.update(protocolBody);
+    hash.update(optimizationPlanBody);
+    hash.update(optimizationCertificateBody);
     for (const f of [...SHARED, ...CHROME_ONLY, "background-chrome.js", "manifest.chrome.json"]) hash.update(fs.readFileSync(path.join(SRC, f)));
     const buildId = hash.digest("hex").slice(0, 32);
     fs.writeFileSync(path.join(chrome, "rules", "build.json"), JSON.stringify({build: buildId, built_at: Math.floor(Date.now() / 1000), coverage,
       cosmetics: cosmeticData.stats, parameters: compiledParams.stats,
       tracking_protocols: compiledFilters.protocols.stats,
+      regex_optimization: summary.regexOptimization,
       tracking_protocols_sha256: crypto.createHash("sha256").update(protocolBody).digest("hex"),
       parameter_policy_sha256: crypto.createHash("sha256").update(parameterBody).digest("hex"),
       psl_sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(SRC, "core/psl-data.js"))).digest("hex")}));
@@ -770,13 +842,16 @@ function parseArgs(argv) {
     else if (a === "--allow-small") args.allowSmall = true;
     else if (a === "--allow-missing") args.allowMissing = true;
     else if (a === "--allow-parameter-quarantine") (args.allowParameterQuarantine ||= []).push(next());
+    else if (a === "--optimize-regex") args.optimizeRegex = true;
+    else if (a === "--re2-python") args.re2Python = next();
     else if (a === "--filters") args.filtersDir = path.resolve(next());
     else if (a === "--offline") args.offline = true;
     else if (a === "--no-filters") args.noFilters = true;
     else if (a === "--accept-list-change") (args.acceptChange = args.acceptChange || []).push(next());
-    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing] [--allow-parameter-quarantine NAME] [--filters DIR] [--offline] [--no-filters] [--accept-list-change ID]"); process.exit(0); }
+    else if (a === "-h" || a === "--help") { console.log("usage: node scripts/build-browser.mjs [--feeds DIR] [--tier pro|pro.plus|ultimate] [--threat-tier full|medium] [--out DIR] [--no-lists] [--allow-missing] [--allow-parameter-quarantine NAME] [--filters DIR] [--offline] [--no-filters] [--accept-list-change ID] [--optimize-regex [--re2-python PATH]]"); process.exit(0); }
     else throw new Error(`unknown argument ${a}`);
   }
+  if (args.re2Python && !args.optimizeRegex) throw new Error("--re2-python requires --optimize-regex");
   return args;
 }
 
@@ -802,7 +877,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         {offline: Boolean(args.offline), allowMissing: Boolean(args.allowMissing), acceptChange: args.acceptChange || [], log: (m) => console.warn(`warning: ${m}`)});
     }
     const summary = build({out: args.out, lists, filters, chunk: args.chunk, allowParameterQuarantine: args.allowParameterQuarantine || [],
-      requireComplete: args.lists && !args.noFilters && !args.allowMissing});
+      requireComplete: args.lists && !args.noFilters && !args.allowMissing, optimizeRegex: Boolean(args.optimizeRegex), re2Python: args.re2Python || "python3"});
     const reductions = [...summary.coverage.missing.map(id => "missing " + id), ...summary.coverage.ineffective.map(id => "ineffective " + id),
       ...(summary.coverage.development ? ["development feed-size override"] : []),
       ...(summary.coverage.cosmetics.reduced ? ["cosmetic exception fallback"] : []),
@@ -819,6 +894,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     console.log(`  rulesets: ${Object.entries(summary.rulesets).map(([k, v]) => `${k} ${v}`).join(", ")}`);
     console.log(`  ${summary.staticRules} static rules of ${GUARANTEED_STATIC_RULES} guaranteed, ${summary.regexRules} regex rules of ${MAX_STATIC_REGEX_RULES}`);
+    if (summary.regexOptimization.enabled) console.log(`  regex optimization: ${summary.regexOptimization.saved} slots saved; complete pinned RE2 audit; native Chrome NOT COVERED`);
     console.log(`Firefox: ${path.join(summary.out, "firefox")}`);
   } catch (error) {
     console.error(`build-browser: ${error.message}`);
