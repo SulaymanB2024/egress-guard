@@ -32,14 +32,18 @@
     {
       "kind": "qualification-pass",
       "detail": "This environment cannot fetch a GitHub checkout or run the full installed repo test suite. An isolated Python 3.13.5 mirror of the changed-root algorithm passed 10 targeted cases and 10,000 deterministic differential property checks (5,000 exact-host and 5,000 suffix). Reviewed GitHub patch and matched immutable tree. Real package integration, native browser and downstream deployed state remain NOT COVERED."
+    },
+    {
+      "kind": "implementation-pass",
+      "detail": "Added sampled per-action real receiver-byte attribution to the optional native Chrome/proxy lab: baseline positive controls, zero-byte protected GA4 windows, monotonic per-connection evidence and route conservation, with fail-safe NOT COVERED for asynchronous/shared-origin ambiguity. Standalone Node helper suite: 6 passes, 0 failures; browser contract test authored but not executed as full installed checkout is unavailable. No production enforcement changed.",
+      "evidence": "docs/collector-byte-windows-0.11.md"
     }
   ],
   "next_actions": [
-    "Re-fetch main; run the full Python/JS suite and integration tests on a supported checkout/CI target before treating the informational feed-review change as release-qualified. Do not claim prior 0.11 test numbers validate later modifications.",
-    "Continue source-pinned SDK drift and first-party collector channel attribution with positive controls and actual receiver bytes; retain all-channel linkability residual.",
-    "Explore bounded provider-aware policy diff and deterministic feed risk signals only with measured false-positive/compatibility controls. Preserve manual/threat rules and existing approval authority.",
-    "Do not retry native Chromium in the restricted environment; browser-native tests remain NOT COVERED.",
-    "Use isolated branches, expected-head merges, update checkpoint, and finish work by the fixed window deadline."
+    "Run the complete repository Node/Python suites and optional Chrome lab on a separately permitted checkout before treating the new browser-byte windows as release-qualified. Native Chrome was not launched here.",
+    "Add controlled delayed-send and multiplexed first-party tests; do not credit worker/Service Worker channel byte suppression without dedicated evidence. Preserve observable opaque-first-party all-channel linkability.",
+    "Investigate source-pinned SDK drift with reproducible local collector and functional controls; never contact production collectors or let uncertain detection alter policy.",
+    "Inspect fresh main before merging, keep work isolated and end at the fixed program deadline."
   ],
   "not_covered": [
     "native Chromium in the initial environment",
@@ -48,7 +52,11 @@
     "full website/SDK lifecycles",
     "population-level linkability",
     "full repository regression suite after changed-root inspection",
-    "installed package integration for changed-root inspection"
+    "installed package integration for changed-root inspection",
+    "full installed repository regression suite for sampled-action-window changes",
+    "native Chrome receiver-byte-window experiment",
+    "late asynchronous first-party receiver bytes after an action window",
+    "shared-origin worker/service-worker per-request byte attribution"
   ],
   "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
 }
