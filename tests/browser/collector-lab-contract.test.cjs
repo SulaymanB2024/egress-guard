@@ -132,7 +132,7 @@ test("residual identification requires complete valid pair counts, rates and ind
 
 test("collector errors, overflow or uncorrelated partial bytes invalidate evidence", async () => {
   const {summarizeArm} = await runner;
-  const before = {connections: [], decrypted_origin_application_bytes: 0, transport_disconnects: 0};
+  const before = {connections: [], decrypted_origin_application_bytes: 0, transport_disconnects: 0, handler_errors: 0, overflow: false};
   const base = {connections: [{host: "publisher.test", peer_port: 12345, application_bytes: 4, closed: true, proxy_route_observed: true}], events: [], decrypted_origin_application_bytes: 4, transport_disconnects: 0, overflow: false, handler_errors: 0};
   for (const change of [{handler_errors: 1}, {overflow: true}, {decrypted_origin_application_bytes: -1}, {connections: [{...base.connections[0], proxy_route_observed: false}]}]) assert.throws(() => summarizeArm({...base, ...change}, before, {}, []));
   const summary = summarizeArm(base, before, {}, []);
@@ -144,7 +144,7 @@ test("collector errors, overflow or uncorrelated partial bytes invalidate eviden
 test("reused TCP source port remains a new metered connection; byte sizes are not invented wire totals", async () => {
   const {summarizeArm} = await runner;
   const row = {host: "tracker.test", peer_port: 12345, application_bytes: 100, closed: true, proxy_route_observed: true};
-  const before = {connections: [row], decrypted_origin_application_bytes: 100, transport_disconnects: 0};
+  const before = {connections: [row], decrypted_origin_application_bytes: 100, transport_disconnects: 0, handler_errors: 0, overflow: false};
   const after = {connections: [row, {...row, application_bytes: 3}], decrypted_origin_application_bytes: 103, transport_disconnects: 0, events: [], overflow: false, handler_errors: 0};
   const summary = summarizeArm(after, before, {}, []);
   assert.equal(summary.connections, 1);
@@ -190,4 +190,43 @@ test("sampled first-party zero-byte credit requires a positive baseline and all 
     totalTargetOriginApplicationBytes: 0};
   pair.baseline.channels.ga4.actionWindows.totalTargetOriginApplicationBytes = 0;
   assert.equal(find().status, "NOT COVERED");
+});
+
+test("tracker bytes on a preexisting routed TLS connection cannot be credited as zero", async () => {
+  const {summarizeArm, assessDelivery, CHANNELS, EXPECTED_BLOCKED} = await runner;
+  const row = {host: "tracker.test", peer_port: 29100, application_bytes: 21, closed: true, proxy_route_observed: true};
+  const before = {connections: [row], decrypted_origin_application_bytes: 21,
+    transport_disconnects: 0, handler_errors: 0, overflow: false};
+  const after = {...before, connections: [{...row, application_bytes: 28}],
+    decrypted_origin_application_bytes: 28, events: []};
+  const summary = summarizeArm(after, before, {}, []);
+  assert.equal(summary.connections, 0, "No new TCP connection was opened");
+  assert.equal(summary.rawApplicationBytesDelta, 7);
+  assert.equal(summary.trackerHostApplicationBytes, 7, "Existing tunnel traffic must be counted");
+  const pair = arms(CHANNELS, EXPECTED_BLOCKED);
+  pair.protectedArm.trackerHostApplicationBytes = summary.trackerHostApplicationBytes;
+  assert.equal(assessDelivery(pair.baseline, pair.protectedArm, 8)
+    .find(check => check.name === "tracker host received zero application bytes").status, "FAIL");
+
+  const open = {...after, connections: [{...row, application_bytes: 28, closed: false}]};
+  assert.equal(summarizeArm(open, before, {}, []).connectionsClosed, false);
+  const unrouted = {...after, connections: [{...row, application_bytes: 28, proxy_route_observed: false}]};
+  assert.throws(() => summarizeArm(unrouted, before, {}, []), /Unrouted/);
+  const rewound = {...after, connections: [{...row, application_bytes: 18}],
+    decrypted_origin_application_bytes: 18};
+  assert.throws(() => summarizeArm(rewound, before, {}, []));
+});
+
+test("all-arm tracker-byte deltas include both old and newly opened same-port connections", async () => {
+  const {summarizeArm} = await runner;
+  const initial = {host: "tracker.test", peer_port: 35000, application_bytes: 100,
+    closed: true, proxy_route_observed: true};
+  const before = {connections: [initial], decrypted_origin_application_bytes: 100,
+    transport_disconnects: 0, handler_errors: 0, overflow: false};
+  const after = {...before, connections: [{...initial, application_bytes: 106},
+    {...initial, application_bytes: 9}], decrypted_origin_application_bytes: 115, events: []};
+  const summary = summarizeArm(after, before, {}, []);
+  assert.equal(summary.connections, 1);
+  assert.equal(summary.trackerHostApplicationBytes, 15);
+  assert.equal(summary.rawApplicationBytesDelta, 15);
 });
