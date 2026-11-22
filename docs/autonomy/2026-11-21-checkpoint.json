@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "program": "2026-11-21-program.md",
+  "window_end_utc": "2026-11-22T12:27:00Z",
+  "baseline_commit": "06e75c7c5927b373efae93db3ee57a8b3282b830",
+  "status": "active",
+  "active_work": {
+    "owner": "initial interactive session",
+    "lease_until_utc": "2026-11-22T05:20:00Z",
+    "planned_branch": "codex/privacy-0.11",
+    "areas": [
+      "controlled collector/proxy/browser lab",
+      "feed-change protection",
+      "DNR compiler capacity",
+      "browser privacy and GPC correctness"
+    ]
+  },
+  "completed": [
+    {
+      "kind": "baseline",
+      "detail": "Fresh remote main verified at 0.10.0; working checkout initially clean. Prior 0.10 qualification is retained but has not yet been rerun for new edits."
+    },
+    {
+      "kind": "scheduling",
+      "detail": "Eight hourly continuation passes requested, bounded by the program deadline. Future execution capabilities remain subject to available environment/tools."
+    }
+  ],
+  "next_actions": [
+    "Complete implementation designs and source validation for the four initial workstreams.",
+    "Land bounded tested changes and replace this initial checkpoint with exact results.",
+    "Run real Chrome only in a separately authorized supported qualification environment; the denied initial environment must not be bypassed."
+  ],
+  "not_covered": [
+    "native Chromium in the initial environment",
+    "installed macOS service/routing/native messaging",
+    "public-IP/WebRTC routing",
+    "full website/SDK lifecycles",
+    "population-level linkability"
+  ],
+  "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
+}
