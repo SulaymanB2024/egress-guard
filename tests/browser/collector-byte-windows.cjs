@@ -57,4 +57,42 @@ function assessFirstPartyActionWindows(baseline, protectedArm, expected) {
     detail: {baseline, protected: protectedArm, expected,
       scope: "Only sampled controlled origin intervals; shared-origin or delayed bytes are not individually attributable."}};
 }
-module.exports = {measureActionWindow, summarizeActionWindows, assessFirstPartyActionWindows};
+
+// A controlled deferred request is scheduled after the page action returns. Its
+// completion marker is observed before taking the final bounded receiver snapshot.
+// The marker proves only that this specific synthetic action completed, not that
+// arbitrary timers or requests from a real SDK have stopped forever.
+function measureDeferredFirstParty(before, scheduled, settled, host) {
+  const immediate = measureActionWindow(before, scheduled, host);
+  const delayed = measureActionWindow(scheduled, settled, host);
+  const total = measureActionWindow(before, settled, host);
+  if (immediate.targetOriginApplicationBytes + delayed.targetOriginApplicationBytes !== total.targetOriginApplicationBytes ||
+      immediate.otherOriginApplicationBytes + delayed.otherOriginApplicationBytes !== total.otherOriginApplicationBytes) {
+    throw new Error("Deferred receiver bytes were not conserved");
+  }
+  return {
+    status: "MEASURED", targetHost: host,
+    immediateTargetOriginApplicationBytes: immediate.targetOriginApplicationBytes,
+    lateTargetOriginApplicationBytes: delayed.targetOriginApplicationBytes,
+    totalTargetOriginApplicationBytes: total.targetOriginApplicationBytes,
+    totalOtherOriginApplicationBytes: total.otherOriginApplicationBytes,
+    scope: "Controlled timer completion plus bounded receiver drain only; arbitrary future traffic and positive shared-origin attribution remain unqualified."
+  };
+}
+function assessDeferredFirstParty(baseline, protectedArm) {
+  const valid = row => row && row.status === "MEASURED" && row.scheduled === true &&
+    row.timerFinished === true && row.attempted === true && row.targetHost === "publisher.test" &&
+    ["immediateTargetOriginApplicationBytes", "lateTargetOriginApplicationBytes",
+      "totalTargetOriginApplicationBytes", "totalOtherOriginApplicationBytes", "receivedEvents"]
+      .every(key => Number.isSafeInteger(row[key]) && row[key] >= 0) &&
+    row.immediateTargetOriginApplicationBytes + row.lateTargetOriginApplicationBytes === row.totalTargetOriginApplicationBytes &&
+    row.totalOtherOriginApplicationBytes === 0;
+  let status = "NOT COVERED";
+  if (valid(baseline) && valid(protectedArm) && baseline.totalTargetOriginApplicationBytes > 0 && baseline.receivedEvents === 1) {
+    status = protectedArm.totalTargetOriginApplicationBytes > 0 || protectedArm.receivedEvents > 0 ? "FAIL" : "PASS";
+  }
+  return {status, detail: {baseline, protected: protectedArm,
+    scope: "One isolated synthetic deferred first-party GA4 GET after timer completion and a bounded 300 ms drain, not a lifetime or real-SDK guarantee."}};
+}
+module.exports = {measureActionWindow, summarizeActionWindows, assessFirstPartyActionWindows,
+  measureDeferredFirstParty, assessDeferredFirstParty};

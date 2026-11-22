@@ -25,7 +25,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const FIXTURE = path.join(ROOT, "tests/privacy_lab.py");
 const hardening = require("../../browser/core/privacy-hardening.js");
 const hosts = require("../../browser/core/hosts.js");
-const {measureActionWindow, summarizeActionWindows, assessFirstPartyActionWindows} = require("./collector-byte-windows.cjs");
+const {measureActionWindow, summarizeActionWindows, assessFirstPartyActionWindows,
+  measureDeferredFirstParty, assessDeferredFirstParty} = require("./collector-byte-windows.cjs");
 export const HOSTS = Object.freeze(["publisher.test", "shop.test", "tracker.test", "alias.test", "allowed.test", "blocked.test"]);
 export const CHANNELS = Object.freeze(["ga4", "opaque", "third-party", "image", "worker", "service-worker", "cart"]);
 export const EXPECTED_BLOCKED = Object.freeze(["ga4", "third-party", "image", "worker", "service-worker"]);
@@ -182,6 +183,24 @@ async function pageProbe() {
   return {gpcPresent: "globalPrivacyControl" in navigator, gpc: typeof navigator.globalPrivacyControl === "boolean" ? navigator.globalPrivacyControl : null, returnedHighEntropyKeys};
 }
 
+// The delayed sender deliberately returns before its 150 ms timer fires.
+// This independent synthetic timer/GET is not a replay of a vendor SDK.
+async function scheduleDeferredGa4(url) {
+  if (globalThis.__egDeferredState !== undefined) return {scheduled: false};
+  const state = {attempted: false, finished: false};
+  globalThis.__egDeferredState = state;
+  setTimeout(async () => {
+    state.attempted = true;
+    try {
+      const response = await fetch(url, {cache: "no-store"});
+      await response.arrayBuffer();
+    } catch {
+      // A blocked fetch must still settle the timer and be checked by the receiver.
+    } finally { state.finished = true; }
+  }, 150);
+  return {scheduled: true};
+}
+
 async function action({kind, url, identifier}) {
   if (kind === "image") return new Promise(resolve => {
     const image = new Image(), timer = setTimeout(() => { image.src = ""; resolve({completed: false, timeout: true}); }, 8000);
@@ -283,8 +302,8 @@ export async function runNative(options) {
   let stage = "prerequisites", fixture, browser, work, expired = false, nativeExecuted = false, output;
   const report = {schema: 1, mode: "native-collector", nativeAttempted: false, nativeExecuted: false, qualification: "NOT COVERED", checks, arms,
     scope: "Synthetic exact-identifier channels in disposable profiles; combined proxy+extension protection, not a population anonymity estimate.",
-    observation: "Every attempted action has a bounded completion deadline; positive controls bracket each visit. Final collector snapshots follow browser closure. Timeouts receive no blocking credit.",
-    notCovered: ["HTML ping auditing (--no-pings helper baseline)", "public IP/VPN/Tor or WebRTC routing", "arbitrary trackers, SDKs, encrypted/encoded bodies", "late arrivals and positive shared-origin byte deltas remain unattributed despite action-window samples", "worker/service-worker first-party partial bytes share functional script-loading origins", "worker JavaScript Client Hints restriction guarantee", "WSS live revocation", "optional Chrome privacy-permission handoff and ChromeSetting precedence"]};
+    observation: "Every action has a bounded completion deadline; a separate controlled 150 ms delayed sender is observed through timer completion and a 300 ms receiver drain. Final snapshots also sample 300 ms after browser closure. Timeouts receive no blocking credit.",
+    notCovered: ["HTML ping auditing (--no-pings helper baseline)", "public IP/VPN/Tor or WebRTC routing", "arbitrary trackers, SDKs, encrypted/encoded bodies", "arbitrary future arrivals and positive shared-origin byte deltas remain unattributed despite action and controlled delayed-send samples", "worker/service-worker first-party partial bytes share functional script-loading origins", "worker JavaScript Client Hints restriction guarantee", "WSS live revocation", "optional Chrome privacy-permission handoff and ChromeSetting precedence"]};
   try {
     for (const key of ["chrome", "python"]) { fs.accessSync(options[key], fs.constants.X_OK); assert(fs.statSync(options[key]).isFile(), "Executable must be a file"); }
     output = fs.openSync(options.out, "wx", 0o600);
@@ -357,6 +376,34 @@ export async function runNative(options) {
           }
           await closePage(page);
         }
+        // One isolated first-party GA4 sender intentionally waits until AFTER
+        // the triggering action returns. The receiver is sampled immediately,
+        // then again after this exact timer reports completion and 300 ms drain.
+        // Its visit is outside the scored multi-identity cohort.
+        stage = `${arm}-deferred-first-party`;
+        const delayedPage = await open(`${origin(HOSTS[0])}/page?policy=absent`);
+        const deferredVisit = sha(`egress-guard-deferred:${arm}`).slice(0, 24);
+        const deferredUrl = new URL(`${origin(HOSTS[0])}/measure`);
+        deferredUrl.search = new URLSearchParams({visit: deferredVisit, case: "ga4",
+          v: "2", tid: "G-LAB12345", cid: rows[0].identifier});
+        const beforeDeferred = await fixture.rpc("snapshot");
+        const scheduled = await evaluate(delayedPage.sessionId,
+          `(${scheduleDeferredGa4.toString()})(
+            ${JSON.stringify(deferredUrl.href)})`);
+        const afterScheduled = await fixture.rpc("snapshot");
+        const timerFinished = await waitFor(
+          () => evaluate(delayedPage.sessionId, "globalThis.__egDeferredState?.finished === true"), 8000, 40);
+        const attempted = await evaluate(delayedPage.sessionId,
+          "globalThis.__egDeferredState?.attempted === true");
+        await sleep(300);
+        const afterDeferred = await fixture.rpc("snapshot");
+        const deferredProbe = {...measureDeferredFirstParty(beforeDeferred, afterScheduled,
+          afterDeferred, HOSTS[0]), scheduled: scheduled?.scheduled === true,
+          timerFinished, attempted,
+          receivedEvents: afterDeferred.events.filter(event =>
+            event.visit === deferredVisit && event.case === "ga4").length};
+        await closePage(delayedPage);
+
         // Header/policy phases use distinct visits outside the scoring cohort.
         async function policyProbe(policy, label) {
           const visit = sha(`egress-guard-policy:${arm}:${label}`).slice(0, 24), url = `${origin(HOSTS[0])}/page?policy=${policy}`;
@@ -381,20 +428,33 @@ export async function runNative(options) {
           report.hardeningReleased = released; headerPhases.released = await policyProbe("absent", "released");
           await closePage(privacy);
         }
+        const beforeClose = await fixture.rpc("snapshot");
         await browser.close(); browser = null;
         // This bounded closure wait is reported, never a substitute for positive
         // controls or successful baseline delivery of every expected-blocked case.
         await waitFor(async () => (await fixture.rpc("snapshot")).connections.every(row => row.closed), 4000, 100);
+        await sleep(300);
         const snapshot = await fixture.rpc("snapshot"), summary = summarizeArm(snapshot, before, visits, outcomes);
+        const postCloseDrain = HOSTS.slice(0, 2).map(host => measureActionWindow(beforeClose, snapshot, host));
         const scoringEvents = summary.eventsForScoring; delete summary.eventsForScoring;
         const scores = {};
         for (const channel of [null, ...CHANNELS.filter(value => value !== "cart")]) scores[channel || "all"] = await fixture.rpc("score", {events: scoringEvents, visits, ...(channel ? {case: channel} : {})});
         record(`${arm}: native leaf certificate matches collector DER`, certificates.some(row => row.status === "FAIL") ? "FAIL" : certificates.length && certificates.every(row => row.status === "PASS") ? "PASS" : "NOT COVERED");
-        arms[arm] = {browser: version.product, proxy, ...summary, outcomes, windowProbes: probes, headerPhases, scores, certificates};
+        arms[arm] = {browser: version.product, proxy, ...summary, outcomes, windowProbes: probes, headerPhases, scores, certificates, deferredProbe, postCloseDrain};
       }
       stage = "assessment";
       const baseline = arms.baseline, protectedArm = arms.protected, n = options.subjects * 2;
       checks.push(...assessDelivery(baseline, protectedArm, n));
+      const deferred = assessDeferredFirstParty(baseline.deferredProbe, protectedArm.deferredProbe);
+      record("controlled deferred first-party GA4 receiver bytes", deferred.status, deferred.detail);
+      const postClose = protectedArm.postCloseDrain;
+      const postCloseQuiet = protectedArm.connectionsClosed && Array.isArray(postClose) &&
+        postClose.length === 2 && postClose.every(row => row.status === "MEASURED" &&
+          row.targetOriginApplicationBytes === 0);
+      record("bounded post-close first-party byte drain", postCloseQuiet ? "PASS" : "NOT COVERED",
+        {protectedPublisherBytes: postClose?.[0]?.targetOriginApplicationBytes ?? null,
+          protectedShopBytes: postClose?.[1]?.targetOriginApplicationBytes ?? null,
+          scope: "Only 300 ms after observed browser closure; shared-origin positive bytes and future arrivals remain unattributed."});
       const phases = protectedArm.headerPhases;
       record("Permissions-Policy absent-only insertion and existing/malformed preservation", phases.absent.policy === hardening.POLICY && phases.existing.policy === EXISTING_POLICY && phases.malformed.policy === "camera=(" && phases.off.policy === null && phases.released.policy === null ? "PASS" : "FAIL");
       const emitted = phases.off.highEntropyRequestHeaders;

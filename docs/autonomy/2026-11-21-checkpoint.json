@@ -46,13 +46,24 @@
     {
       "kind": "qualification-pass",
       "detail": "Evaluated exact modified GitHub branch summarizeArm source with the existing standalone collector-byte module in isolated JavaScript: 6/6 focused assertions passed, zero failures. Two added Node test-runner cases and full installed repository test suite not executed; native Chrome not run."
+    },
+    {
+      "kind": "implementation-pass",
+      "source_commit": "2ff1e84dec4b17dfc8038c4a4f8537d883239707",
+      "detail": "Added optional controlled timer-delayed same-origin GA4 sender outside linkability cohort, receiver byte deltas before/after sender completion plus bounded 300ms drain, and a post-browser-close first-party byte sample. Positive protected bytes/events explicitly FAIL despite a zero immediate sample; baseline/sender/route/meter and unrelated-origin ambiguity cannot pass without evidence. No production enforcement changed.",
+      "evidence": "docs/deferred-first-party-0.11.md"
+    },
+    {
+      "kind": "qualification-pass",
+      "detail": "Node v22.16.0 isolated new deferred-first-party.test.cjs: 5/5 tests passed, zero failures/skips. Checked helper git blob IDs against locally executed bytes and parser compatibility of modified runner source. Full repository Node/Python and imported-runner integration NOT COVERED; actual native Chrome/proxy lab NOT RUN under earlier startup restriction."
     }
   ],
   "next_actions": [
-    "Run complete repository Node/Python suites on a separately permitted checkout, including the two new collector-arm regression tests; run optional native Chrome/real-proxy lab only in an environment that expressly permits it. Earlier startup denial remains in force here.",
-    "Design controlled delayed-send and multiplexed first-party experiments, including an explicit post-close receiver drain; do not treat zero bytes within one action window as a lifetime absence.",
-    "Investigate source-pinned SDK protocol drift using locally redirected controlled sinks and functional controls, without contacting real collectors or permitting detection to alter live policy.",
-    "Keep all-channel opaque first-party identifier linkability in the scorer; fetch fresh main before publication and stop at the existing program deadline."
+    "Run complete installed repository Node/Python suites on a permitted checkout, covering earlier collector fixes and the new deferred-first-party test; source-only isolated checks are not an equivalent gate.",
+    "Run optional integrated Chrome + real proxy + controlled collector in an environment explicitly permitting native browser startup; do not retry the previously denied startup here.",
+    "Expand delayed-send/first-party multiplexing with exact per-request causal instrumentation only after native qualification, and keep positive same-origin bytes unattributed where causal data are absent.",
+    "Investigate pinned SDK protocol drift using locally redirected collectors and functional controls, avoiding real SDK production event destinations; no automatic policy promotion.",
+    "Preserve the opaque first-party cross-site identity linkability residual and record any post-close receiver bytes as bounded-window observations, not a lifetime guarantee."
   ],
   "not_covered": [
     "native Chromium in the initial environment",
@@ -68,7 +79,11 @@
     "shared-origin worker/service-worker per-request byte attribution",
     "full installed repository suite for existing-tunnel byte accounting",
     "native browser old-connection byte behavior",
-    "deferred receiver bytes after final snapshot"
+    "deferred receiver bytes after final snapshot",
+    "native Chrome deferred first-party timed sender and post-close receiver drain",
+    "full installed test suite for controlled delayed-send changes",
+    "arbitrary delayed/scheduled sends after the 300ms drain",
+    "multiplexed positive same-origin received-byte per-request causal attribution"
   ],
   "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
 }
