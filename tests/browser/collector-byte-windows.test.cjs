@@ -42,7 +42,7 @@ test("rejects unapproved origins and invalid floating, missing or negative count
     assert.throws(() => measureActionWindow(initial, snap([bad]), "publisher.test"));
 });
 test("positive receiver baseline and all protected zero-byte windows are mandatory", () => {
-  const outcome = (kind, bytes) => ({kind, byteWindow: {status: "MEASURED", targetOriginApplicationBytes: bytes, otherOriginApplicationBytes: 0}});
+  const outcome = (kind, bytes) => ({kind, byteWindow: {status: "MEASURED", targetHost: "publisher.test", targetOriginApplicationBytes: bytes, otherOriginApplicationBytes: 0}});
   const base = summarizeActionWindows([outcome("ga4", 12), outcome("ga4", 9), outcome("cart", 44)], "ga4");
   const active = summarizeActionWindows([outcome("ga4", 0), outcome("ga4", 0)], "ga4");
   assert.equal(assessFirstPartyActionWindows(base, active, 2).status, "PASS");
@@ -51,4 +51,15 @@ test("positive receiver baseline and all protected zero-byte windows are mandato
   assert.equal(assessFirstPartyActionWindows({...base, positiveByteWindows: 1}, active, 2).status, "NOT COVERED");
   assert.equal(assessFirstPartyActionWindows(base, active, 3).status, "NOT COVERED");
   assert.throws(() => summarizeActionWindows([{kind: "ga4"}], "ga4"));
+});
+
+test("GA4 first-party qualification refuses missing or off-origin target receipts", () => {
+  const valid = {kind: "ga4", byteWindow: measureActionWindow(
+    snap([]), snap([row("publisher.test", 30001, 22)]), "publisher.test")};
+  const wrong = {kind: "ga4", byteWindow: measureActionWindow(
+    snap([]), snap([row("tracker.test", 30002, 22)]), "tracker.test")};
+  assert.equal(summarizeActionWindows([valid], "ga4").totalTargetOriginApplicationBytes, 22);
+  assert.throws(() => summarizeActionWindows([wrong], "ga4"), /first-party publisher/);
+  assert.throws(() => summarizeActionWindows([{...valid, byteWindow: {...valid.byteWindow, targetHost: undefined}}], "ga4"), /first-party publisher/);
+  assert.equal(summarizeActionWindows([wrong], "third-party").measuredWindows, 0);
 });
