@@ -37,13 +37,22 @@
       "kind": "implementation-pass",
       "detail": "Added sampled per-action real receiver-byte attribution to the optional native Chrome/proxy lab: baseline positive controls, zero-byte protected GA4 windows, monotonic per-connection evidence and route conservation, with fail-safe NOT COVERED for asynchronous/shared-origin ambiguity. Standalone Node helper suite: 6 passes, 0 failures; browser contract test authored but not executed as full installed checkout is unavailable. No production enforcement changed.",
       "evidence": "docs/collector-byte-windows-0.11.md"
+    },
+    {
+      "kind": "implementation-pass",
+      "detail": "Corrected native collector-arm evidence so the isolated tracker-host received-byte delta counts new decrypted application bytes on preexisting TLS connections as well as newly opened/reused-source-port connections. Existing open connections also prevent the all-closed receipt. Added two repository regression tests covering false zero-byte credit, route/rollback and same-port reuse.",
+      "evidence": "docs/collector-existing-tunnel-0.11.md"
+    },
+    {
+      "kind": "qualification-pass",
+      "detail": "Evaluated exact modified GitHub branch summarizeArm source with the existing standalone collector-byte module in isolated JavaScript: 6/6 focused assertions passed, zero failures. Two added Node test-runner cases and full installed repository test suite not executed; native Chrome not run."
     }
   ],
   "next_actions": [
-    "Run the complete repository Node/Python suites and optional Chrome lab on a separately permitted checkout before treating the new browser-byte windows as release-qualified. Native Chrome was not launched here.",
-    "Add controlled delayed-send and multiplexed first-party tests; do not credit worker/Service Worker channel byte suppression without dedicated evidence. Preserve observable opaque-first-party all-channel linkability.",
-    "Investigate source-pinned SDK drift with reproducible local collector and functional controls; never contact production collectors or let uncertain detection alter policy.",
-    "Inspect fresh main before merging, keep work isolated and end at the fixed program deadline."
+    "Run complete repository Node/Python suites on a separately permitted checkout, including the two new collector-arm regression tests; run optional native Chrome/real-proxy lab only in an environment that expressly permits it. Earlier startup denial remains in force here.",
+    "Design controlled delayed-send and multiplexed first-party experiments, including an explicit post-close receiver drain; do not treat zero bytes within one action window as a lifetime absence.",
+    "Investigate source-pinned SDK protocol drift using locally redirected controlled sinks and functional controls, without contacting real collectors or permitting detection to alter live policy.",
+    "Keep all-channel opaque first-party identifier linkability in the scorer; fetch fresh main before publication and stop at the existing program deadline."
   ],
   "not_covered": [
     "native Chromium in the initial environment",
@@ -56,7 +65,10 @@
     "full installed repository regression suite for sampled-action-window changes",
     "native Chrome receiver-byte-window experiment",
     "late asynchronous first-party receiver bytes after an action window",
-    "shared-origin worker/service-worker per-request byte attribution"
+    "shared-origin worker/service-worker per-request byte attribution",
+    "full installed repository suite for existing-tunnel byte accounting",
+    "native browser old-connection byte behavior",
+    "deferred receiver bytes after final snapshot"
   ],
   "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
 }
