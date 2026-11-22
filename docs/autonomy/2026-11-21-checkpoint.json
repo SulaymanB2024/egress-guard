@@ -3,7 +3,7 @@
   "program": "2026-11-21-program.md",
   "window_end_utc": "2026-11-22T12:27:00Z",
   "baseline_commit": "06e75c7c5927b373efae93db3ee57a8b3282b830",
-  "status": "between-scheduled-passes",
+  "status": "completed-window",
   "active_work": null,
   "completed": [
     {
@@ -96,13 +96,19 @@
       "kind": "qualification-pass",
       "detail": "On isolated Git-blob-matched source in Node v22.16.0, ran actual node --test for existing collector-byte-windows and new collector-origin-contamination suites:10 passed,0 failures/skips; baseline synthetic origin-shift counterexample reproduced the old false PASS; protected off-target receiver delivery now NOT COVERED, clean windows retain PASS. Full repository suites and native Chrome/proxy integration were not run.",
       "evidence": "tests/browser/collector-origin-contamination.test.cjs"
+    },
+    {
+      "kind": "final-implementation-pass",
+      "detail": "Hardened GA4 first-party sampled-byte qualification to require publisher.test/shop.test targetHost receipts; a mislabeled tracker.test collector window cannot receive first-party blocking credit. Added two regression tests in existing suites. Exact updated source passed 2/2 isolated V8 behavioral checks; Node repository suite and newly authored node:test files NOT EXECUTED in this environment.",
+      "source_blob_sha": "cd683e8617ea24e812901b8650dc8856b0c96dcf",
+      "evidence": "tests/browser/collector-byte-windows.test.cjs"
     }
   ],
   "next_actions": [
-    "Run full installed Node and Python suites and controlled real proxy/browser collector lifecycle in an expressly permitted environment; prior Chromium startup restriction remains in force here.",
-    "Investigate request-level attribution on shared first-party TLS streams and delayed sends beyond the bounded receiver drain without awarding unexplained cross-origin byte windows a PASS.",
-    "Obtain independent source-pinned local SDK collector receipts before interpreting offline drift comparisons as real native SDK behavior.",
-    "Preserve last-good feed review, deterministic DNR proofs, GPC/WebRTC native qualification requirements and manual/threat/OS authority boundaries."
+    "In an explicitly permitted environment run full installed Python/Node suites, controlled real Chrome/proxy routing, and first-party collector origin/byte receipts; do not retry the prior blocked native Chromium launch here.",
+    "Independently source-pin actual SDK revisions and replay at controlled sinks before claiming real-world tracking efficacy.",
+    "Investigate connection-level causality on shared first-party TLS streams and late receiver sends after bounded drains; preserve NOT COVERED for ambiguous positive bytes.",
+    "Retain last-good feed rollback, DNR proofs, explicit browser control authority and current non-MITM/OS boundaries."
   ],
   "not_covered": [
     "native Chromium in the initial environment",
@@ -131,7 +137,8 @@
     "independent real-world attribution for tracking-byte growth",
     "full installed repository regression suite after collector origin-contamination fix",
     "native Chrome/real proxy execution for origin-contamination evidence gate",
-    "causal attribution for positive bytes received on unrelated origin within action windows"
+    "causal attribution for positive bytes received on unrelated origin within action windows",
+    "full installed repository suite and native browser qualification for final GA4 target-origin receipt guard"
   ],
   "publication_policy": "Verified source changes may be merged under existing user authorization. Device settings, destructive data changes and paid services are outside this program."
 }
