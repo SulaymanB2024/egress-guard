@@ -22,6 +22,12 @@ Coverage follows each component's actual matching semantics. Ordinary domain fee
 
 These are finite tripwires. An attacker can change domains outside the catalog, retain the anchors while weakening other entries, or add disruptive names absent from the infrastructure catalog. No statistical detector, publisher-signature system or general semantic proof is introduced here. Existing threat, manual-block, exemption and temporary-grant precedence is unchanged. The catalog does not become a host allowlist or a new set of forced permanent blocks.
 
+## Changed-root impact in review output
+
+A quarantined candidate's `delta.semantic_coverage` now reports **newly covered roots** and **no-longer-covered roots**, alongside bounded samples. A root is counted only when the exact changed domain is not already covered by an unchanged parent under that feed's matching semantics. For example, adding `metrics.shop.test` beneath an already blocked `shop.test` is entry churn, but not new domain blocking. Replacing `metrics.shop.test` with `shop.test` broadens blocking and counts `shop.test` as one newly covered root. Exact-host CNAME entries are assessed differently: parent and child are separate hosts.
+
+Root counts are **not** total affected descendant counts or a calculation of the application's actual final policy. Other feeds, threat priority, manual rules, grants and local exceptions can change the eventual decision. A newly covered parent could affect many descendant hosts that are not individually counted. The semantic field is inspection evidence only: it neither changes existing publication/quarantine criteria nor silently grants or blocks traffic.
+
 ## Inspect and approve exact artifacts
 
 Inspection reads local files. It does not initialize application state, download a list, contact a domain, open a browser or change policy:

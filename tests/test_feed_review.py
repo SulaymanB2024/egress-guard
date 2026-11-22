@@ -89,6 +89,51 @@ class FeedReviewTests(unittest.TestCase):
         self.assertEqual((candidate["delta"]["entries_added"], candidate["delta"]["entries_removed"]), (1, 1))
         self.assertEqual(candidate["base_sha256"], feed_review.digest(original))
 
+    def test_coverage_root_delta_distinguishes_redundancy_from_widening(self):
+        def encoded(names):
+            return "".join(host + "\n" for host in sorted(names)).encode("ascii")
+
+        old = encoded({"a.foo.test", "b.foo.test", "still.test"})
+        new = encoded({"foo.test", "extra.still.test", "still.test"})
+        delta = feed_review.entry_delta(old, new)
+        self.assertEqual((delta["entries_added"], delta["entries_removed"]), (2, 2))
+        impact = delta["semantic_coverage"]
+        self.assertEqual((impact["newly_covered_roots"], impact["no_longer_covered_roots"]), (1, 0))
+        self.assertEqual(impact["newly_covered_sample"], ["foo.test"])
+        self.assertEqual(impact["no_longer_covered_sample"], [])
+        self.assertEqual(impact["matching"], "domain-and-descendants")
+        self.assertEqual(feed_review.entry_delta(encoded({"foo.test"}),
+                         encoded({"foo.test", "sub.foo.test"}))["semantic_coverage"]["newly_covered_roots"], 0)
+        self.assertEqual(feed_review.entry_delta(encoded({"foo.test", "sub.foo.test"}),
+                         encoded({"foo.test"}))["semantic_coverage"]["no_longer_covered_roots"], 0)
+
+        # The exact-host CNAME feed has a different semantic effect for the same bytes.
+        exact = feed_review.entry_delta(old, new, exact=True)["semantic_coverage"]
+        self.assertEqual((exact["newly_covered_roots"], exact["no_longer_covered_roots"]), (2, 2))
+        self.assertEqual(exact["matching"], "exact-host")
+
+    def test_coverage_root_delta_in_review_is_advisory_and_preserves_final_policy(self):
+        initial = {"a.foo.test", "b.foo.test", "retained.test"}
+        replacement = {"foo.test", "retained.test"}
+        self.assertTrue(self.refresh(initial)["ok"])
+        before = Policy({}, self.state)
+        self.assertTrue(self.refresh(replacement)["ok"])
+        after = Policy({}, self.state)
+        self.assertEqual(before.decision("a.foo.test")["decision"], "blocked")
+        self.assertEqual(after.decision("a.foo.test")["decision"], "blocked")
+        self.assertEqual(after.decision("third.foo.test")["decision"], "blocked")
+
+        # Force a review using a protected infrastructure parent; entries that
+        # are already covered by a prior parent should not inflate the impact.
+        self.assertFalse(self.refresh(replacement | {"github.com"})["ok"])
+        row = self.row()
+        self.assertEqual(row["candidate"]["state"], "held")
+        delta = row["candidate"]["delta"]
+        self.assertEqual(delta["semantic_coverage"]["newly_covered_sample"], ["github.com"])
+        self.assertEqual(delta["semantic_coverage"]["no_longer_covered_roots"], 0)
+        self.assertEqual(delta["semantic_coverage"]["matching"], "domain-and-descendants")
+        self.assertEqual(Policy({}, self.state).decision("github.com")["decision"], "allowed")
+
     def test_initial_critical_parent_is_held_but_absent_canaries_are_not_required(self):
         self.assertFalse(self.refresh(POISONED)["ok"])
         row = self.row()

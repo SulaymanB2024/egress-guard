@@ -95,28 +95,58 @@ def records(blob):
         position = stop + 1
 
 
-def entry_delta(previous: bytes, candidate: bytes) -> dict:
-    """Exact entry differences with bounded examples; suffix effects are separate."""
+def entry_delta(previous: bytes, candidate: bytes, *, exact=False, previous_names=None, candidate_names=None) -> dict:
+    """Count exact entry churn and changed coverage roots under this feed's semantics.
+
+    The root count is NOT the number of affected descendants or a whole-policy
+    decision count. Reuse already validated HostSet indexes when available.
+    """
+    if previous_names is None or candidate_names is None:
+        from .feeds import HostSet  # avoid a module-level feed_review <-> feeds import cycle
+        previous_names = HostSet(previous)
+        candidate_names = HostSet(candidate)
     old_records, new_records = iter(records(previous)), iter(records(candidate))
     old, new = next(old_records, None), next(new_records, None)
-    added, removed, added_sample, removed_sample = 0, 0, [], []
+    added = removed = newly_covered = no_longer_covered = 0
+    added_sample, removed_sample = [], []
+    newly_covered_sample, no_longer_covered_sample = [], []
     while old is not None or new is not None:
         if new is None or (old is not None and old < new):
             removed += 1
+            host = old.decode("ascii")
             if len(removed_sample) < MAX_SAMPLE_NAMES:
-                removed_sample.append(old.decode("ascii"))
+                removed_sample.append(host)
+            if match(host, candidate_names, exact=exact) is None:
+                no_longer_covered += 1
+                if len(no_longer_covered_sample) < MAX_SAMPLE_NAMES:
+                    no_longer_covered_sample.append(host)
             old = next(old_records, None)
         elif old is None or new < old:
             added += 1
+            host = new.decode("ascii")
             if len(added_sample) < MAX_SAMPLE_NAMES:
-                added_sample.append(new.decode("ascii"))
+                added_sample.append(host)
+            if match(host, previous_names, exact=exact) is None:
+                newly_covered += 1
+                if len(newly_covered_sample) < MAX_SAMPLE_NAMES:
+                    newly_covered_sample.append(host)
             new = next(new_records, None)
         else:
             old, new = next(old_records, None), next(new_records, None)
     return {"entries_added": added, "entries_removed": removed,
             "added_sample": added_sample, "removed_sample": removed_sample,
             "sample_limit": MAX_SAMPLE_NAMES,
-            "scope": "exact feed entries; other feeds, suffixes and local policy can change the final decision"}
+            "semantic_coverage": {
+                "matching": "exact-host" if exact else "domain-and-descendants",
+                "newly_covered_roots": newly_covered,
+                "no_longer_covered_roots": no_longer_covered,
+                "newly_covered_sample": newly_covered_sample,
+                "no_longer_covered_sample": no_longer_covered_sample,
+                "scope": ("Changed entry roots under this feed's matching semantics, not a count "
+                          "of all affected descendants, other feeds, exceptions or final policy decisions.")
+            },
+            "scope": ("Exact feed-entry differences and changed-root effects; other feeds and local "
+                      "policy can change the final decision.")}
 
 
 def directory(state: Path, *, create=False) -> Path:
