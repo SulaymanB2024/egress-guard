@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Egress Guard Companion (experimental)",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Site-scoped endpoint blocking and reversible element hiding. Local rules only; no remote code or extension networking.",
   "browser_specific_settings": {
     "gecko": {

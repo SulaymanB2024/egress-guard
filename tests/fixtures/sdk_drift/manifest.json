@@ -1,0 +1,425 @@
+{
+  "schema": 1,
+  "id": "sdk-source-review-2026-11-22",
+  "reviewed_on": "2026-11-22",
+  "evidence_level": "manual-source-review",
+  "not_covered": [
+    "vendor-sdk-execution",
+    "native-browser-enforcement",
+    "receiver-bytes",
+    "future-releases"
+  ],
+  "sdks": [
+    {
+      "id": "ga4",
+      "name": "Google Analytics 4",
+      "source_kind": "unacquired-sdk",
+      "repository": null,
+      "revision": null,
+      "source_directory": null,
+      "reviewed_files": [],
+      "documents": [
+        {
+          "url": "https://developers.google.com/tag-platform/tag-manager/server-side/send-data",
+          "review": "primary-reviewed"
+        },
+        {
+          "url": "https://developers.google.com/tag-platform/learn/sst-fundamentals/6-testing",
+          "review": "primary-reviewed"
+        },
+        {
+          "url": "https://support.google.com/analytics/answer/16536051?hl=en",
+          "review": "primary-reviewed"
+        }
+      ],
+      "claims": [
+        {
+          "id": "first-party-transports",
+          "tier": "reviewed-primary-doc",
+          "statement": "Google documents routing browser analytics to a server container and image, Fetch, XHR, and iframe service-worker transports.",
+          "files": [],
+          "documents": [
+            "https://developers.google.com/tag-platform/tag-manager/server-side/send-data",
+            "https://developers.google.com/tag-platform/learn/sst-fundamentals/6-testing"
+          ],
+          "limitations": [
+            "No gtag.js bundle was acquired, hashed, or executed. Documentation is not wire evidence.",
+            "Literal query signatures cannot identify arbitrary encoded URLs, body-only collectors, or subsequent server-to-server sharing."
+          ]
+        },
+        {
+          "id": "meta-import-direction",
+          "tier": "reviewed-primary-doc",
+          "statement": "Google Meta Links imports Meta campaign and cost data into Google Analytics. This is the reverse direction of the separate GA4-to-Meta Events Manager sharing claim.",
+          "files": [],
+          "documents": [
+            "https://support.google.com/analytics/answer/16536051?hl=en"
+          ],
+          "limitations": [
+            "This page does not verify the GA4-to-Meta integration or imply that all GA4 traffic is automatically shared with Meta."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gtm",
+      "name": "Google Tag Manager",
+      "source_kind": "unacquired-sdk",
+      "repository": null,
+      "revision": null,
+      "source_directory": null,
+      "reviewed_files": [],
+      "documents": [
+        {
+          "url": "https://developers.google.com/tag-platform/tag-manager/datalayer",
+          "review": "primary-reviewed"
+        },
+        {
+          "url": "https://developers.google.com/tag-platform/tag-manager/server-side/send-data",
+          "review": "primary-reviewed"
+        }
+      ],
+      "claims": [
+        {
+          "id": "loader-and-first-party-delivery",
+          "tier": "reviewed-primary-doc",
+          "statement": "The documented GTM loader uses an id=GTM- query field and optional custom data-layer name; Google also documents first-party server-container delivery.",
+          "files": [],
+          "documents": [
+            "https://developers.google.com/tag-platform/tag-manager/datalayer",
+            "https://developers.google.com/tag-platform/tag-manager/server-side/send-data"
+          ],
+          "limitations": [
+            "No gtm.js bundle or configured container was acquired or executed.",
+            "GTM may deploy functional code, and bundled or renamed loaders need not expose the literal query signature."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "meta-pixel",
+      "name": "Meta Pixel",
+      "source_kind": "unacquired-sdk",
+      "repository": null,
+      "revision": null,
+      "source_directory": null,
+      "reviewed_files": [],
+      "documents": [
+        {
+          "url": "https://developers.facebook.com/documentation/meta-pixel/advanced",
+          "review": "primary-reviewed"
+        },
+        {
+          "url": "https://www.facebook.com/business/help/4237575203200036",
+          "review": "primary-inaccessible"
+        },
+        {
+          "url": "https://www.facebook.com/business/help/2192875204996675",
+          "review": "primary-inaccessible"
+        },
+        {
+          "url": "https://www.facebook.com/business/help/483077987527740",
+          "review": "primary-inaccessible"
+        }
+      ],
+      "claims": [
+        {
+          "id": "documented-image-protocol",
+          "tier": "reviewed-primary-doc",
+          "statement": "Meta documents /tr image requests with a numeric pixel id and standard event names, including the four events in the selected catalog.",
+          "files": [],
+          "documents": [
+            "https://developers.facebook.com/documentation/meta-pixel/advanced"
+          ],
+          "limitations": [
+            "No proprietary fbevents.js bundle was acquired, hashed, or executed.",
+            "The existing selected URL signature does not verify on-device matching behavior or server conversion APIs."
+          ]
+        },
+        {
+          "id": "on-device-november-default",
+          "tier": "unverified-primary",
+          "statement": "The claim that on-device conversion measurement became enabled by default on 12 November 2026 is not verified by accessible primary text in this review.",
+          "files": [],
+          "documents": [
+            "https://www.facebook.com/business/help/4237575203200036",
+            "https://www.facebook.com/business/help/2192875204996675"
+          ],
+          "limitations": [
+            "Both official Help Center article URLs returned a sign-in page. A secondary report or account notice is not substituted for readable primary evidence.",
+            "No rollout eligibility, local processing, payload, or default-setting behavior is inferred for enforcement."
+          ]
+        },
+        {
+          "id": "ga4-to-meta-sharing",
+          "tier": "unverified-primary",
+          "statement": "The GA4-to-Meta Events Manager integration and its exact sharing scope remain unverified from accessible primary text in this review.",
+          "files": [],
+          "documents": [
+            "https://www.facebook.com/business/help/483077987527740"
+          ],
+          "limitations": [
+            "The official integration Help Center URL returned a sign-in/temporary-block page.",
+            "The reviewed Google Meta Links page covers Meta-to-GA import, not this direction. Browser filtering cannot govern server-to-server transfer after a server receives data."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "matomo",
+      "name": "Matomo JavaScript tracker",
+      "source_kind": "sdk-source",
+      "repository": "matomo-org/matomo",
+      "revision": "4cc2fa000b20f3c11eb0138fa782de89a3e5485e",
+      "source_directory": "matomo",
+      "reviewed_files": [
+        {
+          "path": "js/piwik.js",
+          "bytes": 337035,
+          "sha256": "49edb5d9c52c7b92d8db2783e7e8a64620b68bf08789fab63b5ca081fe07ac17",
+          "git_blob_sha1": "4992b19c2fab99291405bec73b4cabf8e35d0115",
+          "source_url": "https://raw.githubusercontent.com/matomo-org/matomo/4cc2fa000b20f3c11eb0138fa782de89a3e5485e/js/piwik.js",
+          "acquired_on": "2026-11-22"
+        }
+      ],
+      "documents": [
+        {
+          "url": "https://developer.matomo.org/api-reference/tracking-api",
+          "review": "primary-reviewed"
+        }
+      ],
+      "claims": [
+        {
+          "id": "query-image-and-body-boundaries",
+          "tier": "reviewed-source",
+          "statement": "The pinned tracker builds idsite, rec=1, _id and send_image=0; image delivery changes send_image to 1. A custom tracker URL and POST/beacon transports are available.",
+          "files": [
+            "js/piwik.js"
+          ],
+          "documents": [
+            "https://developer.matomo.org/api-reference/tracking-api"
+          ],
+          "limitations": [
+            "Only selected query wire formats are recognized. Custom body-only requests remain unresolved.",
+            "The source file was read and byte-pinned, not executed in a browser."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "posthog",
+      "name": "PostHog browser SDK",
+      "source_kind": "sdk-source",
+      "repository": "PostHog/posthog-js",
+      "revision": "7babace5aa013d34a32e4595fec255a019cd8693",
+      "source_directory": "posthog",
+      "reviewed_files": [
+        {
+          "path": "packages/browser/src/request.ts",
+          "bytes": 28820,
+          "sha256": "4bffaaa897c4deb800339869c8238a699accc01d78e495c4cc0700fcb302e6d2",
+          "git_blob_sha1": "ea63944700396ab322d7e60ad609d7e7a8364654",
+          "source_url": "https://raw.githubusercontent.com/PostHog/posthog-js/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/request.ts",
+          "acquired_on": "2026-11-22"
+        },
+        {
+          "path": "packages/browser/src/posthog-core.ts",
+          "bytes": 227733,
+          "sha256": "50fc848bba8173337d8002d9ae78f72cf2e638284f1057f8ae08ff85d75cf9db",
+          "git_blob_sha1": "3bbce379209524ff799711d200d188851859ed44",
+          "source_url": "https://raw.githubusercontent.com/PostHog/posthog-js/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/posthog-core.ts",
+          "acquired_on": "2026-11-22"
+        },
+        {
+          "path": "packages/browser/src/extensions/replay/session-recording.ts",
+          "bytes": 24517,
+          "sha256": "1db4be112cfaf2bc77790c5c41af3f95dab428a61af54e30515ad49c1dd3b02b",
+          "git_blob_sha1": "72012254bc5ca570c98bc04ca42a60a499910a7e",
+          "source_url": "https://raw.githubusercontent.com/PostHog/posthog-js/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/extensions/replay/session-recording.ts",
+          "acquired_on": "2026-11-22"
+        },
+        {
+          "path": "packages/browser/src/utils/request-router.ts",
+          "bytes": 6589,
+          "sha256": "1de64aad868c55f014ed513d9ec0b5038af791588703fcc192692ea4c43f76ef",
+          "git_blob_sha1": "271d1ccfb8b56799a7d792a77965b96d52cf44f7",
+          "source_url": "https://raw.githubusercontent.com/PostHog/posthog-js/7babace5aa013d34a32e4595fec255a019cd8693/packages/browser/src/utils/request-router.ts",
+          "acquired_on": "2026-11-22"
+        }
+      ],
+      "documents": [
+        {
+          "url": "https://posthog.com/docs/libraries/js/config",
+          "review": "primary-reviewed"
+        }
+      ],
+      "claims": [
+        {
+          "id": "bundled-replay-no-loader-fetch",
+          "tier": "reviewed-source",
+          "statement": "The recorder startup path skips its remote recorder fetch when rrweb.record and initSessionRecording are already present, including full and recorder bundles.",
+          "files": [
+            "packages/browser/src/extensions/replay/session-recording.ts"
+          ],
+          "documents": [],
+          "limitations": [
+            "A separate recorder-script block is not sufficient for every bundle. This source path was reviewed but not executed."
+          ]
+        },
+        {
+          "id": "compressed-and-beacon-transport",
+          "tier": "reviewed-source",
+          "statement": "The selected capture path requests best-available compression, including session recording. The transport implements gzip and Base64 bodies, beacon fallbacks, and gzip requests without a compression query field.",
+          "files": [
+            "packages/browser/src/posthog-core.ts",
+            "packages/browser/src/request.ts"
+          ],
+          "documents": [],
+          "limitations": [
+            "This establishes source behavior, not observed delivery or a universal default at every project.",
+            "Opaque compressed same-origin payloads are outside URL-only DNR recognition. No content decoding or broad /event blocking is added."
+          ]
+        },
+        {
+          "id": "configurable-request-rewrite",
+          "tier": "reviewed-source",
+          "statement": "The request router invokes the configured rewriteRequestPath callback and records rewritten ingestion endpoints.",
+          "files": [
+            "packages/browser/src/utils/request-router.ts"
+          ],
+          "documents": [
+            "https://posthog.com/docs/libraries/js/config"
+          ],
+          "limitations": [
+            "Arbitrarily renamed same-origin paths may have no reliable URL signature.",
+            "Source byte pins are selected files, not a built or executed SDK bundle."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prebid",
+      "name": "Prebid Server user synchronization",
+      "source_kind": "server-source",
+      "repository": "prebid/prebid-server",
+      "revision": "0f7916bfd975b82a185e9677d8196d94b2ea4dcc",
+      "source_directory": "prebid",
+      "reviewed_files": [
+        {
+          "path": "config/config.go",
+          "bytes": 66837,
+          "sha256": "2b275b685d945ee53ee4ece8d56f4dfa2f9895afe334a9e09451eb31cdd67399",
+          "git_blob_sha1": "940c0e41c5eb33f55b91a75980c960609e19ee1c",
+          "source_url": "https://raw.githubusercontent.com/prebid/prebid-server/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/config/config.go",
+          "acquired_on": "2026-11-22"
+        },
+        {
+          "path": "usersync/syncer.go",
+          "bytes": 7988,
+          "sha256": "d8066a062fef5ace38e2691bf1d407b51015dd3140598bb02df2be8586d4f3e0",
+          "git_blob_sha1": "10ec089abb4a8b48125b18e2d357a4b75e46152a",
+          "source_url": "https://raw.githubusercontent.com/prebid/prebid-server/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/usersync/syncer.go",
+          "acquired_on": "2026-11-22"
+        },
+        {
+          "path": "router/router.go",
+          "bytes": 17933,
+          "sha256": "ce18341e9cea123167416162b8ab7196ea68970f07c8e757a9afaa918729f981",
+          "git_blob_sha1": "766eadf7962874fa5783cb9214b89939aac17c0e",
+          "source_url": "https://raw.githubusercontent.com/prebid/prebid-server/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/router/router.go",
+          "acquired_on": "2026-11-22"
+        },
+        {
+          "path": "endpoints/setuid.go",
+          "bytes": 14734,
+          "sha256": "4b2458977a2dc99329a8296bb823952a3ac1333cd997d5074905f2f215f565eb",
+          "git_blob_sha1": "dcefe4f6453cae578f76aacb2fbced55ef1db675",
+          "source_url": "https://raw.githubusercontent.com/prebid/prebid-server/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/endpoints/setuid.go",
+          "acquired_on": "2026-11-22"
+        },
+        {
+          "path": "usersync/cookie.go",
+          "bytes": 7112,
+          "sha256": "ae8d9712d1acbbfd61f701bcc8adb2d343c865daf1e543e4ec1f2e7b9d24a6e7",
+          "git_blob_sha1": "deefccced19750687275946682e7a28e63322fb6",
+          "source_url": "https://raw.githubusercontent.com/prebid/prebid-server/0f7916bfd975b82a185e9677d8196d94b2ea4dcc/usersync/cookie.go",
+          "acquired_on": "2026-11-22"
+        }
+      ],
+      "documents": [
+        {
+          "url": "https://docs.prebid.org/prebid-server/endpoints/pbs-endpoint-setuid.html",
+          "review": "primary-reviewed"
+        }
+      ],
+      "claims": [
+        {
+          "id": "configured-public-callback-prefix",
+          "tier": "reviewed-source",
+          "statement": "The default user-sync callback appends /setuid to a configurable external URL and the template builder preserves that configured string. The native router still registers only /setuid.",
+          "files": [
+            "config/config.go",
+            "usersync/syncer.go",
+            "router/router.go"
+          ],
+          "documents": [],
+          "limitations": [
+            "A prefixed public URL needs a deployment rewrite; no native route-prefix switch is claimed.",
+            "The added signature accepts at most one plain ASCII prefix segment. Deeper, encoded, dotted and empty prefixes remain outside its grammar.",
+            "This is reviewed server source, not execution of Prebid.js or a configured Prebid deployment."
+          ]
+        },
+        {
+          "id": "empty-id-deletes-sync",
+          "tier": "reviewed-source",
+          "statement": "The handler reads the first decoded uid value and removes the bidder mapping when it is missing or empty; the cookie Unsync method deletes the mapping.",
+          "files": [
+            "endpoints/setuid.go",
+            "usersync/cookie.go"
+          ],
+          "documents": [
+            "https://docs.prebid.org/prebid-server/endpoints/pbs-endpoint-setuid.html"
+          ],
+          "limitations": [
+            "The block recognizer must decline missing/empty UID and ambiguous duplicate or encoded identity keys.",
+            "The selected rule does not validate every configured bidder, optional privacy value, or server policy. Tests use synthetic request shapes."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fingerprint-pro",
+      "name": "Fingerprint Pro JavaScript agent",
+      "source_kind": "integration-documentation",
+      "repository": "fingerprintjs/cloudflare-worker-proxy",
+      "revision": "0d41a591f82b1f132c029a9a3e9d2ac8dfd9c524",
+      "source_directory": "fingerprint-pro",
+      "reviewed_files": [
+        {
+          "path": "CHANGELOG.md",
+          "bytes": 10258,
+          "sha256": "8bcfd08ed4e2acf7d0aa0318b413c2759357e60158972e864fbac311373e030d",
+          "git_blob_sha1": "289b0a74a6a8f1c085231a9f8e6c7dedf85f351f",
+          "source_url": "https://raw.githubusercontent.com/fingerprintjs/cloudflare-worker-proxy/0d41a591f82b1f132c029a9a3e9d2ac8dfd9c524/CHANGELOG.md",
+          "acquired_on": "2026-11-22"
+        }
+      ],
+      "documents": [],
+      "claims": [
+        {
+          "id": "legacy-v3-and-current-v4",
+          "tier": "reviewed-source",
+          "statement": "The pinned maintained Cloudflare integration changelog retains v3 compatibility and describes a different v4 setup using endpoints instead of the v3 scriptUrlPattern and endpoint options.",
+          "files": [
+            "CHANGELOG.md"
+          ],
+          "documents": [],
+          "limitations": [
+            "Only integration documentation bytes were acquired, not the proprietary JavaScript agent or its runtime.",
+            "The current URL recognizer covers the selected v3 apiKey/version/loaderVersion format; no v4 or general fingerprinting protection is inferred."
+          ]
+        }
+      ]
+    }
+  ]
+}

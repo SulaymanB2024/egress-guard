@@ -111,3 +111,45 @@ node tests/browser/chrome-collector-lab.mjs --check
 The second command is source-only. On a separately permitted native target, run the command in [the collector guide](privacy-lab-0.11.md#optional-native-browser-runner) with explicit Chrome, Python, built-extension and new-output paths. Require real certificate, route, context-completion, positive-extraction and functional evidence. A first-party channel with no completed collector event is not automatically a zero-byte result; its shared-origin partial-byte attribution remains uncovered.
 
 For Client Hints, exercise native request headers, eligible document API values and release, preserving existing policy headers. Missing baseline exposure gives no suppression credit. Add separate tests for duplicate/large policies, subframes, worker contexts, BFCache, site-access restrictions and competing extensions before broadening the qualified scope. Product receipts remain installed-rule observations rather than native behavior certification. The prior implementation-environment Chromium restriction must not be retried or bypassed.
+
+## Additional 0.12 gates
+
+Run the full suites after merging all constituent changes. The starting main tree
+for this pass had three stale collector test fixtures; a collection of earlier
+focused checks was not a substitute for a fresh complete run.
+
+Feed qualification must cover exact/suffix semantics, selected-component masking,
+threat precedence over configured allows, expired temporary grants, missing or
+corrupt baselines, public DoH canary losses and changes at the active temporary
+file's fsync boundary. The final publication callback must retain the old active
+bytes on either a base mismatch or a changed policy input. Verify the packaged
+probe corpus is present and matches its pinned digest in the installed wheel.
+
+```sh
+python -B scripts/qualify-channel-lab.py --out /absolute/new-channel-receipt.json
+node tests/browser/chrome-collector-lab.mjs --check \
+  --extension /absolute/built/chrome
+node scripts/compare-sdk-wire-drift.mjs \
+  --source-manifest tests/fixtures/sdk_drift/manifest.json \
+  --source-root /absolute/reviewed-sources \
+  --out /absolute/new-source-receipt.json
+```
+
+The portable channel run requires exact framing totals, all expected identities,
+functional cart responses, shared TLS connections and the observed idle-revocation
+case with a concurrent functional socket. Broken extraction or failed metering
+must invalidate qualification. [Accounting definitions](channel-accounting-0.12.md).
+
+The browser `--check` invocation inventories actual artifact bytes without
+starting a process or opening a socket. A separately permitted native run must
+call `isRegexSupported` on every static regex, including disabled rulesets, with
+the actual case/capture flags. Require matching loaded-package hashes, complete
+responses and unchanged final artifact bytes. An external RE2 pass does not
+replace this native gate. [Browser gate and Client Hints decisions](browser-privacy-0.12.md).
+
+SDK source hashes qualify only the acquired files listed in the seven-family
+manifest. Unacquired proprietary bundles, documentation-only entries and simulated
+lifecycles cannot earn native SDK/collector credit. The three newly recognized
+Prebid prefix examples are development cases, separate from the frozen challenge.
+Preserve its remaining escaped requests and imported-filter functional overblocks
+in the release report. [Source evidence and limits](sdk-drift-0.12.md).

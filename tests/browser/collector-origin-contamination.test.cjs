@@ -29,12 +29,12 @@ test("isolated baseline deliveries and protected zero receivers still pass the b
 test("other-origin evidence is mandatory and bounded, not silently treated as zero", () => {
   for (const otherOriginApplicationBytes of [undefined, -1, 0.1, Number.POSITIVE_INFINITY]) {
     assert.throws(() => summarizeActionWindows([{kind: "ga4", byteWindow: {
-      status: "MEASURED", targetOriginApplicationBytes: 0, otherOriginApplicationBytes}}], "ga4"));
+      status: "MEASURED", targetHost: "publisher.test", targetOriginApplicationBytes: 0, otherOriginApplicationBytes}}], "ga4"), /Missing action-byte/);
   }
   const max = Number.MAX_SAFE_INTEGER;
   assert.throws(() => summarizeActionWindows([
-    {kind: "ga4", byteWindow: {status: "MEASURED", targetOriginApplicationBytes: 0, otherOriginApplicationBytes: max}},
-    {kind: "ga4", byteWindow: {status: "MEASURED", targetOriginApplicationBytes: 0, otherOriginApplicationBytes: 1}}
+    {kind: "ga4", byteWindow: {status: "MEASURED", targetHost: "publisher.test", targetOriginApplicationBytes: 0, otherOriginApplicationBytes: max}},
+    {kind: "ga4", byteWindow: {status: "MEASURED", targetHost: "publisher.test", targetOriginApplicationBytes: 0, otherOriginApplicationBytes: 1}}
   ], "ga4"), /overflow/);
 });
 

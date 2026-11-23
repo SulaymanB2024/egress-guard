@@ -6,11 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from mitmproxy import connection, options
-from mitmproxy.proxy import commands, events
+from mitmproxy.proxy import commands, events, layer
 from mitmproxy.proxy.context import Context
 from mitmproxy.proxy.layers.tls import parse_client_hello
 
-from egress_guard.addon import EgressGuard, MAX_CLIENT_HELLO_BYTES, MAX_CLIENT_HELLO_READS, PolicyRelay, TunnelGuard
+from egress_guard.addon import EgressGuard, MAX_CLIENT_HELLO_BYTES, MAX_CLIENT_HELLO_READS, PolicyRelay, TunnelGuard, TUNNEL_RECHECK_INTERVAL
 
 
 def client_hello(name="passthrough.test"):
@@ -44,6 +44,7 @@ def sni_extension(names):
 class TunnelGuardTests(unittest.TestCase):
     def guard(self, *, require_tls=True, decision=True):
         client = connection.Client(peername=("127.0.0.1", 12345), sockname=("127.0.0.1", 8080))
+        client.state = connection.ConnectionState.OPEN
         context = Context(client, options.Options())
         context.server.address = ("front.test", 443)
         self.admit = Mock(return_value=decision)
@@ -67,11 +68,16 @@ class TunnelGuardTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], commands.OpenConnection)
         # The buffered bytes become sendable only after the approved upstream opens.
+        self.layer.context.server.state = connection.ConnectionState.OPEN
+        self.layer.context.server.timestamp_start = 1
+        self.layer.context.server.peername = ("127.0.0.1", 443)
         forwarded = list(self.layer.handle_event(events.OpenConnectionCompleted(result[0], None)))
-        self.assertEqual(len(forwarded), 1)
+        self.assertEqual(len(forwarded), 2)
         self.assertIsInstance(forwarded[0], commands.SendData)
         self.assertIs(forwarded[0].connection, self.layer.context.server)
         self.assertEqual(forwarded[0].data, expected)
+        self.assertIsInstance(forwarded[1], commands.RequestWakeup)
+        self.assertEqual(forwarded[1].delay, TUNNEL_RECHECK_INTERVAL)
         self.invalid.assert_not_called()
         self.assertEqual(self.layer._buffer, b"")
 
@@ -197,6 +203,7 @@ class PolicyRelayTests(unittest.TestCase):
         self.assertEqual({command.connection for command in result}, {self.context.client, self.context.server})
         self.assertFalse(self.relay._paused_event_queue)
         self.assertIsNone(self.relay._paused)
+        self.assertIsNone(self.relay._policy_wakeup)
 
     def test_each_direction_is_checked_and_revocation_cannot_be_undone(self):
         for source in (self.context.client, self.context.server):
@@ -205,9 +212,10 @@ class PolicyRelayTests(unittest.TestCase):
                 self.admit.return_value = True
                 self.connected()
                 passed = self.send(source, b"allowed-ciphertext")
-                self.assertEqual(len(passed), 1)
+                self.assertEqual(len(passed), 2)
                 self.assertIsInstance(passed[0], commands.SendData)
                 self.assertEqual(passed[0].data, b"allowed-ciphertext")
+                self.assertIsInstance(passed[1], commands.RequestWakeup)
                 self.admit.return_value = False
                 self.assert_revoked(self.send(source, b"revoked-ciphertext"))
                 self.admit.return_value = True
@@ -251,6 +259,136 @@ class PolicyRelayTests(unittest.TestCase):
         self.assertIsInstance(result[0], commands.CloseConnection)
         self.assertIs(result[0].connection, self.context.client)
         self.assertEqual(self.send(self.context.client, b"after-error"), [])
+        self.admit.assert_not_called()
+        self.assertIsNone(self.relay._policy_wakeup)
+
+    def test_one_timer_is_armed_after_admitted_bytes_and_never_accumulates_on_traffic(self):
+        self.connected()
+        first = self.send(self.context.client, b"first-ciphertext")
+        self.assertEqual([type(command) for command in first], [commands.SendData, commands.RequestWakeup])
+        timer = first[1]
+        self.assertGreater(timer.delay, 0)
+        self.assertLessEqual(timer.delay, 1)
+        self.assertIs(self.relay._policy_wakeup, timer)
+        for source in (self.context.client, self.context.server) * 4:
+            forwarded = self.send(source, b"more-ciphertext")
+            self.assertEqual([type(command) for command in forwarded], [commands.SendData])
+            self.assertIs(self.relay._policy_wakeup, timer)
+        self.assertIsNone(self.relay.flow, "The timer must not enable TCP-flow history")
+        self.assertEqual(self.admit.call_count, 9)
+
+    def test_allowed_idle_wakeup_checks_once_and_only_schedules_a_new_token(self):
+        self.connected()
+        timer = self.send(self.context.client, b"first-ciphertext")[1]
+        self.admit.reset_mock()
+        for _ in range(3):
+            result = list(self.relay.handle_event(events.Wakeup(timer)))
+            self.assertEqual([type(command) for command in result], [commands.RequestWakeup])
+            self.assertIsNot(result[0], timer)
+            self.assertEqual(result[0].delay, TUNNEL_RECHECK_INTERVAL)
+            self.assertIs(self.relay._policy_wakeup, result[0])
+            timer = result[0]
+        self.assertEqual(self.admit.call_count, 3)
+
+    def test_idle_policy_revocation_closes_both_peers_without_waiting_for_more_bytes(self):
+        self.connected()
+        timer = self.send(self.context.client, b"initial-ciphertext")[1]
+        self.admit.return_value = False
+        self.assert_revoked(list(self.relay.handle_event(events.Wakeup(timer))))
+        self.admit.return_value = True
+        self.admit.reset_mock()
+        for event in (events.Wakeup(timer), events.Wakeup(commands.RequestWakeup(1)),
+                      events.DataReceived(self.context.client, b"no-revival"),
+                      events.DataReceived(self.context.server, b"no-revival"),
+                      events.ConnectionClosed(self.context.client)):
+            self.assertEqual(list(self.relay.handle_event(event)), [])
+        self.admit.assert_not_called()
+
+    def test_idle_policy_error_clears_retained_layer_work_without_forwarding(self):
+        self.connected()
+        timer = self.send(self.context.client, b"initial-ciphertext")[1]
+        # Inject retained layer work to establish that a timer cannot wait behind
+        # it or later revive it. The ordinary ignore=True relay creates no hooks.
+        pending = commands.OpenConnection(self.context.server)
+        self.relay._paused = layer.Paused(pending, iter(()))
+        self.relay._paused_event_queue.append(events.DataReceived(self.context.client, b"retained-ciphertext"))
+        self.admit.side_effect = RuntimeError("policy unavailable")
+        self.assert_revoked(list(self.relay.handle_event(events.Wakeup(timer))))
+        self.assertEqual(list(self.relay.handle_event(events.OpenConnectionCompleted(pending, None))), [])
+
+    def test_foreign_and_stale_wakeups_never_enter_tcp_or_its_paused_queue(self):
+        foreign = commands.RequestWakeup(TUNNEL_RECHECK_INTERVAL)
+        self.assertEqual(list(self.relay.handle_event(events.Wakeup(foreign))), [])
+        opening = list(self.relay.handle_event(events.Start()))[0]
+        self.assertEqual(list(self.relay.handle_event(events.Wakeup(foreign))), [])
+        self.assertFalse(self.relay._paused_event_queue)
+        self.assertEqual(self.send(self.context.client, b"queued"), [])
+        self.assertIsNone(self.relay._policy_wakeup)
+        self.admit.assert_not_called()
+        self.context.server.state = connection.ConnectionState.OPEN
+        self.context.server.peername = ("127.0.0.1", 443)
+        self.context.server.timestamp_start = 1
+        opened = list(self.relay.handle_event(events.OpenConnectionCompleted(opening, None)))
+        self.assertEqual([type(command) for command in opened], [commands.SendData, commands.RequestWakeup])
+        token = opened[1]
+        self.admit.reset_mock()
+        self.assertEqual(list(self.relay.handle_event(events.Wakeup(foreign))), [])
+        self.assertIs(self.relay._policy_wakeup, token)
+        self.admit.assert_not_called()
+        replacement = list(self.relay.handle_event(events.Wakeup(token)))[0]
+        self.admit.assert_called_once_with()
+        self.assertEqual(list(self.relay.handle_event(events.Wakeup(token))), [])
+        self.assertIs(self.relay._policy_wakeup, replacement)
+        self.admit.assert_called_once_with()
+
+    def test_pending_open_and_multiple_buffered_chunks_create_only_one_timer(self):
+        opening = list(self.relay.handle_event(events.Start()))[0]
+        for data in (b"first", b"second", b"third"):
+            self.assertEqual(self.send(self.context.client, data), [])
+        self.assertIsNone(self.relay._policy_wakeup)
+        self.admit.assert_not_called()
+        self.context.server.state = connection.ConnectionState.OPEN
+        self.context.server.peername = ("127.0.0.1", 443)
+        self.context.server.timestamp_start = 1
+        result = list(self.relay.handle_event(events.OpenConnectionCompleted(opening, None)))
+        self.assertEqual([type(command) for command in result],
+                         [commands.SendData, commands.RequestWakeup, commands.SendData, commands.SendData])
+        self.assertEqual([command.data for command in result if isinstance(command, commands.SendData)],
+                         [b"first", b"second", b"third"])
+        self.assertEqual(self.admit.call_count, 3)
+
+    def test_half_close_keeps_live_direction_and_idle_checks_until_both_sides_finish(self):
+        self.connected()
+        timer = self.send(self.context.client, b"request")[1]
+        self.context.client.state = connection.ConnectionState.CAN_WRITE
+        close = list(self.relay.handle_event(events.ConnectionClosed(self.context.client)))
+        self.assertEqual(len(close), 1)
+        self.assertIsInstance(close[0], commands.CloseTcpConnection)
+        self.assertTrue(close[0].half_close)
+        self.assertIs(close[0].connection, self.context.server)
+        self.context.server.state = connection.ConnectionState.CAN_READ
+        replacement = list(self.relay.handle_event(events.Wakeup(timer)))
+        self.assertEqual([type(command) for command in replacement], [commands.RequestWakeup])
+        reply = self.send(self.context.server, b"remaining-response")
+        self.assertEqual([type(command) for command in reply], [commands.SendData])
+        self.assertIs(reply[0].connection, self.context.client)
+        self.context.server.state = connection.ConnectionState.CLOSED
+        finished = list(self.relay.handle_event(events.ConnectionClosed(self.context.server)))
+        self.assertEqual([type(command) for command in finished], [commands.CloseConnection])
+        self.assertIs(finished[0].connection, self.context.client)
+        self.assertIsNone(self.relay._policy_wakeup)
+        self.admit.reset_mock()
+        self.assertEqual(list(self.relay.handle_event(events.Wakeup(replacement[0]))), [])
+        self.assertEqual(self.send(self.context.server, b"already-finished"), [])
+        self.admit.assert_not_called()
+
+    def test_wakeup_does_not_reschedule_when_no_read_direction_remains(self):
+        self.connected()
+        timer = self.send(self.context.client, b"initial-ciphertext")[1]
+        self.context.client.state = self.context.server.state = connection.ConnectionState.CLOSED
+        self.admit.reset_mock()
+        self.assertEqual(list(self.relay.handle_event(events.Wakeup(timer))), [])
+        self.assertIsNone(self.relay._policy_wakeup)
         self.admit.assert_not_called()
 
 

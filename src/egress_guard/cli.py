@@ -114,13 +114,15 @@ def main(argv=None) -> int:
             print(json.dumps(operation(args.extension_id, args.browser), indent=2))
         elif args.command == "refresh":
             initialize()
-            result = update_feeds(data_dir(), load_config())
+            source = config_path()
+            result = update_feeds(data_dir(), load_config(source), config_file=source)
             print(json.dumps(result, indent=2))
             return 0 if result.get("ok") else 1
         elif args.command in {"feed-review", "feed-approve", "feed-discard", "feed-rollback"}:
-            state, config = data_dir(), load_config()
+            source = config_path()
+            state, config = data_dir(), load_config(source)
             if args.command == "feed-review":
-                result = review_feeds(state, config, args.feed_id)
+                result = review_feeds(state, config, args.feed_id, config_file=source)
             elif args.command == "feed-approve":
                 result = approve_feed(state, config, args.feed_id, candidate_sha256=args.candidate,
                                       base_sha256=None if args.base == "none" else args.base)

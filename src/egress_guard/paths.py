@@ -31,7 +31,12 @@ def private_dir(path: Path) -> Path:
     return path
 
 
-def atomic_private(path: Path, data: bytes) -> None:
+def atomic_private(path: Path, data: bytes, *, before_replace=None) -> None:
+    """Write privately, optionally rechecking authority after the temporary fsync.
+
+    The callback may refuse the replacement. It runs immediately before rename;
+    it does not make checks of other files part of a filesystem transaction.
+    """
     private_dir(path.parent)
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".")
     try:
@@ -39,6 +44,8 @@ def atomic_private(path: Path, data: bytes) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
+        if before_replace is not None:
+            before_replace()
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):

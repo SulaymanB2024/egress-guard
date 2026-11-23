@@ -1,0 +1,285 @@
+{
+  "schema": 1,
+  "mode": "source-contracts",
+  "nativeExecuted": false,
+  "qualification": "NOT COVERED",
+  "startedProcesses": 0,
+  "openedSockets": 0,
+  "fixtureSha256": "e6b0a4937a9a8b53a967797172366768468835c9f7d403caa35f32d9c22b632d",
+  "runnerSha256": "fc212791365b0a58c8f11c7b41176faaec6dd6b043622306ef2009ee2c546686",
+  "nativeRegex": {
+    "status": "NOT COVERED",
+    "reason": "native-api-not-run",
+    "inventory": {
+      "schema": 1,
+      "scope": "all-manifest-static-regexes-including-disabled",
+      "files": [
+        {
+          "path": "manifest.json",
+          "bytes": 4259,
+          "sha256": "4e638e2d48e7570bdfa8a018f707f45ee984ff227e243974e8f89f548f296c29"
+        },
+        {
+          "path": "rules/threats.json",
+          "bytes": 33194211,
+          "sha256": "16264312ba1c6754ac968a40ec1e3340af9d28c91a22949162874ab7b9aec503"
+        },
+        {
+          "path": "rules/threats-2.json",
+          "bytes": 33492877,
+          "sha256": "2965e341aa88a6c17c3e73d46cebd333afd95a120fee67f06653afcf301d7e29"
+        },
+        {
+          "path": "rules/trackers.json",
+          "bytes": 5584642,
+          "sha256": "f6884a8b50896a8a97735ac10e52528da58e116a4747c7ae90a8b4581b2ec3ab"
+        },
+        {
+          "path": "rules/cname.json",
+          "bytes": 4947510,
+          "sha256": "8037690817575f40d624954e7b987e9225a29179bdd0e09497333a88bcfde1ad"
+        },
+        {
+          "path": "rules/params.json",
+          "bytes": 567970,
+          "sha256": "e69c2124763a31265cd5dd44655e1e6b5ac3a0d6482a07859b5bcc6c31a0d4a4"
+        },
+        {
+          "path": "rules/links.json",
+          "bytes": 9667,
+          "sha256": "2ff0e57f058e7486d142c9078048f1a05e620b036fc20ef2ee2f21e012c87cc8"
+        },
+        {
+          "path": "rules/gpc.json",
+          "bytes": 323,
+          "sha256": "6a51534b0f48c008e44a791c3c5a814fe2758988c806e8efd6c1bab6c34bbacd"
+        },
+        {
+          "path": "rules/referrer.json",
+          "bytes": 414,
+          "sha256": "97d6010aed52bff4004480cf2d476c93a66a15194b5bcdb0bdbd4b5af5d2143d"
+        },
+        {
+          "path": "rules/beacons.json",
+          "bytes": 114,
+          "sha256": "92e7b055a03631960ba6455186c571839cb6bdc05d4ef98efa6d178a175b8a1e"
+        },
+        {
+          "path": "rules/cookies.json",
+          "bytes": 2075952,
+          "sha256": "ba2c4cf7ade97e1eabf47db78674ef27d3c87f95dbddb0468d1274022f080a8c"
+        },
+        {
+          "path": "rules/bounce.json",
+          "bytes": 848338,
+          "sha256": "74980fc4f5c27e7ac84465acfad4056fc00c24956c8ea3d46641fff8263ce4a2"
+        },
+        {
+          "path": "rules/surrogates.json",
+          "bytes": 2276,
+          "sha256": "3b0ea1c87e5dcf1b4c6dfb3c544638411828cb1dbf67f53504123c47704f68e3"
+        },
+        {
+          "path": "rules/fp-trackers.json",
+          "bytes": 476336,
+          "sha256": "5b4f43c348eb1f94566f0614be0bceb42563b2179b0e2476efdee3bcd4345857"
+        },
+        {
+          "path": "rules/easyprivacy.json",
+          "bytes": 1811947,
+          "sha256": "b44958877b5122bdcac6c842595359292f1fd47e31ab3f4c5d4516ef2857352d"
+        },
+        {
+          "path": "rules/easylist.json",
+          "bytes": 1537366,
+          "sha256": "3966c94837c6fdfdf1dae7af39cf4112db1e6a58592a58d5308f32c27163c162"
+        },
+        {
+          "path": "rules/filter-allow.json",
+          "bytes": 287814,
+          "sha256": "51acd8824426a988999302bbdb20d456de50a9842200bc2ee04f4ac7dd329e16"
+        },
+        {
+          "path": "rules/replay.json",
+          "bytes": 2984,
+          "sha256": "56d8dc0f50ac9ca32f7a5993236505665925b181de121a8f18d74688897274b0"
+        }
+      ],
+      "rulesets": [
+        {
+          "id": "threats",
+          "path": "rules/threats.json",
+          "enabled": true,
+          "sha256": "16264312ba1c6754ac968a40ec1e3340af9d28c91a22949162874ab7b9aec503",
+          "rules": 65,
+          "regexes": 32,
+          "regexRuleIdsSha256": "e757e2d961b6191b0cea34ff9ece0216bcc8bfa25b820da339f1b7593e5c3b7f"
+        },
+        {
+          "id": "threats-2",
+          "path": "rules/threats-2.json",
+          "enabled": true,
+          "sha256": "2965e341aa88a6c17c3e73d46cebd333afd95a120fee67f06653afcf301d7e29",
+          "rules": 67,
+          "regexes": 34,
+          "regexRuleIdsSha256": "362b4ffb698cc17835d3afcbcaf89696630e3982d1442caba3122b93d2c01c55"
+        },
+        {
+          "id": "trackers",
+          "path": "rules/trackers.json",
+          "enabled": true,
+          "sha256": "f6884a8b50896a8a97735ac10e52528da58e116a4747c7ae90a8b4581b2ec3ab",
+          "rules": 11,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "cname",
+          "path": "rules/cname.json",
+          "enabled": true,
+          "sha256": "8037690817575f40d624954e7b987e9225a29179bdd0e09497333a88bcfde1ad",
+          "rules": 8,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "params",
+          "path": "rules/params.json",
+          "enabled": true,
+          "sha256": "e69c2124763a31265cd5dd44655e1e6b5ac3a0d6482a07859b5bcc6c31a0d4a4",
+          "rules": 696,
+          "regexes": 696,
+          "regexRuleIdsSha256": "cc69743d05b08acb6d80b7c6d14413950daa5afa26bfab3fe0e2fd71bbb4da9e"
+        },
+        {
+          "id": "links",
+          "path": "rules/links.json",
+          "enabled": true,
+          "sha256": "2ff0e57f058e7486d142c9078048f1a05e620b036fc20ef2ee2f21e012c87cc8",
+          "rules": 26,
+          "regexes": 26,
+          "regexRuleIdsSha256": "588e3e2e0a37aeab2fbf3c7e84466103ea90aa22b138a8468a4c750fd78eac57"
+        },
+        {
+          "id": "gpc",
+          "path": "rules/gpc.json",
+          "enabled": true,
+          "sha256": "6a51534b0f48c008e44a791c3c5a814fe2758988c806e8efd6c1bab6c34bbacd",
+          "rules": 1,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "referrer",
+          "path": "rules/referrer.json",
+          "enabled": true,
+          "sha256": "97d6010aed52bff4004480cf2d476c93a66a15194b5bcdb0bdbd4b5af5d2143d",
+          "rules": 1,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "beacons",
+          "path": "rules/beacons.json",
+          "enabled": true,
+          "sha256": "92e7b055a03631960ba6455186c571839cb6bdc05d4ef98efa6d178a175b8a1e",
+          "rules": 1,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "cookies",
+          "path": "rules/cookies.json",
+          "enabled": true,
+          "sha256": "ba2c4cf7ade97e1eabf47db78674ef27d3c87f95dbddb0468d1274022f080a8c",
+          "rules": 4,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "bounce",
+          "path": "rules/bounce.json",
+          "enabled": true,
+          "sha256": "74980fc4f5c27e7ac84465acfad4056fc00c24956c8ea3d46641fff8263ce4a2",
+          "rules": 2,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "surrogates",
+          "path": "rules/surrogates.json",
+          "enabled": true,
+          "sha256": "3b0ea1c87e5dcf1b4c6dfb3c544638411828cb1dbf67f53504123c47704f68e3",
+          "rules": 11,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "fp-trackers",
+          "path": "rules/fp-trackers.json",
+          "enabled": true,
+          "sha256": "5b4f43c348eb1f94566f0614be0bceb42563b2179b0e2476efdee3bcd4345857",
+          "rules": 3539,
+          "regexes": 28,
+          "regexRuleIdsSha256": "21f377c0ba2abbc68794580b07e52c7ceee162cc318a83e38eaae6f0d3fe69ea"
+        },
+        {
+          "id": "easyprivacy",
+          "path": "rules/easyprivacy.json",
+          "enabled": true,
+          "sha256": "b44958877b5122bdcac6c842595359292f1fd47e31ab3f4c5d4516ef2857352d",
+          "rules": 4919,
+          "regexes": 6,
+          "regexRuleIdsSha256": "cc6c68d23786c82cb52621986596a38c4ec2af5b2a30b4c6d4418870dddbe32a"
+        },
+        {
+          "id": "easylist",
+          "path": "rules/easylist.json",
+          "enabled": true,
+          "sha256": "3966c94837c6fdfdf1dae7af39cf4112db1e6a58592a58d5308f32c27163c162",
+          "rules": 3349,
+          "regexes": 7,
+          "regexRuleIdsSha256": "5a7126d7a0b672819cc10cf0e2167b1dc670d18eace8a087b46795a3aa3bbed5"
+        },
+        {
+          "id": "filter-allow",
+          "path": "rules/filter-allow.json",
+          "enabled": true,
+          "sha256": "51acd8824426a988999302bbdb20d456de50a9842200bc2ee04f4ac7dd329e16",
+          "rules": 1350,
+          "regexes": 0,
+          "regexRuleIdsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "id": "replay",
+          "path": "rules/replay.json",
+          "enabled": true,
+          "sha256": "56d8dc0f50ac9ca32f7a5993236505665925b181de121a8f18d74688897274b0",
+          "rules": 19,
+          "regexes": 1,
+          "regexRuleIdsSha256": "080a9ed428559ef602668b4c00f114f1a11c3f6b02a435f0bdc154578e4d7f22"
+        }
+      ],
+      "rules": 14069,
+      "regexes": 830,
+      "regexSourceBytes": 59080,
+      "inputsSha256": "008f904e9d22dd7a6c2e067077a233bf6405f17dea778334aee7049353fe9e84",
+      "inventorySha256": "eb86e588debc3a85f290fbdbb9566eaa242620160a2026cd99161c216559ac15"
+    }
+  },
+  "cases": [
+    "ga4",
+    "opaque",
+    "third-party",
+    "image",
+    "worker",
+    "service-worker",
+    "cart"
+  ],
+  "subjects": 4,
+  "sites": [
+    "publisher.test",
+    "shop.test"
+  ],
+  "scope": "Source contracts only. No Chrome, Python, proxy, collector or network listener was started."
+}

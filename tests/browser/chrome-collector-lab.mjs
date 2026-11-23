@@ -19,6 +19,7 @@ import {spawn} from "node:child_process";
 import {createRequire} from "node:module";
 import {fileURLToPath} from "node:url";
 import {launch, attachWorker, waitFor, sleep} from "./cdp.mjs";
+import {readArtifactRegexInventory, publicRegexInventory, artifactRegexesUnchanged, attestNativeRegexes} from "./native-regex-attestation.mjs";
 
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -99,7 +100,7 @@ export function certificateReceipt(result, expectedSha256) {
   } catch { return {status: "NOT COVERED"}; }
 }
 
-export function staticCheck() {
+export function staticCheck({extension} = {}) {
   const fixture = fs.readFileSync(FIXTURE, "utf8"), worker = read("browser/background-chrome.js");
   for (const host of HOSTS) assert(fixture.includes(`"${host}"`));
   assert(new Set(HOSTS.map(hosts.siteOf)).size === HOSTS.length);
@@ -107,8 +108,10 @@ export function staticCheck() {
   for (const field of ["decrypted_origin_application_bytes", "proxy_route_observed", "handler_errors", "transport_disconnects", "distinct_identifier_bytes", "returnedHighEntropyKeys"]) assert(fixture.includes(field));
   for (const action of ["status", "apply", "release"]) assert(worker.includes(`browser-privacy-hardening-${action}`));
   assert(hardening.compile({enabled: true}).length === 2 && hardening.CAPABILITIES.behaviorVerified === false);
+  const regexInventory = extension ? publicRegexInventory(readArtifactRegexInventory(extension)) : null;
   return {schema: 1, mode: "source-contracts", nativeExecuted: false, qualification: "NOT COVERED",
     startedProcesses: 0, openedSockets: 0, fixtureSha256: sha(fixture), runnerSha256: sha(fs.readFileSync(fileURLToPath(import.meta.url))),
+    nativeRegex: {status: "NOT COVERED", reason: "native-api-not-run", inventory: regexInventory},
     cases: CHANNELS, subjects: 4, sites: HOSTS.slice(0, 2),
     scope: "Source contracts only. No Chrome, Python, proxy, collector or network listener was started."};
 }
@@ -308,6 +311,8 @@ export async function runNative(options) {
     for (const key of ["chrome", "python"]) { fs.accessSync(options[key], fs.constants.X_OK); assert(fs.statSync(options[key]).isFile(), "Executable must be a file"); }
     output = fs.openSync(options.out, "wx", 0o600);
     const artifact = inspectArtifact(options.extension); report.artifact = artifact;
+    const regexInventory = readArtifactRegexInventory(options.extension);
+    report.regexArtifact = publicRegexInventory(regexInventory);
     work = fs.mkdtempSync(path.join(os.tmpdir(), "egress-guard-collector-browser-"));
     fixture = startFixture(options.python); const meta = await fixture.ready;
     report.fixture = {certificateSha256: meta.origin_certificate_sha256, proxy: meta.proxy, mitmproxy: meta.mitmproxy,
@@ -352,6 +357,15 @@ export async function runNative(options) {
           const loaded = await cdp("Extensions.loadUnpacked", {path: options.extension}); assert.equal(loaded.id, artifact.id);
           const worker = await attachWorker(cdp, loaded.id, {tries: 50}); assert(worker, "Extension worker missing");
           await evaluate(worker.sessionId, "__EGBackground.ready.then(() => true)");
+          stage = "native-regex-attestation";
+          report.nativeRegex = await attestNativeRegexes({inventory: regexInventory,
+            evaluate: expression => evaluate(worker.sessionId, expression),
+            recheck: () => artifactRegexesUnchanged(options.extension, regexInventory), browserProduct: version.product});
+          record("every artifact regex accepted by native Chrome", report.nativeRegex.status,
+            {expected: report.nativeRegex.expected, checked: report.nativeRegex.checked,
+              rejected: report.nativeRegex.rejected, unavailable: report.nativeRegex.unavailable,
+              inventorySha256: report.nativeRegex.inventorySha256});
+          assert(report.nativeRegex.status !== "FAIL", "Native regex attestation failed");
           privacy = await open(`chrome-extension://${loaded.id}/privacy.html`);
           send = message => evaluate(privacy.sessionId, `chrome.runtime.sendMessage(${JSON.stringify(message)})`);
           const off = await send({type: "browser-privacy-hardening-status"});
@@ -467,6 +481,8 @@ export async function runNative(options) {
         baselineWindow: baseline.windowProbes, protectedWindow: protectedArm.windowProbes,
         workerObservations: protectedArm.outcomes.filter(row => ["worker", "service-worker"].includes(row.kind)).map(({kind, result}) => ({kind, gpcPresent: result.gpcPresent ?? null, gpc: result.gpc ?? null, returnedHighEntropyKeys: result.returnedHighEntropyKeys ?? null})),
         baselineHeaders: baseline.gpc, protectedHeaders: protectedArm.gpc};
+      report.nativeRegex.artifactMatchesFinalSnapshot = artifactRegexesUnchanged(options.extension, regexInventory);
+      record("static regex artifact matches final snapshot", report.nativeRegex.artifactMatchesFinalSnapshot ? "PASS" : "FAIL");
       report.qualification = checks.some(check => check.status === "FAIL") ? "FAIL" : checks.some(check => check.status === "NOT COVERED") ? "INCOMPLETE" : "PASS";
     } finally { clearTimeout(deadline); }
   } catch {
@@ -484,7 +500,7 @@ export async function runNative(options) {
 export async function main(args, native = runNative) {
   const options = parseOptions(args);
   // Keep this branch before artifact/executable checks, temp paths and processes.
-  if (options.check) return staticCheck();
+  if (options.check) return staticCheck(options);
   return native(options);
 }
 

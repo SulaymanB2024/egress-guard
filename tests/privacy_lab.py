@@ -28,13 +28,15 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
+from privacy_accounting import CHANNELS as BYTE_CHANNELS, ConsumedReader, channel as byte_channel, framed_snapshot
+
 ROOT = Path(__file__).resolve().parents[1]
 HOSTS = ("publisher.test", "shop.test", "tracker.test", "alias.test", "allowed.test", "blocked.test")
 HINT_HEADERS = ("sec-ch-ua-arch", "sec-ch-ua-bitness", "sec-ch-ua-form-factors", "sec-ch-ua-full-version",
                 "sec-ch-ua-full-version-list", "sec-ch-ua-model", "sec-ch-ua-platform-version", "sec-ch-ua-wow64")
 IDENTIFIER = re.compile(rb"eglab-id-[0-9a-f]{24}")
 VISIT = re.compile(r"[0-9a-f]{24}\Z")
-CASES = frozenset({"ga4", "opaque", "third-party", "image", "worker", "service-worker", "cart", "headers", "socket"})
+CASES = frozenset({"ga4", "opaque", "third-party", "image", "worker", "service-worker", "cart", "headers", "socket", "deferred"})
 MAX_BODY = 8192
 MAX_EVENTS = 8192
 EXISTING_POLICY = "camera=(), microphone=(), geolocation=()"
@@ -161,7 +163,8 @@ class Collector(ThreadingHTTPServer):
         connection.settimeout(5)
         try:
             wrapped = self.tls.wrap_socket(connection, server_side=True)
-            row = {"host": getattr(wrapped, "_lab_host", None), "peer_port": peer[1], "application_bytes": 0, "closed": False}
+            row = {"host": getattr(wrapped, "_lab_host", None), "peer_port": peer[1], "application_bytes": 0,
+                   "attributed_bytes": {name: 0 for name in BYTE_CHANNELS}, "closed": False}
             with self.lock:
                 if len(self.connections) >= MAX_EVENTS:
                     self.overflow = True
@@ -179,14 +182,19 @@ class Collector(ThreadingHTTPServer):
         if VISIT.fullmatch(visit) is None or case not in CASES:
             return
         headers = {key.lower(): value for key, value in handler.headers.items()}
-        data = handler.path.encode("utf-8") + b"\n" + body
+        header_data = b""
         for name in ("cookie", "x-posthog-distinct-id", "x-posthog-session-id", "x-posthog-window-id"):
             for value in handler.headers.get_all(name, []):
-                data += b"\n" + value.encode("utf-8")
-        tokens = sorted({match.decode() for match in IDENTIFIER.findall(data)})
+                header_data += b"\n" + value.encode("utf-8")
+        by_source = {name: sorted({match.decode() for match in IDENTIFIER.findall(data)})
+                     for name, data in (("url", handler.path.encode("utf-8")), ("headers", header_data), ("body", body))}
+        tokens = sorted(set().union(*map(set, by_source.values())))
         event = {"visit": visit, "case": case, "host": handler.host, "method": "WEBSOCKET" if websocket else handler.command,
                  "body_bytes": len(body), "distinct_identifier_bytes": sum(len(t) for t in tokens),
                  "identifiers": tokens, "peer_port": handler.client_address[1],
+                 "identifier_sources": by_source,
+                 "channel": handler._channel,
+                 "request_or_frame_bytes": handler._last_frame_bytes,
                  "high_entropy_headers": [name for name in HINT_HEADERS if name in headers],
                  "posthog_headers": [name for name in ("x-posthog-distinct-id", "x-posthog-session-id", "x-posthog-window-id") if name in headers],
                  "gpc": handler.headers.get_all("sec-gpc", []) == ["1"]}
@@ -199,6 +207,38 @@ class Collector(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+
+    def setup(self):
+        super().setup()
+        self.rfile = ConsumedReader(self.rfile)
+        self._frame_start = 0
+        self._last_frame_bytes = 0
+        self._channel = "unclassified_complete"
+
+    def handle_one_request(self):
+        self._frame_start = self.rfile.position
+        self._last_frame_bytes = 0
+        super().handle_one_request()
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        if (not self.raw_requestline.endswith(b"\r\n") or self.rfile.last_line != b"\r\n"
+                or self.request_version != "HTTP/1.1"):
+            self.close_connection = True
+            return False
+        return True
+
+    def account(self, route, query, *, websocket=False):
+        self._channel = byte_channel(self.host, route, query.get("case", [""])[0], websocket=websocket)
+        count = self.rfile.position - self._frame_start
+        row, lock = self.connection._lab_meter
+        with lock:
+            if count < 0 or sum(row["attributed_bytes"].values()) + count > row["application_bytes"]:
+                raise RuntimeError("Origin framing counter lost conservation")
+            row["attributed_bytes"][self._channel] += count
+        self._last_frame_bytes = count
+        self._frame_start = self.rfile.position
 
     def log_message(self, *_args):
         pass
@@ -222,11 +262,13 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def parse(self):
-        authority = self.headers.get("Host", "")
+        authorities = self.headers.get_all("Host", [])
+        authority = authorities[0] if len(authorities) == 1 else ""
         try:
             parsed = urlsplit("https://" + authority)
             self.host = parsed.hostname
-            valid = (self.host in HOSTS and parsed.port == self.server.server_port and parsed.username is None
+            valid = (self.host in HOSTS and self.host == getattr(self.connection, "_lab_host", None)
+                     and parsed.port == self.server.server_port and parsed.username is None
                      and not (parsed.path or parsed.query or parsed.fragment))
         except ValueError:
             valid = False
@@ -238,20 +280,37 @@ class Handler(BaseHTTPRequestHandler):
         return target.path, parse_qs(target.query, keep_blank_values=True)
 
     def do_OPTIONS(self):
-        if self.parse() is not None:
+        parsed = self.parse()
+        if parsed is not None and self.empty_body():
+            self.account(*parsed)
             self.send(status=204)
+        else:
+            self.close_connection = True
+
+    def empty_body(self):
+        lengths = self.headers.get_all("Content-Length", [])
+        return not self.headers.get_all("Transfer-Encoding") and lengths in ([], ["0"])
 
     def do_POST(self):
         parsed = self.parse()
         if parsed is None:
             return
-        length = self.headers.get("Content-Length", "")
-        if self.headers.get("Transfer-Encoding") or not length.isdecimal() or not 0 <= int(length) <= MAX_BODY:
+        lengths = self.headers.get_all("Content-Length", [])
+        length = lengths[0] if len(lengths) == 1 else ""
+        if self.headers.get_all("Transfer-Encoding") or not length.isascii() or not length.isdecimal() or not 0 <= int(length) <= MAX_BODY:
             self.close_connection = True
             self.send(status=413)
             return
         body = self.rfile.read(int(length))
+        if len(body) != int(length):
+            self.close_connection = True
+            return
+        self.account(*parsed)
         self.server.record(self, parsed[1], body)
+        if parsed[0] == "/cart" and (body != b'{"sku":"fixture","quantity":1}'
+                or self.headers.get_all("X-Lab-CSRF") != ["fixture-session"]):
+            self.send(status=409)
+            return
         self.send(b'{"ok":true}', content_type="application/json")
 
     def do_GET(self):
@@ -259,8 +318,13 @@ class Handler(BaseHTTPRequestHandler):
         if parsed is None:
             return
         route, query = parsed
+        if not self.empty_body():
+            self.close_connection = True
+            self.send(status=400)
+            return
         if route == "/socket" and self.headers.get("Upgrade", "").lower() == "websocket":
             return self.websocket(query)
+        self.account(route, query)
         if route == "/page":
             policy = query.get("policy", ["absent"])[0]
             if policy not in POLICIES:
@@ -280,12 +344,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send(b'{"ok":true}', content_type="application/json")
 
     def websocket(self, query):
-        key = self.headers.get("Sec-WebSocket-Key", "")
+        keys = self.headers.get_all("Sec-WebSocket-Key", [])
+        key = keys[0] if len(keys) == 1 else ""
         try:
-            if len(base64.b64decode(key, validate=True)) != 16:
+            if (len(base64.b64decode(key, validate=True)) != 16
+                    or self.headers.get_all("Sec-WebSocket-Version") != ["13"]):
                 raise ValueError()
         except ValueError:
             return self.send(status=400)
+        self.account("/socket", query, websocket=True)
         self.send_response(101)
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
@@ -301,12 +368,16 @@ class Handler(BaseHTTPRequestHandler):
                 if first & 0x70 or not first & 0x80 or not size & 0x80:
                     break
                 length = size & 127
+                if length == 127:
+                    break
                 if length == 126:
                     encoded = self.rfile.read(2)
                     if len(encoded) != 2:
                         break
                     length = struct.unpack("!H", encoded)[0]
-                if length > MAX_BODY or length == 127:
+                    if length < 126:
+                        break
+                if length > MAX_BODY:
                     break
                 mask = self.rfile.read(4)
                 body = self.rfile.read(length)
@@ -315,9 +386,13 @@ class Handler(BaseHTTPRequestHandler):
                 body = bytes(value ^ mask[i % 4] for i, value in enumerate(body))
                 opcode = first & 15
                 if opcode == 8:
+                    if length == 1 or length > 125:
+                        break
+                    self.account("/socket", query, websocket=True)
                     break
                 if opcode not in (1, 2):
                     break
+                self.account("/socket", query, websocket=True)
                 self.server.record(self, query, body, websocket=True)
                 echo = b"ack"
                 self.wfile.write(b"\x81" + bytes([len(echo)]) + echo)
@@ -338,6 +413,8 @@ class Lab(AbstractContextManager):
         self.temp = tempfile.TemporaryDirectory(prefix="egress-guard-collector-")
         self.state = Path(self.temp.name)
         self.process = self.server = self.thread = self.log = None
+        self.meter_read_fd = self.meter_write_fd = None
+        self.meter_failed = False
 
     def __enter__(self):
         try:
@@ -389,14 +466,24 @@ class Lab(AbstractContextManager):
             atomic_private(feed.path(self.state), _snapshot({host}, time.time()))
         atomic_private(self.state / "config.toml", f'[proxy]\nport = {self.proxy_port}\n[logging]\nhistory = "none"\n'.encode())
         self.route_path = self.state / "routes.jsonl"
+        self.wire_path = self.state / "proxy-wire.json"
+        self.meter_read_fd, self.meter_write_fd = os.pipe()
+        os.set_blocking(self.meter_read_fd, False)
+        os.set_blocking(self.meter_write_fd, False)
         script = self.state / "fixture.py"
         script.write_text(f'''from dataclasses import replace
 import json
+import os
 from pathlib import Path
 from egress_guard import policy
+from egress_guard import addon as addon_module
 from egress_guard.addon import EgressGuard
+from privacy_proxy_meter import install
 _original = policy.selected_feeds
 policy.selected_feeds = lambda cfg: tuple(replace(feed, minimum=1) for feed in _original(cfg))
+origins = {{}}
+install(addon_module, Path({str(self.wire_path)!r}), origins,
+        on_failure=lambda: os.write({self.meter_write_fd}, b"!"))
 class LoopbackOnly:
     def __init__(self):
         self.targets = {{}}
@@ -407,12 +494,14 @@ class LoopbackOnly:
             data.server.error = "outside controlled fixture"
             return
         self.targets[data.server.id] = host
+        if len(origins) < {MAX_EVENTS}:
+            origins[data.server.id] = host
         data.server.address = ("127.0.0.1", {self.server.server_port})
     def server_connected(self, data):
         host = self.targets.pop(data.server.id, None)
         if host is not None and self.count < {MAX_EVENTS}:
             self.count += 1
-            row = {{"host": host, "peer_port": data.server.sockname[1]}}
+            row = {{"host": host, "peer_port": data.server.sockname[1], "tunnel_id": str(data.server.id)}}
             with Path({str(self.route_path)!r}).open("a") as out:
                 out.write(json.dumps(row) + "\\n")
     def server_connect_error(self, data):
@@ -422,12 +511,14 @@ addons = [EgressGuard(), LoopbackOnly()]
         self.log = (self.state / "proxy.log").open("wb")
         env = {key: value for key, value in os.environ.items() if key in {"PATH", "LANG", "LC_ALL", "SYSTEMROOT"}}
         env.update(EGRESS_GUARD_DATA=str(self.state), EGRESS_GUARD_CONFIG=str(self.state / "config.toml"),
-                   PYTHONPATH=str(ROOT / "src"), PYTHONDONTWRITEBYTECODE="1")
+                   PYTHONPATH=os.pathsep.join((str(ROOT / "src"), str(ROOT / "tests"))), PYTHONDONTWRITEBYTECODE="1")
         self.process = subprocess.Popen([sys.executable, "-c", "from mitmproxy.tools.main import mitmdump; mitmdump()",
                 "--mode", "regular", "--listen-host", "127.0.0.1", "--listen-port", str(self.proxy_port),
                 "--ignore-hosts", ".*", "--set", "connection_strategy=lazy", "--set", "flow_detail=0",
                 "--set", "termlog_verbosity=error", "--set", f"confdir={self.state / 'mitm'}", "-s", str(script)],
-                stdout=self.log, stderr=subprocess.STDOUT, env=env)
+                stdout=self.log, stderr=subprocess.STDOUT, env=env, pass_fds=(self.meter_write_fd,))
+        os.close(self.meter_write_fd)
+        self.meter_write_fd = None
         self.wait_policy()
 
     def wait_policy(self, *, different=None):
@@ -464,20 +555,47 @@ addons = [EgressGuard(), LoopbackOnly()]
                 "scope": "Synthetic loopback origins, original TLS and fixed host routing; not a network sandbox."}
 
     def snapshot(self):
+        try:
+            signal = os.read(self.meter_read_fd, 1)
+            # EOF while the child should be running is also incomplete evidence.
+            # One byte is a failure signal; EOF is a broken diagnostics channel.
+            self.meter_failed = True
+        except BlockingIOError:
+            pass
+        if self.meter_failed:
+            raise RuntimeError("Fixture metering failed; traffic was forwarded without qualification credit")
         routes = []
         if self.route_path.exists():
             if self.route_path.stat().st_size > 1024 * 1024:
                 raise RuntimeError("Fixture route evidence exceeded its bound")
             routes = [json.loads(line) for line in self.route_path.read_text().splitlines()]
         known = {(row["host"], row["peer_port"]) for row in routes}
+        if not self.wire_path.exists() or self.wire_path.stat().st_size > 4 * 1024 * 1024:
+            raise RuntimeError("Missing or oversized proxy emission evidence")
+        wire = json.loads(self.wire_path.read_text())
+        if (wire.get("schema") != 1 or not isinstance(wire.get("tunnels"), list)
+                or len(wire["tunnels"]) > MAX_EVENTS or type(wire.get("overflow")) is not bool):
+            raise RuntimeError("Invalid proxy emission evidence")
+        ids = set()
+        for row in wire["tunnels"]:
+            if (not isinstance(row, dict) or not isinstance(row.get("tunnel_id"), str)
+                    or row["tunnel_id"] in ids or row.get("host") not in HOSTS
+                    or type(row.get("peer_port")) is not int
+                    or any(type(row.get(key)) is not int or row[key] < 0 for key in
+                           ("to_origin_bytes", "to_client_bytes", "origin_send_commands", "client_send_commands"))):
+                raise RuntimeError("Incomplete proxy tunnel identity or counters")
+            ids.add(row["tunnel_id"])
+        wire["definition"] = "Encrypted TLS bytes in PolicyRelay SendData commands after admission; excludes CONNECT, TCP overhead and acknowledgement. Not a delivery guarantee."
         with self.server.lock:
             events = [{**row, "proxy_route_observed": (row["host"], row["peer_port"]) in known} for row in self.server.events]
-            connections = [{**row, "proxy_route_observed": (row["host"], row["peer_port"]) in known} for row in self.server.connections]
+            connections = [{**row, "attributed_bytes": dict(row["attributed_bytes"]),
+                            "proxy_route_observed": (row["host"], row["peer_port"]) in known} for row in self.server.connections]
             return {"events": events, "closed_sockets": sorted(self.server.closed_sockets), "handler_errors": self.server.handler_errors,
                     "transport_disconnects": self.server.transport_disconnects,
-                    "overflow": self.server.overflow or len(routes) >= MAX_EVENTS,
+                    "overflow": self.server.overflow or len(routes) >= MAX_EVENTS or wire["overflow"],
                     "origin_body_bytes": sum(row["body_bytes"] for row in events), "observed_proxy_connections": len(routes),
-                    "connections": connections, "decrypted_origin_application_bytes": sum(row["application_bytes"] for row in connections)}
+                    "connections": connections, "decrypted_origin_application_bytes": sum(row["application_bytes"] for row in connections),
+                    "origin_framing": framed_snapshot(connections), "proxy_emissions": wire}
 
     def clear(self):
         with self.server.lock:
@@ -501,6 +619,11 @@ addons = [EgressGuard(), LoopbackOnly()]
             self.thread.join(2)
         if self.log is not None:
             self.log.close()
+        for name in ("meter_read_fd", "meter_write_fd"):
+            descriptor = getattr(self, name)
+            if descriptor is not None:
+                os.close(descriptor)
+                setattr(self, name, None)
         self.temp.cleanup()
 
     def __exit__(self, *_args):
