@@ -116,7 +116,11 @@
     {
       id: "prebid-user-sync-query", family: "prebid", category: "fp-trackers", stage: "identity-sync",
       conditions: {
-        methods: ["get"], resourceTypes: ["image", "sub_frame"], path: "/setuid", queryMode: "singleton-identity",
+        // The source's public callback URL can include a deployment prefix. Keep the
+        // final endpoint exact and accept only one plain segment: two counted segments
+        // exceed the selected 2 KiB RE2 budget with this complete query envelope.
+        methods: ["get"], resourceTypes: ["image", "sub_frame"],
+        path: "/(?:[A-Za-z0-9_-]+/)?setuid", queryMode: "singleton-identity",
         query: [{key: "bidder", valuePattern: "[a-z][a-z0-9_-]*"},
           {key: "uid", valuePattern: "[A-Za-z0-9][A-Za-z0-9_-]+"}],
         optionalQueryKeys: ["gdpr", "gdpr_consent", "gpp", "gpp_sid", "account", "f"],
@@ -124,8 +128,13 @@
       },
       sourceRefs: [source(`https://github.com/prebid/prebid-server/blob/${PREBID}/endpoints/setuid.go`, PREBID),
         source(`https://github.com/prebid/prebid-server/blob/${PREBID}/usersync/cookie.go`, PREBID),
+        source(`https://github.com/prebid/prebid-server/blob/${PREBID}/config/config.go`, PREBID),
+        source(`https://github.com/prebid/prebid-server/blob/${PREBID}/usersync/syncer.go`, PREBID),
+        source(`https://github.com/prebid/prebid-server/blob/${PREBID}/router/router.go`, PREBID),
         source("https://docs.prebid.org/prebid-server/endpoints/pbs-endpoint-setuid.html")],
       limitations: ["Only literal singleton bidder/uid fields and a contiguous group of approved optional keys match.",
+        "The final /setuid endpoint may have one plain ASCII prefix segment; deeper, encoded, dotted, or empty prefix segments are outside this policy grammar.",
+        "The source can generate a prefixed public callback through its external URL or redirect template; its native router still registers /setuid, so a deployment rewrite is required.",
         "Missing/empty uid deletes a sync in the server; duplicate identity fields, encoded/unknown keys, and empty segments decline this signature.",
         "Single-character IDs, including 0, and negative/encoded values, including -1, remain outside this conservative token grammar.",
         "Optional fields spread around both identities, other transports, renamed endpoints, and server-to-server operations remain outside scope."],

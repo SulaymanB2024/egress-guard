@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Egress Guard Companion",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Locally built ad, tracker and threat blocking, with reversible page hiding and optional on-device ad review.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkwoFe6kgodZ7HIcbFvIhyTZGEDBAYjFOcbhWzwKiwih+g7r2nlVsJ0liOeJNZh3W+ezChEhGnlbecHJYgjh+JdkiMAVEfUzOh/K0/j0wl4vyrKoG2oKFsivq1aZDJj5NDvon1wuI1ls5D5Oxt4GYEBhIK/3I1A75g7jCkGNEGeiYOdA304B8AQjslXiPmFnBPogCFjWxrqkSxob0ZuDEuZY9b0ZhBjSsU9o++tT4NBmR/qCIAv4n2Q2r+5qRqfwRL7xTb1uKZP9HLZfNma5ZCv0W5gpKvLId2+WhKMlR0NeZuPWkd5W0XWkeXRuG52jDM1nMMwSJmd9TRGv24vOKxQIDAQAB",
   "minimum_chrome_version": "145",

@@ -1,0 +1,450 @@
+{
+  "schema": 1,
+  "reviewed_on": "2026-11-22",
+  "baseline_revision": "74b1ec5d89b5d7fdad6b22c48116ef101279b74d",
+  "baseline_module_sha256": "ca201eaca19c018007e0534e96bca48849196f8f8c28daa505c2ad13d2273aa9",
+  "candidate_module_sha256": "07158f82c85f08ac05d5c88b21db1583c282b18caf6c4f5edbb97ce30d5b2772",
+  "source_manifest_sha256": "b14bfe9f6a8a23e7ffd1b1347d612112599696b604522c2ffb6860b6c23bb496",
+  "evidence_level": "standalone-re2-and-authored-request-shapes",
+  "native_chrome": "NOT COVERED",
+  "vendor_sdk_execution": "NOT COVERED",
+  "scope": "Selected protocol catalog only. These authored development controls are not captured SDK traffic, a frozen holdout benchmark, or full-list artifact coverage. No production requests were sent.",
+  "rule_count_before": 29,
+  "rule_count_after": 29,
+  "prebid_rule_count": 6,
+  "engine": {
+    "package": "google-re2",
+    "version": "1.1.20251105",
+    "options": {
+      "encoding": "LATIN1",
+      "max_mem": 2048,
+      "case_sensitive": true,
+      "never_capture": true
+    }
+  },
+  "qualified_regexes": [
+    {
+      "id": 1,
+      "pattern_sha256": "f73382111c49d3cf87c18a9af9e9b01701243f3672a9c9427a25d3744e0336c9",
+      "source_bytes": 76,
+      "program_size": 80,
+      "status": "PASS"
+    },
+    {
+      "id": 2,
+      "pattern_sha256": "ca7b67a06ff5a4b8af419336651e259649d9a53196841eb7398335d66cb3b7f6",
+      "source_bytes": 76,
+      "program_size": 80,
+      "status": "PASS"
+    },
+    {
+      "id": 3,
+      "pattern_sha256": "711452c1430b24597133187488ebc625e6e5725e104c45a7cf3a841186c751a9",
+      "source_bytes": 61,
+      "program_size": 72,
+      "status": "PASS"
+    },
+    {
+      "id": 4,
+      "pattern_sha256": "f223617ee4cc70011b13d4c5d7639b99168ecb6960a63f1a51824077b603de04",
+      "source_bytes": 118,
+      "program_size": 82,
+      "status": "PASS"
+    },
+    {
+      "id": 5,
+      "pattern_sha256": "3eb336661d3e0739aa484cede5818bdc8de28018654db9885975f6072240a373",
+      "source_bytes": 118,
+      "program_size": 82,
+      "status": "PASS"
+    },
+    {
+      "id": 6,
+      "pattern_sha256": "a208f3ff47ced0fac37d82a33f8ec266689aba251266801d9900e7ffa79c2fb1",
+      "source_bytes": 105,
+      "program_size": 83,
+      "status": "PASS"
+    },
+    {
+      "id": 7,
+      "pattern_sha256": "a169f0a9efcb4547d025acc5aef9cc1e2547ecccdea6c7e6638ced474f269959",
+      "source_bytes": 105,
+      "program_size": 83,
+      "status": "PASS"
+    },
+    {
+      "id": 8,
+      "pattern_sha256": "581926c0e590aab50292f06202d37cb844edefdfa24ea98b83726c0536668d93",
+      "source_bytes": 105,
+      "program_size": 83,
+      "status": "PASS"
+    },
+    {
+      "id": 9,
+      "pattern_sha256": "0b0c398500650f21060ec4bee5a1ac7340fc542f5da4f7b29398d591a58b5ff4",
+      "source_bytes": 105,
+      "program_size": 83,
+      "status": "PASS"
+    },
+    {
+      "id": 10,
+      "pattern_sha256": "4243e8ef172fd0ba8ed2beb703ee517097342c65ef76c82ec052bd228ea3edb8",
+      "source_bytes": 105,
+      "program_size": 83,
+      "status": "PASS"
+    },
+    {
+      "id": 11,
+      "pattern_sha256": "de39a2c09ea64d344fba7c0f3bdc61409885ffc1ed14d1c5a83828655e74a635",
+      "source_bytes": 105,
+      "program_size": 83,
+      "status": "PASS"
+    },
+    {
+      "id": 12,
+      "pattern_sha256": "a8b3fc70909595ecc169fdb3aa7d6cb37a528de4680cab93cb9fc8ca8646d1b1",
+      "source_bytes": 101,
+      "program_size": 59,
+      "status": "PASS"
+    },
+    {
+      "id": 13,
+      "pattern_sha256": "59b3f5306bb4c7548d840f01f07705e00ff4be32679f34cd56d26af1e6e0801c",
+      "source_bytes": 101,
+      "program_size": 59,
+      "status": "PASS"
+    },
+    {
+      "id": 14,
+      "pattern_sha256": "daff7b4c8ec09934eda116b112c882e04209c1127d4fc2427ac64eed5c85842f",
+      "source_bytes": 101,
+      "program_size": 59,
+      "status": "PASS"
+    },
+    {
+      "id": 15,
+      "pattern_sha256": "b811ab1b847729efdf49bcec7f0d5069f503ac3cb4755169e5a895e1e6996ff6",
+      "source_bytes": 101,
+      "program_size": 59,
+      "status": "PASS"
+    },
+    {
+      "id": 16,
+      "pattern_sha256": "e354e82bbe46aae15dcf0053d6768a2fb9bc187bfb9196526726bc337f2e8ab4",
+      "source_bytes": 101,
+      "program_size": 59,
+      "status": "PASS"
+    },
+    {
+      "id": 17,
+      "pattern_sha256": "d7fe93ff3d26bd573daacec97acaeee1b8f3315cf7f728064eedc0fa5ef1b548",
+      "source_bytes": 101,
+      "program_size": 59,
+      "status": "PASS"
+    },
+    {
+      "id": 18,
+      "pattern_sha256": "e4b19fe5dd8de689e7b1c3f39475650122611a39092696b72e64583f060b0cd1",
+      "source_bytes": 131,
+      "program_size": 91,
+      "status": "PASS"
+    },
+    {
+      "id": 19,
+      "pattern_sha256": "4198cec0d9f9fa4805b978f21cfe13ed00b1415f6ba2791fed4e5a2d97fc0d70",
+      "source_bytes": 131,
+      "program_size": 91,
+      "status": "PASS"
+    },
+    {
+      "id": 20,
+      "pattern_sha256": "c55ecf45ad9a665fe52593338e3bc99949636ef3b1fee6febd23b55d31f55617",
+      "source_bytes": 131,
+      "program_size": 91,
+      "status": "PASS"
+    },
+    {
+      "id": 21,
+      "pattern_sha256": "914e192a5fe590a836b90e0d83437ce6953f95af33f1e3cacb6190ed40675228",
+      "source_bytes": 131,
+      "program_size": 91,
+      "status": "PASS"
+    },
+    {
+      "id": 22,
+      "pattern_sha256": "6197796d85a2dec5b01680cf33a4dbf91a8db21513c12350389759451a152367",
+      "source_bytes": 131,
+      "program_size": 91,
+      "status": "PASS"
+    },
+    {
+      "id": 23,
+      "pattern_sha256": "73379970b3209b9c797150abecf150f185b7e9c50856c2211effeb5617c66685",
+      "source_bytes": 131,
+      "program_size": 91,
+      "status": "PASS"
+    },
+    {
+      "id": 24,
+      "pattern_sha256": "af20fbc7b07eac6c9bbae9c87de1dea12898b0c7fb51e0b330f3821a3f6811f5",
+      "source_bytes": 163,
+      "program_size": 89,
+      "status": "PASS"
+    },
+    {
+      "id": 25,
+      "pattern_sha256": "de16001326c261e098a20b441dcbc3476231d116537846a9e771ef5c8df13f60",
+      "source_bytes": 163,
+      "program_size": 89,
+      "status": "PASS"
+    },
+    {
+      "id": 26,
+      "pattern_sha256": "c0a5c2ee4273b9b57c580ba2252e4ea03f7903932ff2a644339b98020d4e132d",
+      "source_bytes": 163,
+      "program_size": 91,
+      "status": "PASS"
+    },
+    {
+      "id": 27,
+      "pattern_sha256": "50e91a274f709df983155be06e7016548915b4ff2730190e52729adc4c0962b4",
+      "source_bytes": 163,
+      "program_size": 89,
+      "status": "PASS"
+    },
+    {
+      "id": 28,
+      "pattern_sha256": "780033899d15053f9be0d2580754ab81ee0d2ba1bf9468e315c5f61153872720",
+      "source_bytes": 163,
+      "program_size": 89,
+      "status": "PASS"
+    },
+    {
+      "id": 29,
+      "pattern_sha256": "44b75ab0d7bdc9c7472a85412d9e2e5f18002da0040cd9cd6e60d725865ce289",
+      "source_bytes": 163,
+      "program_size": 91,
+      "status": "PASS"
+    }
+  ],
+  "rejected_scope_probes": [
+    {
+      "maximum_plain_prefix_segments": 2,
+      "results": [
+        {
+          "id": 24,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 25,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 26,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 27,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 28,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 29,
+          "status": "REJECTED_COMPILED_MEMORY"
+        }
+      ],
+      "disposition": "NOT EMITTED"
+    },
+    {
+      "maximum_plain_prefix_segments": 4,
+      "results": [
+        {
+          "id": 24,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 25,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 26,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 27,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 28,
+          "status": "REJECTED_COMPILED_MEMORY"
+        },
+        {
+          "id": 29,
+          "status": "REJECTED_COMPILED_MEMORY"
+        }
+      ],
+      "disposition": "NOT EMITTED"
+    }
+  ],
+  "cases": [
+    {
+      "id": "canonical-sync",
+      "kind": "tracking-shape",
+      "url": "https://shop.example/setuid?bidder=pubmatic&uid=123",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": true,
+      "candidate_catalog_block": true
+    },
+    {
+      "id": "pbs-prefix-sync",
+      "kind": "tracking-shape",
+      "url": "https://shop.example/pbs/setuid?bidder=pubmatic&uid=123",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": true
+    },
+    {
+      "id": "prebid-prefix-frame",
+      "kind": "tracking-shape",
+      "url": "https://shop.example/prebid/setuid?uid=123&bidder=pubmatic",
+      "resource_type": "sub_frame",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": true
+    },
+    {
+      "id": "prefix-privacy-fields",
+      "kind": "tracking-shape",
+      "url": "https://shop.example/prebid/setuid?bidder=pubmatic&gdpr=0&f=i&uid=123",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": true
+    },
+    {
+      "id": "deep-prefix-residual",
+      "kind": "unrecognized-residual",
+      "url": "https://shop.example/ads/pbs/setuid?bidder=pubmatic&uid=123",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "empty-uid-deletion",
+      "kind": "functional-control",
+      "url": "https://shop.example/pbs/setuid?bidder=pubmatic&uid=",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "missing-uid-deletion",
+      "kind": "functional-control",
+      "url": "https://shop.example/prebid/setuid?bidder=pubmatic",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "first-empty-duplicate",
+      "kind": "functional-control",
+      "url": "https://shop.example/pbs/setuid?uid=&bidder=pubmatic&uid=123",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "encoded-first-empty",
+      "kind": "functional-control",
+      "url": "https://shop.example/pbs/setuid?%75id=&bidder=pubmatic&uid=123",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "optout-control",
+      "kind": "functional-control",
+      "url": "https://shop.example/pbs/setuid?bidder=pubmatic&uid=123&optout=1",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "endpoint-status",
+      "kind": "functional-control",
+      "url": "https://shop.example/pbs/setuid/status?bidder=pubmatic&uid=123",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "ordinary-account-update",
+      "kind": "functional-control",
+      "url": "https://shop.example/auth/setuid?user=123&action=update",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "top-navigation",
+      "kind": "functional-control",
+      "url": "https://shop.example/prebid/setuid?bidder=pubmatic&uid=123",
+      "resource_type": "main_frame",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "unsupported-post",
+      "kind": "functional-control",
+      "url": "https://shop.example/prebid/setuid?bidder=pubmatic&uid=123",
+      "resource_type": "image",
+      "method": "post",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "unsupported-xhr",
+      "kind": "functional-control",
+      "url": "https://shop.example/prebid/setuid?bidder=pubmatic&uid=123",
+      "resource_type": "xmlhttprequest",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    },
+    {
+      "id": "nested-return-url",
+      "kind": "functional-control",
+      "url": "https://shop.example/return?next=https%3A%2F%2Fshop.example%2Fpbs%2Fsetuid%3Fbidder%3Dpubmatic%26uid%3D123",
+      "resource_type": "image",
+      "method": "get",
+      "baseline_catalog_block": false,
+      "candidate_catalog_block": false
+    }
+  ],
+  "summary": {
+    "tracking_shapes": 4,
+    "newly_recognized_tracking_shapes": 3,
+    "explicit_deep_prefix_residuals": 1,
+    "functional_controls": 11,
+    "newly_blocked_functional_controls": 0
+  },
+  "limits": [
+    "One plain ASCII prefix segment is a conservative policy bound, not a vendor configuration limit.",
+    "The server source generates public callbacks but does not itself register prefixed routes. A deployment rewrite is necessary.",
+    "Browser rule installation, redirects, request normalization, service workers, caches, cross-extension precedence and real SDK lifecycle delivery are not established by standalone RE2."
+  ]
+}

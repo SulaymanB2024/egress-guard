@@ -94,6 +94,8 @@ test("CLI entrypoint executes when installed in a directory containing spaces", 
     fs.mkdirSync(path.dirname(lib), {recursive: true});
     fs.copyFileSync(cli, cloned);
     fs.copyFileSync(path.resolve(__dirname, "../../scripts/lib/sdk-wire-drift.cjs"), lib);
+    fs.copyFileSync(path.resolve(__dirname, "../../scripts/lib/sdk-source-review.cjs"),
+      path.join(path.dirname(lib), "sdk-source-review.cjs"));
     const p = spawnSync(process.execPath, [cloned, "--not-valid"], {encoding: "utf8", timeout: 10000});
     assert.notEqual(p.status, 0, "CLI must reject invalid input, not silently exit 0");
     assert.match(p.stderr, /sdk-wire-drift: invalid input/);
@@ -107,6 +109,18 @@ test("routing, positive controls, sender completion and native declaration are r
     assert.equal(compareReceipts(good, receipt(rev2, {evidence})).status, "NOT COVERED");
   assert.equal(compareReceipts(receipt(rev1, {setup: {execution: "source-only"}}),
     receipt(rev2, {setup: {execution: "source-only"}})).status, "NOT COVERED");
+});
+test("simulated lifecycle evidence stays distinct from source review and native SDK delivery", () => {
+  const before = receipt(rev1, {setup: {execution: "simulated-lifecycle"}});
+  const after = receipt(rev2, {setup: {execution: "simulated-lifecycle"},
+    tracking: {received_canary_events: 1, received_application_bytes: 10}});
+  // These are comparator unit inputs, not actual collector measurements.
+  assert.equal(validateReceipt(before), before);
+  const result = compareReceipts(before, after);
+  assert.equal(result.status, "NOT COVERED");
+  assert.deepEqual(result.new_canary_escapes, ["query"]);
+  assert.equal(result.pinned_setup.execution, "simulated-lifecycle");
+  assert.throws(() => compareReceipts(before, receipt(rev2)), /Environment/);
 });
 test("policy/artifact/fixture and denominator drift are rejected", () => {
   const base = receipt(rev1);

@@ -70,14 +70,15 @@ function arms(CHANNELS, EXPECTED_BLOCKED) {
   for (const key of CHANNELS) {
     baseline.channels[key] = {receivedVisits: 8, events: key === "cart" ? 16 : 8, completedContexts: key === "cart" ? 16 : 8,
       actionWindows: {measuredWindows: key === "cart" ? 16 : 8, zeroByteWindows: 0,
-        positiveByteWindows: key === "cart" ? 16 : 8, totalTargetOriginApplicationBytes: 800}};
+        positiveByteWindows: key === "cart" ? 16 : 8, totalTargetOriginApplicationBytes: 800,
+        positiveOtherOriginWindows: 0, totalOtherOriginApplicationBytes: 0}};
     baseline.scores[key] = score(key);
   }
   baseline.scores.all = score("all");
   const protectedArm = structuredClone(baseline); protectedArm.trackerHostApplicationBytes = 0;
   for (const key of EXPECTED_BLOCKED) protectedArm.channels[key].receivedVisits = protectedArm.channels[key].events = 0;
   protectedArm.channels.ga4.actionWindows = {measuredWindows: 8, zeroByteWindows: 8, positiveByteWindows: 0,
-    totalTargetOriginApplicationBytes: 0};
+    totalTargetOriginApplicationBytes: 0, positiveOtherOriginWindows: 0, totalOtherOriginApplicationBytes: 0};
   return {baseline, protectedArm};
 }
 
@@ -184,10 +185,10 @@ test("sampled first-party zero-byte credit requires a positive baseline and all 
   const find = () => assessDelivery(pair.baseline, pair.protectedArm, 8).find(row => row.name.startsWith("sampled first-party"));
   assert.equal(find().status, "PASS");
   pair.protectedArm.channels.ga4.actionWindows = {measuredWindows: 8, zeroByteWindows: 7, positiveByteWindows: 1,
-    totalTargetOriginApplicationBytes: 11};
+    totalTargetOriginApplicationBytes: 11, positiveOtherOriginWindows: 0, totalOtherOriginApplicationBytes: 0};
   assert.equal(find().status, "NOT COVERED");
   pair.protectedArm.channels.ga4.actionWindows = {measuredWindows: 8, zeroByteWindows: 8, positiveByteWindows: 0,
-    totalTargetOriginApplicationBytes: 0};
+    totalTargetOriginApplicationBytes: 0, positiveOtherOriginWindows: 0, totalOtherOriginApplicationBytes: 0};
   pair.baseline.channels.ga4.actionWindows.totalTargetOriginApplicationBytes = 0;
   assert.equal(find().status, "NOT COVERED");
 });

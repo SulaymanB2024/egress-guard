@@ -1,0 +1,1887 @@
+{
+  "arms": {
+    "baseline": {
+      "attempts": [
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 94,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 135,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 252,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 174,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 171,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 1779,
+          "received_application_bytes": 158,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 94,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 135,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 252,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 174,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 171,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 1779,
+          "received_application_bytes": 158,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 94,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 135,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 252,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 174,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 171,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 1779,
+          "received_application_bytes": 158,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 94,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 135,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 252,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 174,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 171,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 1779,
+          "received_application_bytes": 158,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 89,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 130,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 169,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 166,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 1779,
+          "received_application_bytes": 158,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 242,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 89,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 130,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 169,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 166,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 1779,
+          "received_application_bytes": 158,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 242,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 89,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 130,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 169,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 166,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 1779,
+          "received_application_bytes": 158,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 242,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 89,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 130,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 169,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 166,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 1779,
+          "received_application_bytes": 158,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 242,
+          "status": "PASS"
+        }
+      ],
+      "byte_conservation": true,
+      "channel_bytes": {
+        "first_party_body_collector": 1372,
+        "first_party_functional": 2080,
+        "first_party_url_or_header_collector": 3056,
+        "fixture_control": 0,
+        "third_party_collector": 1264,
+        "unclassified_complete": 0,
+        "websocket_telemetry": 1956
+      },
+      "functional_responses": {
+        "expected": 16,
+        "passed": 16
+      },
+      "matrix": {
+        "all_channels": {
+          "bytes_delivered": 9728,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        },
+        "first_party_body_collector": {
+          "bytes_delivered": 1372,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        },
+        "first_party_url_or_header_collector": {
+          "bytes_delivered": 3056,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        },
+        "third_party_collector": {
+          "bytes_delivered": 1264,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        },
+        "websocket_telemetry": {
+          "bytes_delivered": 1956,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        }
+      },
+      "origin_connections": [
+        {
+          "application_bytes": 826,
+          "attributed_bytes": {
+            "first_party_body_collector": 174,
+            "first_party_functional": 265,
+            "first_party_url_or_header_collector": 387,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38102,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 158,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 158,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "tracker.test",
+          "peer_port": 38118,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 247,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 247
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38126,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 826,
+          "attributed_bytes": {
+            "first_party_body_collector": 174,
+            "first_party_functional": 265,
+            "first_party_url_or_header_collector": 387,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38142,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 158,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 158,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "tracker.test",
+          "peer_port": 38148,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 247,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 247
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38160,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 826,
+          "attributed_bytes": {
+            "first_party_body_collector": 174,
+            "first_party_functional": 265,
+            "first_party_url_or_header_collector": 387,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38170,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 158,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 158,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "tracker.test",
+          "peer_port": 38186,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 247,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 247
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38196,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 826,
+          "attributed_bytes": {
+            "first_party_body_collector": 174,
+            "first_party_functional": 265,
+            "first_party_url_or_header_collector": 387,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38202,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 158,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 158,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "tracker.test",
+          "peer_port": 38210,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 247,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 247
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38214,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 801,
+          "attributed_bytes": {
+            "first_party_body_collector": 169,
+            "first_party_functional": 255,
+            "first_party_url_or_header_collector": 377,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38216,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 158,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 158,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "tracker.test",
+          "peer_port": 38220,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 242,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 242
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38226,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 801,
+          "attributed_bytes": {
+            "first_party_body_collector": 169,
+            "first_party_functional": 255,
+            "first_party_url_or_header_collector": 377,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38242,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 158,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 158,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "tracker.test",
+          "peer_port": 38250,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 242,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 242
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38258,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 801,
+          "attributed_bytes": {
+            "first_party_body_collector": 169,
+            "first_party_functional": 255,
+            "first_party_url_or_header_collector": 377,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38260,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 158,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 158,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "tracker.test",
+          "peer_port": 38266,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 242,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 242
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38280,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 801,
+          "attributed_bytes": {
+            "first_party_body_collector": 169,
+            "first_party_functional": 255,
+            "first_party_url_or_header_collector": 377,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38284,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 158,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 158,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "tracker.test",
+          "peer_port": 38292,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 242,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 242
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38308,
+          "proxy_route_observed": true
+        }
+      ],
+      "proxy_byte_definition": "Encrypted TLS bytes in PolicyRelay SendData commands after admission; excludes CONNECT, TCP overhead and acknowledgement. Not a delivery guarantee.",
+      "proxy_origin_tunnel_join": true,
+      "same_tls_connection_visits": {
+        "expected": 8,
+        "passed": 8
+      },
+      "status": "PASS",
+      "tunnels": [
+        {
+          "client_send_commands": 11,
+          "host": "publisher.test",
+          "origin_send_commands": 7,
+          "peer_port": 38102,
+          "to_client_bytes": 3538,
+          "to_origin_bytes": 2537,
+          "tunnel_id": "5a6764cd-c429-4cb5-a588-4d7583a7b8d7"
+        },
+        {
+          "client_send_commands": 3,
+          "host": "tracker.test",
+          "origin_send_commands": 3,
+          "peer_port": 38118,
+          "to_client_bytes": 2637,
+          "to_origin_bytes": 1779,
+          "tunnel_id": "536b254b-e730-429b-8721-31e3c3b9206a"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "publisher.test",
+          "origin_send_commands": 4,
+          "peer_port": 38126,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1892,
+          "tunnel_id": "6693cd75-76e0-4cd2-b6aa-862f03e353ac"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "publisher.test",
+          "origin_send_commands": 7,
+          "peer_port": 38142,
+          "to_client_bytes": 3538,
+          "to_origin_bytes": 2537,
+          "tunnel_id": "1f499e79-6d05-4ad6-aa0b-0c727499ca1b"
+        },
+        {
+          "client_send_commands": 3,
+          "host": "tracker.test",
+          "origin_send_commands": 3,
+          "peer_port": 38148,
+          "to_client_bytes": 2637,
+          "to_origin_bytes": 1779,
+          "tunnel_id": "dac2538c-b321-4064-a802-3d2e3655318d"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "publisher.test",
+          "origin_send_commands": 4,
+          "peer_port": 38160,
+          "to_client_bytes": 2663,
+          "to_origin_bytes": 1892,
+          "tunnel_id": "c99a5ceb-615c-49d0-b5b2-df6c8a835ddf"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "publisher.test",
+          "origin_send_commands": 7,
+          "peer_port": 38170,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2537,
+          "tunnel_id": "11cf23a9-3021-4810-b863-ff9c86ccc44c"
+        },
+        {
+          "client_send_commands": 3,
+          "host": "tracker.test",
+          "origin_send_commands": 3,
+          "peer_port": 38186,
+          "to_client_bytes": 2637,
+          "to_origin_bytes": 1779,
+          "tunnel_id": "2d7c6abc-c0c1-400c-9c53-cd3628a94f80"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "publisher.test",
+          "origin_send_commands": 4,
+          "peer_port": 38196,
+          "to_client_bytes": 2665,
+          "to_origin_bytes": 1892,
+          "tunnel_id": "c1abfe6e-63a7-46e3-a93e-1278f5106eca"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "publisher.test",
+          "origin_send_commands": 7,
+          "peer_port": 38202,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2537,
+          "tunnel_id": "3203ec2c-99b9-421f-8e20-bbadc46ede65"
+        },
+        {
+          "client_send_commands": 3,
+          "host": "tracker.test",
+          "origin_send_commands": 3,
+          "peer_port": 38210,
+          "to_client_bytes": 2637,
+          "to_origin_bytes": 1779,
+          "tunnel_id": "58c93add-86d1-4939-b697-e83fb89f609d"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "publisher.test",
+          "origin_send_commands": 4,
+          "peer_port": 38214,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1892,
+          "tunnel_id": "48c8eaba-7ab0-468c-9179-a91ce6d1bf5f"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "shop.test",
+          "origin_send_commands": 7,
+          "peer_port": 38216,
+          "to_client_bytes": 3536,
+          "to_origin_bytes": 2507,
+          "tunnel_id": "009b7bbe-42d2-424a-841c-6b8928e1111f"
+        },
+        {
+          "client_send_commands": 3,
+          "host": "tracker.test",
+          "origin_send_commands": 3,
+          "peer_port": 38220,
+          "to_client_bytes": 2638,
+          "to_origin_bytes": 1779,
+          "tunnel_id": "457606ee-1bb0-4c08-a46e-f239c2786f7a"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "shop.test",
+          "origin_send_commands": 4,
+          "peer_port": 38226,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1882,
+          "tunnel_id": "e28a07c4-22cf-4f26-911c-1e7f756bc149"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "shop.test",
+          "origin_send_commands": 7,
+          "peer_port": 38242,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2507,
+          "tunnel_id": "35da8a16-b6ee-4d13-a044-eeb96efb9b12"
+        },
+        {
+          "client_send_commands": 3,
+          "host": "tracker.test",
+          "origin_send_commands": 3,
+          "peer_port": 38250,
+          "to_client_bytes": 2638,
+          "to_origin_bytes": 1779,
+          "tunnel_id": "2dc9003a-2774-4642-96b9-00668393b56c"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "shop.test",
+          "origin_send_commands": 4,
+          "peer_port": 38258,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1882,
+          "tunnel_id": "612738e1-c825-4d12-8604-02bc3aafc4e0"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "shop.test",
+          "origin_send_commands": 7,
+          "peer_port": 38260,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2507,
+          "tunnel_id": "5c64c8f2-936f-4315-a71c-d2aaf4cc8e57"
+        },
+        {
+          "client_send_commands": 3,
+          "host": "tracker.test",
+          "origin_send_commands": 3,
+          "peer_port": 38266,
+          "to_client_bytes": 2636,
+          "to_origin_bytes": 1779,
+          "tunnel_id": "d58420a6-a24f-461a-92b3-865fed8ba22a"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "shop.test",
+          "origin_send_commands": 4,
+          "peer_port": 38280,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1882,
+          "tunnel_id": "9bf15937-5581-4235-8702-5457f4f41e67"
+        },
+        {
+          "client_send_commands": 12,
+          "host": "shop.test",
+          "origin_send_commands": 7,
+          "peer_port": 38284,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2507,
+          "tunnel_id": "fe1a3678-ab4b-4424-81db-4f334e11233b"
+        },
+        {
+          "client_send_commands": 3,
+          "host": "tracker.test",
+          "origin_send_commands": 3,
+          "peer_port": 38292,
+          "to_client_bytes": 2637,
+          "to_origin_bytes": 1779,
+          "tunnel_id": "74a04d85-b456-44eb-a495-5ea81344412d"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "shop.test",
+          "origin_send_commands": 4,
+          "peer_port": 38308,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1882,
+          "tunnel_id": "1035dc2b-cf50-47ef-907d-68cb494e33bc"
+        }
+      ],
+      "unparsed_or_truncated_bytes": 0
+    },
+    "protected_proxy": {
+      "attempts": [
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 94,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 135,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 252,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 174,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 171,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 0,
+          "received_application_bytes": 0,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 94,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 135,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 252,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 174,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 171,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 0,
+          "received_application_bytes": 0,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 94,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 135,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 252,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 174,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 171,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 0,
+          "received_application_bytes": 0,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 94,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 135,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 252,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 174,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 171,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 0,
+          "received_application_bytes": 0,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 89,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 130,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 169,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 166,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 0,
+          "received_application_bytes": 0,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 242,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 89,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 130,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 169,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 166,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 0,
+          "received_application_bytes": 0,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 242,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 89,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 130,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 169,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 166,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 0,
+          "received_application_bytes": 0,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 242,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 89,
+          "status": "PASS"
+        },
+        {
+          "case": "ga4",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 130,
+          "status": "PASS"
+        },
+        {
+          "case": "headers",
+          "channel": "first_party_url_or_header_collector",
+          "expected_request_bytes": 247,
+          "status": "PASS"
+        },
+        {
+          "case": "opaque",
+          "channel": "first_party_body_collector",
+          "expected_request_bytes": 169,
+          "status": "PASS"
+        },
+        {
+          "case": "cart",
+          "channel": "first_party_functional",
+          "expected_request_bytes": 166,
+          "status": "PASS"
+        },
+        {
+          "case": "third-party",
+          "channel": "third_party_collector",
+          "proxy_emitted_tls_bytes": 0,
+          "received_application_bytes": 0,
+          "status": "PASS"
+        },
+        {
+          "case": "socket",
+          "channel": "websocket_telemetry",
+          "expected_upgrade_and_frame_bytes": 242,
+          "status": "PASS"
+        }
+      ],
+      "byte_conservation": true,
+      "channel_bytes": {
+        "first_party_body_collector": 1372,
+        "first_party_functional": 2080,
+        "first_party_url_or_header_collector": 3056,
+        "fixture_control": 0,
+        "third_party_collector": 0,
+        "unclassified_complete": 0,
+        "websocket_telemetry": 1956
+      },
+      "functional_responses": {
+        "expected": 16,
+        "passed": 16
+      },
+      "matrix": {
+        "all_channels": {
+          "bytes_delivered": 8464,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        },
+        "first_party_body_collector": {
+          "bytes_delivered": 1372,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        },
+        "first_party_url_or_header_collector": {
+          "bytes_delivered": 3056,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        },
+        "third_party_collector": {
+          "bytes_delivered": 0,
+          "cross_site_matches": 0,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 0
+        },
+        "websocket_telemetry": {
+          "bytes_delivered": 1956,
+          "cross_site_matches": 4,
+          "false_matches": 0,
+          "negative_pairs": 12,
+          "positive_pairs": 4,
+          "status": "PASS",
+          "unique_identities_extracted": 4
+        }
+      },
+      "origin_connections": [
+        {
+          "application_bytes": 826,
+          "attributed_bytes": {
+            "first_party_body_collector": 174,
+            "first_party_functional": 265,
+            "first_party_url_or_header_collector": 387,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38312,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 247,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 247
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38322,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 826,
+          "attributed_bytes": {
+            "first_party_body_collector": 174,
+            "first_party_functional": 265,
+            "first_party_url_or_header_collector": 387,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38336,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 247,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 247
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38338,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 826,
+          "attributed_bytes": {
+            "first_party_body_collector": 174,
+            "first_party_functional": 265,
+            "first_party_url_or_header_collector": 387,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38342,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 247,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 247
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38344,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 826,
+          "attributed_bytes": {
+            "first_party_body_collector": 174,
+            "first_party_functional": 265,
+            "first_party_url_or_header_collector": 387,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38348,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 247,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 247
+          },
+          "closed": true,
+          "host": "publisher.test",
+          "peer_port": 38362,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 801,
+          "attributed_bytes": {
+            "first_party_body_collector": 169,
+            "first_party_functional": 255,
+            "first_party_url_or_header_collector": 377,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38368,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 242,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 242
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38382,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 801,
+          "attributed_bytes": {
+            "first_party_body_collector": 169,
+            "first_party_functional": 255,
+            "first_party_url_or_header_collector": 377,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 38396,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 242,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 242
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 51494,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 801,
+          "attributed_bytes": {
+            "first_party_body_collector": 169,
+            "first_party_functional": 255,
+            "first_party_url_or_header_collector": 377,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 51510,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 242,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 242
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 51514,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 801,
+          "attributed_bytes": {
+            "first_party_body_collector": 169,
+            "first_party_functional": 255,
+            "first_party_url_or_header_collector": 377,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 0
+          },
+          "closed": true,
+          "host": "shop.test",
+          "peer_port": 51522,
+          "proxy_route_observed": true
+        },
+        {
+          "application_bytes": 242,
+          "attributed_bytes": {
+            "first_party_body_collector": 0,
+            "first_party_functional": 0,
+            "first_party_url_or_header_collector": 0,
+            "fixture_control": 0,
+            "third_party_collector": 0,
+            "unclassified_complete": 0,
+            "websocket_telemetry": 242
+          },
+          "closed": false,
+          "host": "shop.test",
+          "peer_port": 51524,
+          "proxy_route_observed": true
+        }
+      ],
+      "proxy_byte_definition": "Encrypted TLS bytes in PolicyRelay SendData commands after admission; excludes CONNECT, TCP overhead and acknowledgement. Not a delivery guarantee.",
+      "proxy_origin_tunnel_join": true,
+      "same_tls_connection_visits": {
+        "expected": 8,
+        "passed": 8
+      },
+      "status": "PASS",
+      "tunnels": [
+        {
+          "client_send_commands": 11,
+          "host": "publisher.test",
+          "origin_send_commands": 7,
+          "peer_port": 38312,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2537,
+          "tunnel_id": "f2c198dd-5d14-4ebf-9e3a-90b594e6849d"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "publisher.test",
+          "origin_send_commands": 4,
+          "peer_port": 38322,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1892,
+          "tunnel_id": "0f9b895e-3d00-4d79-b953-80fdcfad1117"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "publisher.test",
+          "origin_send_commands": 7,
+          "peer_port": 38336,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2537,
+          "tunnel_id": "8972e9c2-a017-482d-a4a2-10507756b3a2"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "publisher.test",
+          "origin_send_commands": 4,
+          "peer_port": 38338,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1892,
+          "tunnel_id": "11337121-d3ae-4dd5-9b0b-a19d471e907a"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "publisher.test",
+          "origin_send_commands": 7,
+          "peer_port": 38342,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2537,
+          "tunnel_id": "86bd1e4c-41e7-49e3-96d8-9e50b3844123"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "publisher.test",
+          "origin_send_commands": 4,
+          "peer_port": 38344,
+          "to_client_bytes": 2663,
+          "to_origin_bytes": 1892,
+          "tunnel_id": "18f3b8f2-a399-4685-9659-4d926ed764bb"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "publisher.test",
+          "origin_send_commands": 7,
+          "peer_port": 38348,
+          "to_client_bytes": 3537,
+          "to_origin_bytes": 2537,
+          "tunnel_id": "6b024432-8fea-4fab-be42-62befcd8184d"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "publisher.test",
+          "origin_send_commands": 4,
+          "peer_port": 38362,
+          "to_client_bytes": 2663,
+          "to_origin_bytes": 1892,
+          "tunnel_id": "f90878ec-13cd-449c-a498-455dea88234b"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "shop.test",
+          "origin_send_commands": 7,
+          "peer_port": 38368,
+          "to_client_bytes": 3538,
+          "to_origin_bytes": 2507,
+          "tunnel_id": "2e5eb788-0b18-41ec-9be3-d3bd1d496202"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "shop.test",
+          "origin_send_commands": 4,
+          "peer_port": 38382,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1882,
+          "tunnel_id": "2a90e74c-1797-4b3e-a990-2533f47a0e4d"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "shop.test",
+          "origin_send_commands": 7,
+          "peer_port": 38396,
+          "to_client_bytes": 3536,
+          "to_origin_bytes": 2507,
+          "tunnel_id": "e66c0779-2e45-4b2d-850a-717747c2696b"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "shop.test",
+          "origin_send_commands": 4,
+          "peer_port": 51494,
+          "to_client_bytes": 2663,
+          "to_origin_bytes": 1882,
+          "tunnel_id": "14fbc30b-e95f-4dc9-9f59-829ea460900d"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "shop.test",
+          "origin_send_commands": 7,
+          "peer_port": 51510,
+          "to_client_bytes": 3538,
+          "to_origin_bytes": 2507,
+          "tunnel_id": "23ed9c5a-c8ab-4c9c-b21a-e63521f1bcd1"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "shop.test",
+          "origin_send_commands": 4,
+          "peer_port": 51514,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1882,
+          "tunnel_id": "0887f3b9-22cf-4eaf-92cf-0b34dea4c121"
+        },
+        {
+          "client_send_commands": 11,
+          "host": "shop.test",
+          "origin_send_commands": 7,
+          "peer_port": 51522,
+          "to_client_bytes": 3536,
+          "to_origin_bytes": 2507,
+          "tunnel_id": "850e6a6c-7e9e-4973-aa08-4dcc7a5eef33"
+        },
+        {
+          "client_send_commands": 4,
+          "host": "shop.test",
+          "origin_send_commands": 3,
+          "peer_port": 51524,
+          "to_client_bytes": 2664,
+          "to_origin_bytes": 1882,
+          "tunnel_id": "4f2b1052-b11e-4517-80f0-8f6f7117fc16"
+        }
+      ],
+      "unparsed_or_truncated_bytes": 0
+    }
+  },
+  "idle_revocation": {
+    "closure_observed_after_ms": 1234,
+    "collector_written_after_deny": false,
+    "expected_functional_frames_after_deny": 8,
+    "functional_frames_after_deny": 8,
+    "idle_collector_closed": true,
+    "positive_collector_control": true,
+    "post_deny_origin_application_bytes": 0,
+    "post_deny_proxy_emitted_tls_bytes": 0,
+    "status": "PASS",
+    "timing_scope": "Observation after sequential functional controls; not an exact close timestamp or scheduling deadline."
+  },
+  "native_chrome": "not_executed",
+  "not_covered": [
+    "Native browser/DNR header or cookie sanitation",
+    "HTTP/2 or HTTP/3 multiplexing",
+    "Opaque bounce/server-side relay experiment",
+    "Application-encrypted or arbitrary compressed identity extraction",
+    "OS-wide routing or population anonymity"
+  ],
+  "residual": "Proxy-only protection leaves first-party URL, header, body and WebSocket identities linkable.",
+  "runtime": {
+    "mitmproxy": "12.3.1",
+    "platform": "linux",
+    "python": "3.12.14"
+  },
+  "schema": 1,
+  "scope": "Controlled HTTP/1.1 and bounded WebSocket frames over the original owned-origin TLS certificate, through the real proxy.",
+  "source_sha256": {
+    "scripts/qualify-channel-lab.py": "98c002b6c728db3801ed8928070dff55246d02a58c3fc63689cb5a57af938056",
+    "src/egress_guard/addon.py": "0ea43d6c88b801466dc919963d3e3bdc7dca205c7ca5f0e96bf3aba8774a6524",
+    "src/egress_guard/feeds.py": "63f8b2c5bb7001c012404d2652a65c167d6e5133830ec28eff8705fa1a7a19e9",
+    "src/egress_guard/policy.py": "1d2a944d9625f3795de7a40901bc0140428934f1cf60e03d9834dd26c6c16779",
+    "src/egress_guard/transport_policy.py": "9a9f330edf86d98b27448884457f6992049da9b2397d19e2c08166fdf64ac13c",
+    "tests/privacy_accounting.py": "f8ee35a3541793bf568f14ed830d10a152197a88648e26fa4e5512f6584f295e",
+    "tests/privacy_clients.py": "48eaae14062774be1feb84b82c643cb6c9bed9c65bc1452ea1e7a1150275e3ff",
+    "tests/privacy_lab.py": "e6b0a4937a9a8b53a967797172366768468835c9f7d403caa35f32d9c22b632d",
+    "tests/privacy_proxy_meter.py": "f941795a71bab6964ca5353420e7de5c4b6c757cd0ed5444315d9734a6a032c5"
+  },
+  "status": "PASS",
+  "synthetic_subjects": 4
+}

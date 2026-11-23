@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+from copy import copy
 import stat
 import time
 from pathlib import Path
@@ -119,13 +120,14 @@ def _expiry_valid(value: object, now: float) -> bool:
     return type(value) in (int, float) and now < value <= now + MAX_EXCEPTION_SECONDS
 
 
-def watched_paths(config_path: Path, state: Path) -> tuple[Path, ...]:
+def watched_paths(config_path: Path | None, state: Path) -> tuple[Path, ...]:
     """Every file whose contents can change a host decision's policy revision."""
-    return (config_path, state / "block.txt", state / "allow.txt", state / "filter-controls.json",
+    configuration = (config_path,) if config_path is not None else ()
+    return (*configuration, state / "block.txt", state / "allow.txt", state / "filter-controls.json",
             state / "tracker-exceptions.json", *(feed.path(state) for feed in ALL_FEEDS))
 
 
-def policy_stamp(config_path: Path, state: Path) -> tuple:
+def policy_stamp(config_path: Path | None, state: Path) -> tuple:
     """The shared change detector for the proxy and the dashboard.
 
     Inode and ctime catch same-size replacements whose mtime was preserved.
@@ -141,7 +143,8 @@ def policy_stamp(config_path: Path, state: Path) -> tuple:
 
 
 class Policy:
-    def __init__(self, config: dict, state: Path, previous: Policy | None = None) -> None:
+    def __init__(self, config: dict, state: Path, previous: Policy | None = None, *,
+                 component_loader=None) -> None:
         self.state = state
         self.logging = dict(config.get("logging", {}))
         self.proxy = dict(config.get("proxy", {}))
@@ -151,18 +154,17 @@ class Policy:
         # Each enabled feed is validated on its own. An unusable snapshot keeps the
         # last verified component from the running policy instead of becoming empty.
         prior = previous.components if previous is not None else {}
+        read_component = component_loader or load_cached_feed
         self.components: dict[str, CachedFeed] = {}
         self.coverage: dict[str, str] = {}
-        # Feeds stay separate compact sets, in selection order, rather than one copied union.
-        groups: dict[str, list] = {"threat": [], "tracker": [], "cname": [], "doh": []}
         for feed in self.feeds:
-            snapshot = load_cached_feed(state, feed)
+            snapshot = read_component(state, feed)
             if snapshot is not None:
                 self.coverage[feed.id] = "verified"
             elif feed.id in prior:
                 snapshot = prior[feed.id]
                 self.coverage[feed.id] = "last-good"
-            elif (substitute := self._other_threat_tier(state, feed)) is not None:
+            elif (substitute := self._other_threat_tier(state, feed, read_component)) is not None:
                 # After a tier change (or an upgrade to the full tier), keep enforcing the other
                 # verified HaGeZi tier until the selected one downloads. Reported as degraded.
                 snapshot = substitute
@@ -171,13 +173,7 @@ class Policy:
                 self.coverage[feed.id] = "missing"
                 continue
             self.components[feed.id] = snapshot
-            names = snapshot.names
-            groups[feed.category].append((feed, names if isinstance(names, HostSet) else HostSet.from_names(names)))
-        self.threats = groups["threat"]
-        self.ip_threats = [(feed, names) for feed, names in self.threats if feed.ips]
-        self.trackers = [names for _, names in groups["tracker"]]
-        self.cname = [names for _, names in groups["cname"]]
-        self.doh = [names for _, names in groups["doh"]]
+        self._group_components()
         self.block_encrypted_dns = block.get("block_encrypted_dns", True)
         self.manual = _rules(state / "block.txt")
         self.manual.update(host for name in block.get("hosts", []) if (host := dns_name(name)))
@@ -199,13 +195,47 @@ class Policy:
         self.reload_controls()
 
     @staticmethod
-    def _other_threat_tier(state: Path, feed) -> CachedFeed | None:
+    def _other_threat_tier(state: Path, feed, read_component) -> CachedFeed | None:
         if feed not in THREAT_TIERS.values():
             return None
         for other in THREAT_TIERS.values():
-            if other != feed and (snapshot := load_cached_feed(state, other)) is not None:
+            if other != feed and (snapshot := read_component(state, other)) is not None:
                 return snapshot
         return None
+
+    def _group_components(self) -> None:
+        """Use the same ordered component groups for live and preview decisions."""
+        groups: dict[str, list] = {"threat": [], "tracker": [], "cname": [], "doh": []}
+        for feed in self.feeds:
+            if (snapshot := self.components.get(feed.id)) is not None:
+                names = snapshot.names
+                groups[feed.category].append((feed, names if isinstance(names, HostSet) else HostSet.from_names(names)))
+        self.threats = groups["threat"]
+        self.ip_threats = [(feed, names) for feed, names in self.threats if feed.ips]
+        self.trackers = [names for _, names in groups["tracker"]]
+        self.cname = [names for _, names in groups["cname"]]
+        self.doh = [names for _, names in groups["doh"]]
+
+    def preview_component(self, feed_id: str, snapshot: CachedFeed) -> Policy:
+        """Replace one already selected, verified component in memory only.
+
+        The caller validates the candidate before using this seam. Controls and
+        settings are copied from this policy, not reread from disk. The returned
+        Policy shares the production precedence and decision implementation.
+        """
+        if feed_id not in {feed.id for feed in self.feeds}:
+            raise ValueError("cannot preview a feed that is not selected")
+        candidate = copy(self)
+        candidate.components = {**self.components, feed_id: snapshot}
+        candidate.coverage = {**self.coverage, feed_id: "verified"}
+        candidate.manual, candidate.allow = set(self.manual), set(self.allow)
+        candidate.dashboard_hosts = set(self.dashboard_hosts)
+        candidate.controls, candidate.exceptions = dict(self.controls), dict(self.exceptions)
+        candidate._group_components()
+        candidate._material = {**self._material, "feeds": {
+            feed.id: getattr(candidate.components.get(feed.id), "sha256", None) for feed in self.feeds}}
+        candidate._set_revision()
+        return candidate
 
     def enforceable(self) -> bool:
         """Threat and tracker data are present, so the proxy can filter at all."""
@@ -238,6 +268,9 @@ class Policy:
         self.exceptions = {host: expiry for host, expiry in
                            _read_controls(self.state / "tracker-exceptions.json").items()
                            if dns_name(host) == host and timestamp(expiry)}
+        self._set_revision()
+
+    def _set_revision(self) -> None:
         material = {**self._material, "controls": self.controls, "exceptions": self.exceptions}
         self.revision = hashlib.sha256(
             json.dumps(material, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -260,7 +293,7 @@ class Policy:
         # A public address skips every hostname rule; label it so the activity shows that.
         return ("ip-literal", address) if parsed.is_global else ("no-match", None)
 
-    def _source(self, host: str, port: int | None) -> tuple[str, str | None]:
+    def _source(self, host: str, port: int | None, at: float | None = None) -> tuple[str, str | None]:
         if dns_name(host) is None:
             # An IP literal is never a valid DNS name (its last label has no letter).
             address = ip_literal(host)
@@ -298,7 +331,7 @@ class Policy:
             return "dashboard-exception", host
         if allowed:
             return "local-allow", allowed
-        now = time.time()
+        now = time.time() if at is None else at
         excepted = _expiry_valid(self.exceptions.get(host), now)
         if doh is not None:
             # A timed exact-host exception covers DoH; pausing ad filtering does not.
@@ -309,11 +342,11 @@ class Policy:
             return "temporary-exception", host
         return ("tracker-feed", tracker) if tracker else ("cname-feed", host)
 
-    def decision(self, host: str, port: int | None = None) -> dict:
+    def decision(self, host: str, port: int | None = None, *, at: float | None = None) -> dict:
         """Decide one request target. `port` is optional; when given, an otherwise unmatched host
         on a port other than 80 or 443 is reported as `nonstandard-port` (still allowed)."""
         normalized = normalize_host(host)
-        source, match = self._source(normalized, port) if normalized else ("invalid-host", None)
+        source, match = self._source(normalized, port, at) if normalized else ("invalid-host", None)
         return {
             "decision": "blocked" if source in BLOCKED else "allowed",
             "source": source,
@@ -333,9 +366,9 @@ class Policy:
         return {"decision": "blocked" if source in BLOCKED else "allowed", "source": source,
                 "category": CATEGORIES[source], "matched_domain": match, "can_allow": False}
 
-    def explain(self, host: str, port: int | None = None) -> dict:
+    def explain(self, host: str, port: int | None = None, *, at: float | None = None) -> dict:
         """A decision that says `indeterminate` when missing coverage could change an allow."""
-        result = self.decision(host, port)
+        result = self.decision(host, port, at=at)
         if result["decision"] == "allowed" and not self.ready():
             result["decision"] = "indeterminate"
         return {**result, "policy_ready": self.ready(), **self.summary()}

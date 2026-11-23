@@ -28,39 +28,81 @@ CREDENTIAL_HEADERS = ("Authorization", "Cookie")
 # A ClientHello, even with post-quantum key shares, fits well inside these bounds.
 MAX_CLIENT_HELLO_BYTES = 32 * 1024
 MAX_CLIENT_HELLO_READS = 32
+# Event-loop cadence, not a wall-clock deadline or a policy-load guarantee.
+TUNNEL_RECHECK_INTERVAL = 1.0
 
 
 class PolicyRelay(TCPLayer):
-    """Recheck opaque bytes immediately before the pinned relay sends them.
+    """Recheck opaque bytes before forwarding and revoke admitted idle tunnels.
 
     Inspecting emitted commands also covers data buffered inside TCPLayer while
     OpenConnection was pending. Keep its ordinary half-close/error behavior and
     ignore=True mode: no TLS decryption or retained TCP message history.
+    One pinned-layer wakeup checks the same current policy without sending data.
     """
 
     def __init__(self, context, *, admit: Callable[[], bool]) -> None:
         super().__init__(context, ignore=True)
         self._admit = admit
         self._revoked = False
+        self._policy_wakeup: commands.RequestWakeup | None = None
+
+    def _finished(self) -> bool:
+        return self._handle_event == self.done or not (
+            self.context.client.state & connection.ConnectionState.CAN_READ
+            or self.context.server.state & connection.ConnectionState.CAN_READ
+        )
+
+    def _policy_allows(self) -> bool:
+        try:
+            return bool(self._admit())
+        except Exception:
+            # A failed policy check cannot become an unchecked relay.
+            return False
+
+    def _arm_policy_wakeup(self):
+        if self._policy_wakeup is None and not self._revoked and not self._finished():
+            self._policy_wakeup = commands.RequestWakeup(TUNNEL_RECHECK_INTERVAL)
+            yield self._policy_wakeup
+
+    def _revoke(self):
+        self._revoked = True
+        self._policy_wakeup = None
+        self._paused = None
+        self._paused_event_queue.clear()
+        yield commands.CloseConnection(self.context.client)
+        yield commands.CloseConnection(self.context.server)
 
     def handle_event(self, event):
         if self._revoked:
             return
+        if isinstance(event, events.Wakeup):
+            # TCPLayer cannot handle Wakeup, and Layer would buffer it while
+            # paused. Consume stale/foreign tokens without changing our timer.
+            if event.command is not self._policy_wakeup:
+                return
+            self._policy_wakeup = None
+            if self._finished():
+                return
+            if not self._policy_allows():
+                yield from self._revoke()
+            else:
+                yield from self._arm_policy_wakeup()
+            return
         for command in super().handle_event(event):
             if isinstance(command, commands.SendData):
-                try:
-                    allowed = self._admit()
-                except Exception:
-                    # A failed policy check cannot become an unchecked relay.
-                    allowed = False
-                if not allowed:
-                    self._revoked = True
-                    self._paused = None
-                    self._paused_event_queue.clear()
-                    yield commands.CloseConnection(self.context.client)
-                    yield commands.CloseConnection(self.context.server)
+                if not self._policy_allows():
+                    yield from self._revoke()
                     return
             yield command
+            if isinstance(command, commands.SendData):
+                # Only an admitted send proves that the pending connector has
+                # completed. Do not apply peer-dependent policy while opening.
+                yield from self._arm_policy_wakeup()
+        if self._finished():
+            # There is no cancellation command; invalidate the sole token.
+            # A later callback is inert, and mitmproxy cancels it at teardown.
+            self._policy_wakeup = None
 
 
 class TunnelGuard(layer.Layer):

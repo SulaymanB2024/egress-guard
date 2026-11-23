@@ -265,7 +265,7 @@ class Application:
                 self.refreshing = True
                 def refresh():
                     try:
-                        update_feeds(self.state, load_config(self.config_path))
+                        update_feeds(self.state, load_config(self.config_path), config_file=self.config_path)
                     finally:
                         self.refreshing = False
                 threading.Thread(target=refresh, daemon=True).start()

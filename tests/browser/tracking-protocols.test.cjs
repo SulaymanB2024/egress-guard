@@ -42,7 +42,8 @@ test("compiler emits only bounded static blocks with explicit methods/types and 
     assert.ok(rule.condition.requestMethods.length && rule.condition.resourceTypes.length);
     assert.ok(!rule.condition.resourceTypes.includes("main_frame"));
     if (rule.condition.resourceTypes.includes("sub_frame")) {
-      assert.ok(rule.condition.regexFilter.includes("/setuid\\?"), "only exact user-sync frames are in scope");
+      assert.ok(rule.condition.regexFilter.includes("/(?:[A-Za-z0-9_-]+/)?setuid\\?"),
+        "only the final user-sync endpoint with at most one plain prefix is in scope");
     }
     assert.ok(!("domainType" in rule.condition), "same-site collection remains in scope");
     assert.ok(!("tabIds" in rule.condition), "static rules carry no session authority");
@@ -74,7 +75,7 @@ test("catalog and provenance are immutable and each signature names its visibili
     assert.throws(() => { item.conditions.methods[0] = "delete"; }, TypeError);
   }
   const pinned = protocols.CATALOG.flatMap((item) => item.sourceRefs).filter((ref) => ref.revision);
-  assert.equal(pinned.length, 5);
+  assert.equal(pinned.length, 8);
   assert.ok(pinned.every((ref) => /^[0-9a-f]{40}$/.test(ref.revision) && ref.url.includes(ref.revision)));
 });
 
@@ -229,18 +230,21 @@ test("presence matching makes no unsupported claim about duplicate-field server 
   assert.equal(blocked("https://shop.example/measure?v=9&v=20&tid=G-12345678"), false);
 });
 
-test("Prebid new-identity sync uses an exact endpoint, supported transports, and a complete query envelope", () => {
+test("Prebid new-identity sync uses a final exact endpoint, supported transports, and a complete query envelope", () => {
   assert.equal(blocked("https://shop.example/setuid?bidder=pubmatic&uid=123", "image"), true,
     "the pinned server's first successful setuid test uses this bidder and UID shape");
   const optional = "gdpr=0&gdpr_consent=fixture&gpp=fixture&gpp_sid=2&account=publisher&f=i";
   for (const [first, second] of orders(["bidder=pubmatic", "uid=buyer-12345"])) {
     for (const query of [`${first}&${second}`, `${optional}&${first}&${second}`,
       `${first}&${optional}&${second}`, `${first}&${second}&${optional}`]) {
-      assert.equal(blocked(`https://shop.example/setuid?${query}`, "image"), true, query);
-      assert.equal(blocked(`https://shop.example/setuid?${query}`, "sub_frame"), true, query);
-      assert.equal(blocked(`https://shop.example/setuid?${query}`, "main_frame"), false, `navigation ${query}`);
-      assert.equal(blocked(`https://shop.example/setuid?${query}`, "xmlhttprequest"), false, `XHR ${query}`);
-      assert.equal(blocked(`https://shop.example/setuid?${query}`, "image", "post"), false, `POST ${query}`);
+      for (const endpoint of ["/setuid", "/pbs/setuid", "/prebid/setuid", "/Tenant_12-v3/setuid"]) {
+        const url = `https://shop.example${endpoint}?${query}`;
+        assert.equal(blocked(url, "image"), true, url);
+        assert.equal(blocked(url, "sub_frame"), true, url);
+        assert.equal(blocked(url, "main_frame"), false, `navigation ${url}`);
+        assert.equal(blocked(url, "xmlhttprequest"), false, `XHR ${url}`);
+        assert.equal(blocked(url, "image", "post"), false, `POST ${url}`);
+      }
     }
   }
   assert.equal(blocked("https://shop.example/setuid?bidder=pubmatic&uid=buyer12345&gdpr_consent=x%26uid%3D", "image"), true,
@@ -252,8 +256,10 @@ test("Prebid missing, empty, single-character, and negative identities never mat
     "uid=&gdpr=0&bidder=pubmatic", "bidder=pubmatic&uid=&f=i", "bidder=pubmatic&uid=0", "bidder=pubmatic&uid=-1",
     "bidder=pubmatic&uid=%30", "bidder=pubmatic&uid=%2D1", "bidder=pubmatic&uid=%20", "bidder=pubmatic&uid=+",
     "uid=buyer12345", "bidder=&uid=buyer12345", "bidder=pubmatic&uid=a", "bidder=pubmatic&uid=buyer;uid="]) {
-    assert.equal(blocked(`https://shop.example/setuid?${query}`, "image"), false, query);
-    assert.equal(blocked(`https://shop.example/setuid?${query}`, "sub_frame"), false, query);
+    for (const endpoint of ["/setuid", "/pbs/setuid", "/prebid/setuid"]) {
+      assert.equal(blocked(`https://shop.example${endpoint}?${query}`, "image"), false, query);
+      assert.equal(blocked(`https://shop.example${endpoint}?${query}`, "sub_frame"), false, query);
+    }
   }
 });
 
@@ -267,7 +273,9 @@ test("Prebid refuses duplicate and encoded identity keys in every position, incl
       for (let where = 0; where <= pair.length; where++) {
         const fields = [...pair]; fields.splice(where, 0, extra);
         const query = fields.join("&");
-        assert.equal(blocked(`https://shop.example/setuid?${query}`, "image"), false, query);
+        for (const endpoint of ["/setuid", "/pbs/setuid", "/prebid/setuid"]) {
+          assert.equal(blocked(`https://shop.example${endpoint}?${query}`, "image"), false, query);
+        }
       }
     }
   }
@@ -279,9 +287,24 @@ test("Prebid unknown/encoded keys, privacy-control requests, and unsupported que
     "bidder=pubmatic&uid=buyer12345&%66=i", "bidder=pubmatic&uid=buyer12345&GDPR=0",
     "bidder=pubmatic&uid=buyer12345&", "&bidder=pubmatic&uid=buyer12345", "bidder=pubmatic&&uid=buyer12345",
     "f=i&bidder=pubmatic&uid=buyer12345&gdpr=0", "bidder=pubmatic&f=i&uid=buyer12345&gdpr=0"]) {
-    assert.equal(blocked(`https://shop.example/setuid?${query}`, "image"), false, query);
+    for (const endpoint of ["/setuid", "/pbs/setuid", "/prebid/setuid"]) {
+      assert.equal(blocked(`https://shop.example${endpoint}?${query}`, "image"), false, query);
+    }
   }
-  for (const endpoint of ["/setuid/", "/setuid/status", "/api/setuid", "/SETUID", "/cookie_sync", "/rpc"]) {
+  for (const endpoint of ["/setuid/", "/setuid/status", "/pbs/v1/setuid", "/pbs/setuid/", "/pbs/setuid/status",
+    "/pbs/prefixed-setuid", "/setuid.json", "/prefix.with-dot/setuid", "/%70bs/setuid", "/pbs%2Fsetuid",
+    "//setuid", "/pbs//setuid", "/SETUID", "/pbs/SETUID", "/cookie_sync", "/rpc"]) {
     assert.equal(blocked(`https://shop.example${endpoint}?bidder=pubmatic&uid=buyer12345`, "image"), false, endpoint);
+  }
+});
+
+test("Prebid deployment-prefix matching never treats nested query URLs as the requested endpoint", () => {
+  const sync = "https://shop.example/pbs/setuid?bidder=pubmatic&uid=buyer12345";
+  for (const url of [`https://shop.example/status?return=${sync}`,
+    `https://shop.example/status?return=${encodeURIComponent(sync)}`,
+    `https://shop.example/status#${sync}`, `https://shop.example/${sync}`,
+    "https://shop.example/pbs/setuid?operation=delete&bidder=pubmatic&uid=buyer12345",
+    "https://shop.example/pbs/setuid?bidder=pubmatic&uid=buyer12345&action=optout"]) {
+    assert.equal(blocked(url, "image"), false, url);
   }
 });

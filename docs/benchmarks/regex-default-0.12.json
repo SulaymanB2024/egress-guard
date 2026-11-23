@@ -1,0 +1,1 @@
+{"complete":true,"encoding":"Latin1","engine":"google-re2","error_count":0,"error_counts_by_ruleset":{},"errors":[],"errors_omitted":0,"failed":0,"max_mem":2048,"native_chrome":false,"package_version":"1.1.20251105","passed":941,"regexes":941,"rules":14180,"rulesets":17,"rulesets_read":17,"schema":1,"scope":"all-manifest-static-regexes-including-disabled","status":"passed"}

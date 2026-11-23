@@ -504,7 +504,7 @@ def _rollback_record(state: Path, feed: Feed, current: InstalledSnapshot, *, str
 
 
 def _publish(state: Path, feed: Feed, candidate: ReviewedSnapshot,
-             current: InstalledSnapshot, *, cause: str) -> dict:
+             current: InstalledSnapshot, *, cause: str, check_policy=None) -> dict:
     """Publish one snapshot while retaining recoverable, digest-bound rollback.
 
     An intent contains the previous bytes and the exact future active digest. It
@@ -514,6 +514,15 @@ def _publish(state: Path, feed: Feed, candidate: ReviewedSnapshot,
     """
     if _installed(state, feed).sha256 != current.sha256:
         raise ValueError("installed feed changed before publication")
+
+    def verify_before_replace():
+        raw = feed_review.read_regular(feed.path(state), MAX_FEED_BYTES)
+        actual = feed_review.digest(raw) if raw is not None else None
+        if actual != current.sha256:
+            raise ValueError("installed feed changed before publication")
+        if check_policy is not None:
+            check_policy()
+
     prior = _rollback_record(state, feed, current, strict=True)
     if prior is not None and prior[2] == "transition":
         os.replace(feed_review.path(state, feed, "transition"), feed_review.path(state, feed, "rollback"))
@@ -528,9 +537,10 @@ def _publish(state: Path, feed: Feed, candidate: ReviewedSnapshot,
     if backup is not None:
         feed_review.write(state, feed, "transition", backup.raw, candidate.sha256,
                           cause=backup_cause, limit=MAX_FEED_BYTES)
-    if _installed(state, feed).sha256 != current.sha256:
-        raise ValueError("installed feed changed before publication")
-    atomic_private(feed.path(state), candidate.raw)
+    verify_before_replace()
+    # The temp write/fsync can be slow. Recheck exact-base authority and the
+    # automatic policy guard AFTER it, directly before the active rename.
+    atomic_private(feed.path(state), candidate.raw, before_replace=verify_before_replace)
     recovery_pending = False
     if backup is not None:
         try:
@@ -582,14 +592,20 @@ def _record_action_attempt(state: Path, feed: Feed, **details) -> bool:
         return False
 
 
-def _refresh(state: Path, config: dict) -> dict:
+def _refresh(state: Path, config: dict, *, config_binding=None) -> dict:
     """Refresh each selected feed independently so a failed source keeps its cache."""
+    from .feed_impact import ComponentCache, ImpactContext, attempt_summary, not_covered
+
     feeds = selected_feeds(config)
     ok = True
+    component_cache = ComponentCache()
+    impact_checks = []
     for feed in feeds:
         started = time.time()
         error = None
         details = {}
+        impact = not_covered("candidate-not-validated")
+        context = None
         try:
             names, published = _parse_feed(_download(feed), feed)
             content = _snapshot(names, published)
@@ -597,25 +613,45 @@ def _refresh(state: Path, config: dict) -> dict:
             _validate_transition(candidate, current.verified)
             previous_names = current.verified.names if current.verified is not None else HostSet()
             assessment = feed_review.assess(feed, previous_names, candidate.names)
+            context = ImpactContext(state, config, component_cache=component_cache, config_binding=config_binding)
+            impact = context.compare(feed, candidate, base_sha256=current.sha256)
+            if impact["status"] != "compared" and impact["reason"] not in {
+                    "incomplete-feed-coverage", "invalid-feed-input"}:
+                raise ValueError("policy impact could not be checked; installed feed was retained")
+            assessment["reasons"].extend(impact["automatic_hold_reasons"])
+
+            def check_policy():
+                nonlocal impact
+                if not context.stable():
+                    impact = not_covered(context.reason or "policy-inputs-changed")
+                    raise ValueError("policy inputs changed during the feed check; retry refresh")
+
             prior = _rollback_record(state, feed, current, strict=True)
             if prior is not None and prior[0].metadata["cause"] == "rollback":
                 assessment["reasons"].append("explicit-rollback-hold")
+            check_policy()
             if assessment["reasons"]:
                 record = _stage(state, feed, candidate, current)
                 details = {"review_candidate_sha256": record.sha256,
                            "review_reasons": assessment["reasons"]}
                 raise ValueError(f"feed update quarantined; run 'egress-guard feed-review {feed.id}' before approval")
-            details = _publish(state, feed, candidate, current, cause="refresh")
+            details = _publish(state, feed, candidate, current, cause="refresh", check_policy=check_policy)
             if not _discard_candidate_file(state, feed):
                 details["candidate_cleanup_pending"] = True
         except (OSError, ValueError) as failure:
             ok = False
             error = str(failure) if type(failure) is ValueError else "could not install feed"
+            if context is not None and not context.stable():
+                impact = not_covered(context.reason or "policy-inputs-changed")
+        summary = attempt_summary(impact)
+        details["policy_impact"] = summary
+        impact_checks.append({"id": feed.id, **summary})
         try:
             _record_attempt(state, feed, started=started, error=error, **details)
         except OSError:
             ok = False
-    return {"ok": ok, "feeds": feed_status(state, config)}
+    return {"ok": ok, "feeds": feed_status(state, config),
+            "policy_impact": {"mode": "automatic-public-probes", "checks": impact_checks}}
 
 
 def _snapshot(names: set[str], published: float | None) -> bytes:
@@ -647,11 +683,20 @@ def _refresh_lock(state: Path):
         connection.close()
 
 
-def update_feeds(state: Path, config: dict) -> dict:
+def update_feeds(state: Path, config: dict, *, config_file: Path | None = None) -> dict:
     """Serialize refreshes and review publications across processes."""
+    from .feed_impact import bind_config
+
+    try:
+        config, binding = bind_config(config, config_file)
+    except (OSError, ValueError):
+        return {"ok": False, "feeds": feed_status(state, config),
+                "error": "configuration changed or could not be bound; reload settings and retry",
+                "policy_impact": {"mode": "automatic-public-probes", "checks": [],
+                                  "status": "not-covered", "reason": "configuration-binding-failed"}}
     try:
         with _refresh_lock(state):
-            return _refresh(state, config)
+            return _refresh(state, config, config_binding=binding)
     except RefreshBusy as error:
         return {"ok": False, "feeds": feed_status(state, config), "error": str(error)}
 
@@ -675,12 +720,18 @@ def _snapshot_summary(snapshot: ReviewedSnapshot | None) -> dict | None:
             "updated_at": snapshot.metadata["updated_at"], "stale": time.time() - clock > STALE_SECONDS}
 
 
-def review_feeds(state: Path, config: dict, feed_id: str | None = None) -> dict:
+def review_feeds(state: Path, config: dict, feed_id: str | None = None, *,
+                 config_file: Path | None = None) -> dict:
     """Inspect bounded local artifacts without locks, downloads or state creation."""
+    from .feed_impact import ImpactContext, bind_config, file_stamp, not_covered
+
+    config, binding = bind_config(config, config_file)
     selected = selected_feeds(config)
     items = (_review_feed(config, feed_id),) if feed_id is not None else selected
     enabled = {feed.id for feed in selected}
     rows = []
+    impact_context = None
+    candidate_stamps = {}
     for feed in items:
         current = _installed(state, feed)
         row = {"id": feed.id, "selected": feed.id in enabled, "source_url": feed.url,
@@ -688,10 +739,12 @@ def review_feeds(state: Path, config: dict, feed_id: str | None = None) -> dict:
                "active": {"state": "verified" if current.verified else "invalid" if current.raw is not None else "missing",
                           "snapshot_sha256": current.sha256, "snapshot": _snapshot_summary(current.verified)},
                "candidate": None, "rollback": None}
-        raw = feed_review.read_regular(feed_review.path(state, feed, "candidate"),
-                                       MAX_FEED_BYTES + feed_review.MAX_HEADER_BYTES)
+        candidate_path = feed_review.path(state, feed, "candidate")
+        candidate_stamps[feed.id] = candidate_path, file_stamp(candidate_path)
+        raw = feed_review.read_regular(candidate_path, MAX_FEED_BYTES + feed_review.MAX_HEADER_BYTES)
         if raw is not None:
-            row["candidate"] = {"state": "invalid", "candidate_sha256": feed_review.digest(raw)}
+            row["candidate"] = {"state": "invalid", "candidate_sha256": feed_review.digest(raw),
+                                "policy_impact": not_covered("invalid-candidate")}
             try:
                 record = feed_review.decode(raw, feed, "candidate", MAX_FEED_BYTES)
                 candidate = _reviewed_snapshot(record.payload, feed)
@@ -705,12 +758,28 @@ def review_feeds(state: Path, config: dict, feed_id: str | None = None) -> dict:
                                     "delta": feed_review.entry_delta(
                                         current.verified.contents if current.verified else b"", candidate.contents,
                                         exact=feed.exact, previous_names=previous_names,
-                                        candidate_names=candidate.names)}
+                                        candidate_names=candidate.names),
+                                    "policy_impact": not_covered("candidate-not-yet-checked")}
                 try:
                     _validate_transition(candidate, current.verified)
                 except ValueError as error:
                     row["candidate"]["state"] = "invalid-transition"
                     row["candidate"]["error"] = str(error)
+                    row["candidate"]["policy_impact"] = not_covered("invalid-transition")
+                else:
+                    if feed.id not in enabled:
+                        row["candidate"]["policy_impact"] = not_covered("feed-not-selected")
+                    elif state_name == "stale-base":
+                        row["candidate"]["policy_impact"] = not_covered("stale-candidate-base")
+                    else:
+                        if impact_context is None:
+                            impact_context = ImpactContext(state, config, config_binding=binding)
+                        delta = row["candidate"]["delta"]
+                        row["candidate"]["policy_impact"] = impact_context.compare(
+                            feed, candidate, base_sha256=current.sha256,
+                            changed_roots=(*delta["added_sample"], *delta["removed_sample"]))
+                        row["candidate"]["reasons"].extend(
+                            row["candidate"]["policy_impact"]["automatic_hold_reasons"])
             except ValueError as error:
                 row["candidate"]["error"] = str(error)
         try:
@@ -728,8 +797,21 @@ def review_feeds(state: Path, config: dict, feed_id: str | None = None) -> dict:
                     and record.metadata["cause"] == "rollback"):
                 row["candidate"]["reasons"].append("explicit-rollback-hold")
         rows.append(row)
+    if impact_context is not None and not impact_context.stable():
+        # A later change must also invalidate an earlier row in this same report.
+        for row in rows:
+            if row["candidate"] is not None and row["candidate"]["policy_impact"]["status"] == "compared":
+                row["candidate"]["policy_impact"] = not_covered(impact_context.reason or "policy-inputs-changed")
+    for row in rows:
+        path, observed = candidate_stamps[row["id"]]
+        if (row["candidate"] is not None and row["candidate"]["policy_impact"]["status"] == "compared"
+                and file_stamp(path) != observed):
+            row["candidate"]["policy_impact"] = not_covered("candidate-input-changed")
     return {"schema": 1, "catalog_version": feed_review.CATALOG_VERSION,
-            "scope": "feed-cache review; running policy and browser routing are not verified", "feeds": rows}
+            "scope": "feed-cache review; running policy and browser routing are not verified",
+            "configuration_status": ("supplied-settings" if binding is None else
+                                     "bound" if binding.stable() else "changed"),
+            "policy_impact_mode": "automatic-public-probes; configured-host effects advisory", "feeds": rows}
 
 
 def approve_feed(state: Path, config: dict, feed_id: str, *, candidate_sha256: str,

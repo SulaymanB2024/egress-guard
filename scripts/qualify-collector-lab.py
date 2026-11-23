@@ -94,7 +94,8 @@ def qualify():
                           "third_party_linkability": third_party,
                           "all_observed_channels_linkability": all_channels}
         metadata = lab.metadata()
-    source_files = ("tests/privacy_lab.py", "scripts/qualify-collector-lab.py", "src/egress_guard/addon.py",
+    source_files = ("tests/privacy_lab.py", "tests/privacy_accounting.py", "tests/privacy_proxy_meter.py",
+                    "scripts/qualify-collector-lab.py", "src/egress_guard/addon.py",
                     "src/egress_guard/transport_policy.py", "src/egress_guard/policy.py", "src/egress_guard/feeds.py")
     passed = all(arm["status"] == "PASS" for arm in arms.values())
     return {"schema": 1, "status": "PASS" if passed else "FAIL",

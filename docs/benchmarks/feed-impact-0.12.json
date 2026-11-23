@@ -1,0 +1,52 @@
+{
+  "base_commit": "74b1ec5d89b5d7fdad6b22c48116ef101279b74d",
+  "corpus": {
+    "network_requests": false,
+    "port": 443,
+    "public_contexts": 95,
+    "public_hosts": 64,
+    "sha256": "4a552d749b7a1715069811a2bab5890f81953fee8404f181f0e98b614b738bf4",
+    "synthetic_contexts": 31,
+    "version": 1
+  },
+  "files_sha256": {
+    "docs/feed-impact-0.12.md": "53137dd49652b879ed3f03c712e1bae6a6fd302fdcae6a28a5315bba9470cebb",
+    "src/egress_guard/cli.py": "a291848685ee24dc75e4be152660cdd9c67763e47ef7d1d68b69e9281a53848d",
+    "src/egress_guard/dashboard_app.py": "c80f751bb7a8ba51bf3aa21fba7351808d6f5c2b778dc1b0f4caa8efebac7cbe",
+    "src/egress_guard/feed-impact-probes.json": "4a552d749b7a1715069811a2bab5890f81953fee8404f181f0e98b614b738bf4",
+    "src/egress_guard/feed_impact.py": "75fce24221f2f598a855fc85b62c7135ab3124a419bc41a6df383a5b12f7cdd4",
+    "src/egress_guard/feed_review.py": "2e7ae5d4f5013db63ebfcd3f0781c64705f66d09bd06358eab4e046a6c59eda1",
+    "src/egress_guard/feeds.py": "63f8b2c5bb7001c012404d2652a65c167d6e5133830ec28eff8705fa1a7a19e9",
+    "src/egress_guard/paths.py": "981a92e79061da546601c2c721a810d33691963e22c345811baaa4cb4472d44e",
+    "src/egress_guard/policy.py": "1d2a944d9625f3795de7a40901bc0140428934f1cf60e03d9834dd26c6c16779",
+    "tests/test_feed_impact.py": "adf1970facc606747362b9965ebab41c433f73042453d9dcb7a77aa34d9522d5",
+    "tests/test_feed_review.py": "f14568aa3a526e6945114706fa2e03e858ded132738583ccf78129fc7853861c"
+  },
+  "focused_gate": {
+    "command": "PYTHONPATH=src:tests python -B -m unittest -v test_feed_impact test_policy test_feed_review test_feeds",
+    "errors": 0,
+    "failures": 0,
+    "log": "/workspace/scratch/a1ed0566cefd/validation-0.12/feed-impact-focused.log",
+    "log_sha256": "9729d63cd11d9bde507aa88d76309b41d3c236c8ce11da468463d20799f095a1",
+    "skips": 0,
+    "tests": 96,
+    "unittest_seconds": 3.53
+  },
+  "hygiene": {
+    "git_diff_check_exit": 0,
+    "trailing_whitespace": []
+  },
+  "limitations": [
+    "A bounded public host-policy regression gate, not universal feed-poisoning detection or publisher authentication",
+    "Current and grant-expiry counterfactual use frozen captured inputs; no prediction of future runtime behavior",
+    "Incomplete baseline/bootstrap or repair is explicitly not covered by decision-delta gate and retains existing hard validators/tripwires",
+    "Configured-host sampling is bounded and advisory; all configured rules still affect decisions",
+    "Final cross-file check and rename are not one filesystem transaction",
+    "Explicit settings-only Python API does not attest a configuration file",
+    "No native macOS, browser, network-routing or live-service qualification"
+  ],
+  "python": "3.12.14",
+  "schema": 1,
+  "scope": "Feed impact engine, automatic quarantine, configuration binding and publication authority; no native browser or OS qualification",
+  "status": "PASS"
+}

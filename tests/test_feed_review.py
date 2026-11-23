@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from egress_guard import feed_review, feeds
 from egress_guard.cli import main
+from egress_guard.config import default_config
 from egress_guard.policy import Policy
 
 
@@ -85,7 +86,8 @@ class FeedReviewTests(unittest.TestCase):
         self.assertEqual(after.decision("github.com")["decision"], "allowed")
         candidate = self.row()["candidate"]
         self.assertEqual(candidate["state"], "held")
-        self.assertEqual(candidate["reasons"], ["tracker-coverage-removed", "critical-infrastructure-added"])
+        self.assertEqual(candidate["reasons"], ["tracker-coverage-removed", "critical-infrastructure-added",
+                                              "policy-critical-deny", "policy-canary-allow"])
         self.assertEqual((candidate["delta"]["entries_added"], candidate["delta"]["entries_removed"]), (1, 1))
         impact = candidate["delta"]["semantic_coverage"]
         self.assertEqual((impact["newly_covered_roots"], impact["no_longer_covered_roots"]), (1, 1))
@@ -339,10 +341,10 @@ class FeedReviewTests(unittest.TestCase):
         current = self.active()
         atomic = feeds.atomic_private
 
-        def fail_active(path, content):
+        def fail_active(path, content, **kwargs):
             if path == self.tracker.path(self.state):
                 raise OSError("injected active rename failure")
-            return atomic(path, content)
+            return atomic(path, content, **kwargs)
 
         with patch("egress_guard.feeds.atomic_private", side_effect=fail_active):
             self.assertFalse(self.refresh(INITIAL | {"third.test"})["ok"])
@@ -490,12 +492,12 @@ feeds.selected_feeds = lambda config: (tracker, threat)
 feeds._download = lambda feed: (b"google-analytics.com\nthird.test\n" if feed == tracker
                                else b"other-threat.test\nthreat.test\n")
 atomic = feeds.atomic_private
-def interrupt(path, content):
+def interrupt(path, content, **kwargs):
     if path == tracker.path(state):
         if point == "before": os._exit(91)
-        atomic(path, content)
+        atomic(path, content, **kwargs)
         os._exit(92)
-    return atomic(path, content)
+    return atomic(path, content, **kwargs)
 feeds.atomic_private = interrupt
 feeds.update_feeds(state, {})
 raise AssertionError("interruption point was not reached")
@@ -539,7 +541,14 @@ raise AssertionError("interruption point was not reached")
 
         code, review, error = command(["feed-review", self.tracker.id])
         self.assertEqual((code, error), (0, ""))
-        self.assertEqual(review["feeds"][0]["candidate"], candidate)
+        reviewed = review["feeds"][0]["candidate"]
+        # Exact artifact identity is stable. The policy dry run uses the CLI's
+        # loaded defaults and a fresh evaluation instant, unlike this helper's {}.
+        self.assertEqual({key: value for key, value in reviewed.items() if key != "policy_impact"},
+                         {key: value for key, value in candidate.items() if key != "policy_impact"})
+        self.assertEqual(reviewed["policy_impact"]["status"], "compared")
+        self.assertEqual(reviewed["policy_impact"]["before"]["revision"],
+                         Policy(default_config(), self.state).revision)
         code, result, error = command(["feed-approve", self.tracker.id, "--candidate", candidate["candidate_sha256"],
                                        "--base", candidate["base_sha256"]])
         self.assertEqual((code, error), (0, ""))

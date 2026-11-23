@@ -24,7 +24,7 @@ function validateReceipt(r) {
   keys(r.setup, ["fixture_sha256", "policy_sha256", "extension_sha256", "execution"], "setup");
   for (const k of ["fixture_sha256", "policy_sha256", "extension_sha256"])
     if (!HEX64.test(r.setup[k])) throw new Error("Invalid setup pin");
-  if (!["native-chrome-proxy", "source-only"].includes(r.setup.execution))
+  if (!["native-chrome-proxy", "source-only", "simulated-lifecycle"].includes(r.setup.execution))
     throw new Error("Unknown execution mode");
   keys(r.evidence, ["sender_completed", "origin_tls_collector", "proxy_route_verified",
     "origin_meter_valid", "positive_control_bytes", "positive_control_events"], "evidence");

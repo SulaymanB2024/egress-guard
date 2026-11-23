@@ -19,7 +19,7 @@ from .bounded_json import loads as bounded_json
 from .paths import atomic_private, private_dir
 
 
-CATALOG_VERSION = 1
+CATALOG_VERSION = 2
 # A removal only matters if this particular component previously covered the
 # anchor. A feed is never required to contain all these names on first install.
 TRACKER_ANCHORS = (
@@ -36,6 +36,10 @@ CRITICAL_HOSTS = (
     "apple.com", "cloudflare.com", "pypi.org", "pythonhosted.org",
     "npmjs.org", "npmjs.com", "amazonaws.com", "cloudfront.net",
     "azurewebsites.net", "microsoft.com",
+    # These service roots sit below a provider parent. Adding one can cover
+    # many independent buckets/accounts without adding the provider itself.
+    # Official endpoint references are in docs/feed-impact-0.12.md.
+    "s3.amazonaws.com", "storage.googleapis.com", "blob.core.windows.net",
 )
 MAX_HEADER_BYTES = 4096
 MAX_SAMPLE_NAMES = 8
