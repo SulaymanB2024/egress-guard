@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blocked by Egress Guard</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="warning.css">
+</head>
+<body>
+<header class="bar"><span class="mark" aria-hidden="true"></span>Egress Guard</header>
+<main class="page" id="page" data-state="reduced" data-optical aria-labelledby="title">
+  <p class="kind"><span class="dot" aria-hidden="true"></span>Blocked before connecting</p>
+  <h1 id="title" class="t-display">Egress Guard blocks this site</h1>
+  <div class="dest">
+    <p class="h"><span class="host" id="host">…</span></p>
+    <p class="url t-caption"><span class="host" id="url"></span></p>
+  </div>
+  <dl class="facts">
+    <dt>Blocked by</dt><dd id="layer">Egress Guard</dd>
+    <dt>List</dt><dd id="list">A block list</dd>
+  </dl>
+  <p class="said">Your browser did not connect to this site.</p>
+  <p class="said" id="how" hidden></p>
+  <p class="said t-caption" id="path-line" hidden><span class="host" id="path"></span></p>
+  <div class="actions">
+    <button id="back" class="btn primary lg" type="button" autofocus>Go back</button>
+    <button id="retry" class="btn" type="button">Try again</button>
+    <button id="copy" class="btn quiet" type="button">Copy name</button>
+  </div>
+  <p id="note" class="said t-caption" role="status" hidden></p>
+</main>
+<script src="core/hosts.js"></script>
+<script src="refused.js"></script>
+</body>
+</html>

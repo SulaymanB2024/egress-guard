@@ -928,6 +928,9 @@
       if (details && Number.isInteger(details.replacedTabId) && details.replacedTabId >= 0) return retireTab(details.replacedTabId).catch(() => {});
       return sync().catch(() => {});
     });
+    // The system proxy refuses a blocked site with a 403 to its CONNECT, which Chrome shows only as "tunnel
+    // connection failed". Ask the proxy which layer refused it and show a page that says so.
+    if (C.webNavigation.onErrorOccurred) C.webNavigation.onErrorOccurred.addListener((details) => { explainRefusal(details).catch(() => {}); });
   }
 
   C.tabs.onUpdated.addListener((tabId, info, tab) => {
@@ -985,6 +988,30 @@
       await broadcast();
     }
   });
+
+  // ---- refused by the proxy ------------------------------------------------------
+  // A local answer from the guard on its reserved name: the blocked site itself is never contacted, and only the
+  // system proxy answers it (without it the name does not resolve and nothing happens).
+  const WHY = "http://egress-guard.invalid/why?host=";
+  /** A top-level load the proxy refused: replace Chrome's bare error with refused.html, naming the layer and list. */
+  async function explainRefusal(details) {
+    if (details.frameId !== 0 || details.error !== "net::ERR_TUNNEL_CONNECTION_FAILED") return;
+    if (!/^https?:/.test(details.url || "")) return;
+    const host = hosts.hostOfUrl(details.url);
+    if (!host) return;
+    const reply = await fetch(WHY + encodeURIComponent(host), {cache: "no-store", credentials: "omit"});
+    if (!reply.ok) return;
+    const why = await reply.json();
+    if (!why || why.blocked !== true || why.host !== host) return;
+    // The tab may have moved on while we asked; only replace the failed load itself.
+    const tab = await C.tabs.get(details.tabId).catch(() => null);
+    if (tab && tab.url && tab.url !== details.url && tab.pendingUrl !== details.url) return;
+    const query = new URLSearchParams({layer: why.layer === "dns-filter" ? "dns-filter" : "proxy",
+      source: typeof why.source === "string" ? why.source : "", allow: why.can_allow === true ? "1" : "0"});
+    // Where this guard keeps permanent allows (it differs between installs); shown as text on the page.
+    if (typeof why.allow_file === "string" && why.allow_file.length <= 200) query.set("file", why.allow_file);
+    await C.tabs.update(details.tabId, {url: `${OWN}refused.html?${query}#${details.url}`});
+  }
 
   // ---- messaging -------------------------------------------------------------------
   const extensionUrl = (sender, page) => typeof sender.url === "string" && sender.url.startsWith(OWN + page);

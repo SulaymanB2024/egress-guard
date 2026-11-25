@@ -24,7 +24,7 @@ const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setIm
 const THREATS = ["bad.example", "other-bad.example"];
 const isListed = (host) => THREATS.some((d) => host === d || host.endsWith(`.${d}`));
 
-async function worker({stored = fixture, packed = false, extraLocal = {}, extraSession = {}, initialDynamic = [], initialSession = [], now = START, faults = {}, threats = THREATS,
+async function worker({stored = fixture, packed = false, extraLocal = {}, extraSession = {}, initialDynamic = [], initialSession = [], now = START, faults = {}, threats = THREATS, why = null, tabUrl = null,
   tabs = [{id: 1, url: "https://publisher.example/article"}]} = {}) {
   const clock = {now};
   const reloads = [];
@@ -52,8 +52,8 @@ async function worker({stored = fixture, packed = false, extraLocal = {}, extraS
       getManifest: () => ({...manifest, ...(packed ? {update_url: "https://clients2.google.com/service/update2/crx"} : {})}), reload: () => { reloads.push(clock.now); }},
     storage: {local: area(local, "local"), session: area(session, "session")},
     alarms: {create: (name, info) => alarms.set(name, info), clear: async (name) => alarms.delete(name), get: async (name) => alarms.get(name), onAlarm: event()},
-    tabs: {onUpdated: event(), onRemoved: event(), sendMessage: async (tabId, msg) => { tabMessages.push({tabId, msg}); }, query: async () => JSON.parse(JSON.stringify(tabs))},
-    webNavigation: {onBeforeNavigate: event(), onCommitted: event(), onTabReplaced: event()},
+    tabs: {get: async (id) => ({id, url: tabUrl}), update: async (id, props) => { updates.push({id, ...props}); return {id}; }, onUpdated: event(), onRemoved: event(), sendMessage: async (tabId, msg) => { tabMessages.push({tabId, msg}); }, query: async () => JSON.parse(JSON.stringify(tabs))},
+    webNavigation: {onBeforeNavigate: event(), onCommitted: event(), onTabReplaced: event(), onErrorOccurred: event()},
     action: {setBadgeBackgroundColor: async () => {}},
     cookies: {onChanged: event(), remove: async (d) => { cookieCalls.push({op: "remove", ...d}); }, set: async (d) => { cookieCalls.push({op: "set", ...d}); }},
     browsingData: {remove: async (options, types) => { browsingCalls.push(JSON.parse(JSON.stringify({options, types}))); }},
@@ -69,6 +69,7 @@ async function worker({stored = fixture, packed = false, extraLocal = {}, extraS
     },
   };
   const matchedInfo = [];
+  const updates = [];
   const cookieCalls = [], browsingCalls = [];
   const fetched = [];
   if (packed) { delete chrome.declarativeNetRequest.onRuleMatchedDebug; delete chrome.declarativeNetRequest.testMatchOutcome; }
@@ -76,12 +77,16 @@ async function worker({stored = fixture, packed = false, extraLocal = {}, extraS
   const disk = {build: "0".repeat(32)};
   const fetch = async (url) => {
     fetched.push(url);
+    if (url.startsWith("http://egress-guard.invalid/why?host=")) {
+      if (!why) throw new TypeError("Failed to fetch");
+      return {ok: true, json: async () => why(decodeURIComponent(url.split("host=")[1]))};
+    }
     if (url === `${EXT}rules/build.json`) return {ok: true, json: async () => ({...disk})};
     if (url !== `${EXT}rules/threats.json`) throw new Error(`unexpected fetch ${url}`);
     return {ok: true, json: async () => [{id: 1, priority: 2, action: {type: "block"}, condition: {requestDomains: threats}}]};
   };
   class FakeDate extends Date { static now() { return clock.now; } }
-  const ctx = vm.createContext({chrome, console, URL, Date: FakeDate, crypto: globalThis.crypto, setTimeout, clearTimeout, fetch});
+  const ctx = vm.createContext({chrome, console, URL, URLSearchParams, Date: FakeDate, crypto: globalThis.crypto, setTimeout, clearTimeout, fetch});
   ctx.EGLists = {build: "0".repeat(32), lists: {trackers: {label: "Ads and trackers", name: "HaGeZi Multi PRO++", domains: 4}, threats: {label: "Malware and phishing", name: "HaGeZi Threat Intelligence (Medium)", domains: 2}}};
   for (const file of WORKER) vm.runInContext(read(`browser/${file}`), ctx, {filename: file});
   await ctx.__EGBackground.ready;
@@ -96,7 +101,7 @@ async function worker({stored = fixture, packed = false, extraLocal = {}, extraS
   const cont = (blocked = "https://login.bad.example/x?y=1", tabId = 4, shown = blocked, frameId = 0) => warning({type: "continue-once", url: shown}, blocked, tabId, frameId);
   const matched = (tabId, url, type, rulesetId, ruleId = 1) => chrome.declarativeNetRequest.onRuleMatchedDebug.fire({request: {tabId, url, type}, rule: {ruleId, rulesetId}});
   const unwrapPage = (msg, link, tabId = 6, frameId = 0) => { const url = `${EXT}unwrap.html#${link}`; return send(msg, {url, frameId, tab: {id: tabId, url}}); };
-  return {disk, reloads, ctx, chrome, clock, faults, tabs, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground, cookieCalls, browsingCalls, unwrapPage, send, dynamicUpdates,
+  return {updates, disk, reloads, ctx, chrome, clock, faults, tabs, local, session, alarms, tabMessages, popup, page, warning, cont, matched, matchedInfo, fetched, api: ctx.__EGBackground, cookieCalls, browsingCalls, unwrapPage, send, dynamicUpdates,
     dynamic: () => dynamicRules, sessionRules: () => sessionRules};
 }
 
@@ -112,7 +117,8 @@ test("manifest (Chrome): MV3 service worker, DNR rulesets, minimal permissions, 
   assert.deepEqual(manifest.web_accessible_resources, [{resources: ["warning.html", "unwrap.html", "surrogates/*.js"], matches: ["<all_urls>"], use_dynamic_url: true}]);
   assert.match(manifest.content_security_policy.extension_pages, /script-src 'self'/);
   // The worker may read its own packaged files (the threat ruleset) and nothing else.
-  assert.match(manifest.content_security_policy.extension_pages, /connect-src 'self'(;|$)/);
+  // And it may ask the local guard why the proxy refused a page (a reserved name only the system proxy answers).
+  assert.match(manifest.content_security_policy.extension_pages, /connect-src 'self' http:\/\/egress-guard\.invalid(;|$)/);
   assert.match(manifest.content_security_policy.extension_pages, /frame-ancestors 'none'/);
   assert.equal(ID.length, 32);
   // The page-world script only defines navigator.globalPrivacyControl; everything else runs isolated, top frame only.
@@ -120,7 +126,7 @@ test("manifest (Chrome): MV3 service worker, DNR rulesets, minimal permissions, 
   assert.deepEqual(manifest.content_scripts[0].js, ["page-gpc.js"]);
   assert.equal(manifest.content_scripts[1].world, undefined);
   assert.equal(manifest.content_scripts[1].all_frames, false);
-  for (const file of [...WORKER, ...manifest.content_scripts[0].js, ...manifest.content_scripts[1].js, "popup.html", "warning.html", "unwrap.html"]) assert.ok(fs.existsSync(path.join(root, "browser", file)), file);
+  for (const file of [...WORKER, ...manifest.content_scripts[0].js, ...manifest.content_scripts[1].js, "popup.html", "warning.html", "refused.html", "refused.js", "unwrap.html"]) assert.ok(fs.existsSync(path.join(root, "browser", file)), file);
 });
 
 test("stored request rules become scoped dynamic DNR rules on start; cosmetic rules do not", async () => {
@@ -1373,4 +1379,41 @@ test("concurrent Client Hints apply/release shares the policy queue and cannot r
   release(); await enabling;
   assert.equal((await releasing).state, "inactive");
   assert.equal(w.local[hardening.KEY].enabled, false); assert.deepEqual(hintRules(w), []);
+});
+
+test("a site the proxy refused gets our explanation in place of Chrome's tunnel error", async () => {
+  const answers = {
+    "ethn.io": {host: "ethn.io", blocked: true, layer: "proxy", source: "tracker-feed", can_allow: true, allow_file: "~/guard/allow.txt"},
+    "twitter.com": {host: "twitter.com", blocked: true, layer: "dns-filter", source: null, can_allow: false},
+    "fine.example": {host: "fine.example", blocked: false, layer: null, source: "no-match", can_allow: false},
+  };
+  const fail = (w, url, error = "net::ERR_TUNNEL_CONNECTION_FAILED", frameId = 0) =>
+    w.chrome.webNavigation.onErrorOccurred.fire({tabId: 7, frameId, url, error});
+  let w = await worker({why: (host) => answers[host] || {blocked: false}, tabUrl: "https://ethn.io/incentives"});
+  await fail(w, "https://ethn.io/incentives");
+  await settle();
+  assert.equal(w.updates.length, 1);
+  assert.ok(w.updates[0].url.startsWith(`${EXT}refused.html?`), w.updates[0].url);
+  const shown = new URL(w.updates[0].url);
+  assert.deepEqual(Object.fromEntries(shown.searchParams), {layer: "proxy", source: "tracker-feed", allow: "1", file: "~/guard/allow.txt"});
+  assert.equal(shown.hash.slice(1), "https://ethn.io/incentives");
+  assert.ok(w.fetched.includes("http://egress-guard.invalid/why?host=ethn.io"));
+
+  w = await worker({why: (host) => answers[host], tabUrl: "https://twitter.com/home"});
+  await fail(w, "https://twitter.com/home");
+  await settle();
+  assert.deepEqual(Object.fromEntries(new URL(w.updates[0].url).searchParams), {layer: "dns-filter", source: "", allow: "0"});
+
+  // Left alone: other errors, subframes, sites the guard did not refuse, a tab that moved on, and no guard at all.
+  w = await worker({why: (host) => answers[host], tabUrl: "https://fine.example/"});
+  await fail(w, "https://ethn.io/x", "net::ERR_NAME_NOT_RESOLVED");
+  await fail(w, "https://ethn.io/x", undefined, 3);
+  await fail(w, "https://fine.example/");
+  await fail(w, "https://ethn.io/x");  // the tab now shows fine.example
+  await settle();
+  assert.equal(w.updates.length, 0);
+  w = await worker({tabUrl: "https://ethn.io/x"});
+  await fail(w, "https://ethn.io/x");
+  await settle();
+  assert.equal(w.updates.length, 0);
 });

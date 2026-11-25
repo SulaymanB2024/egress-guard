@@ -65,7 +65,10 @@ test("extension source has no HTML injection, eval or unapproved browser network
     let code = fs.readFileSync(file, "utf8");
     // The one sanctioned read: the Chrome worker loads its own packaged threat ruleset (CSP connect-src 'self').
     // And it asks Chrome how a navigation to a host would match (testMatchOutcome), which sends nothing.
-    if (path.basename(file) === "background-chrome.js") code = code.replace("fetch(OWN + file)", "OWN_RULESET").replace('fetch(OWN + "rules/build.json"', "OWN_STAMP(").replace("url: `https://${host}/`", "url: PROBE");
+    if (path.basename(file) === "background-chrome.js") code = code.replace("fetch(OWN + file)", "OWN_RULESET").replace('fetch(OWN + "rules/build.json"', "OWN_STAMP(").replace("url: `https://${host}/`", "url: PROBE")
+      // After the system proxy refused a page, the worker asks the local guard why, on the reserved name
+      // egress-guard.invalid that only the proxy answers (CSP connect-src names exactly that origin).
+      .replace("fetch(WHY + encodeURIComponent(host)", "ASK_GUARD(");
     // Ban the network API identifier, not a local option such as includeWebSockets.
     for (const banned of [/innerHTML/, /outerHTML/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function/, /\bfetch\s*\(/, /XMLHttpRequest/, /\bWebSocket\b/, /sendBeacon/, /importScripts/, /setTimeout\(\s*["'`]/, /\bon[a-z]+\s*=\s*["']/]) {
       assert.doesNotMatch(code, banned, `${path.relative(root, file)} contains ${banned}`);
