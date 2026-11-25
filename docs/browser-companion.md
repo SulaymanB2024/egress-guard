@@ -177,6 +177,19 @@ egress-guard native-host unregister \
   --browser chrome
 ```
 
+## When the proxy refuses a page (Chrome)
+
+With the Egress Guard proxy as the system proxy, a blocked site is refused with a labelled 403 to its CONNECT
+(`X-Egress-Guard: blocked; layer=proxy|dns-filter`). Chrome shows that only as `ERR_TUNNEL_CONNECTION_FAILED`.
+On that error for a top-level load, the worker asks `http://egress-guard.invalid/why?host=NAME` which layer refused
+the name and replaces the error with `refused.html`: the layer, the list, and where to allow it. The page explains
+and grants nothing.
+
+`egress-guard.invalid` is a reserved name that only the local proxy answers. Without the proxy it does not resolve
+and nothing is sent; the refused site itself is never contacted. This is the one network request the Chrome worker
+makes beyond its own packaged files, and `connect-src` names exactly that origin. It uses the existing
+`webNavigation` permission.
+
 ## Upgrade behavior
 
 - Chrome's minimum version remains 145. The extension now requires `webNavigation` for preparation hints and requests optional `privacy` only through the new settings page.

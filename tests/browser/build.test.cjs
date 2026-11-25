@@ -154,8 +154,8 @@ test("build emits Chrome and Firefox from shared sources; Chrome gets rulesets, 
     assert.deepEqual(trackers[0].condition.requestDomains, ["adserver.example", "tracker-fixture.test"], "subdomains folded into parents");
     const worker = fs.readFileSync(path.join(chrome, "background.js"), "utf8");
     assert.doesNotMatch(worker, /importScripts/);
-    assert.deepEqual(worker.match(/\bfetch\s*\([^)]*\)/g), ["fetch(OWN + file)", 'fetch(OWN + "rules/build.json", {cache: "no-store"})'],
-      "the worker reads only its own packaged files: the threat ruleset and the build stamp");
+    assert.deepEqual(worker.match(/\bfetch\s*\([^)]*\)/g), ["fetch(OWN + file)", 'fetch(OWN + "rules/build.json", {cache: "no-store"})', "fetch(WHY + encodeURIComponent(host)"],
+      "the worker reads only its own packaged files (the threat ruleset and the build stamp) and asks the local guard why it refused a page");
     const stamp = JSON.parse(fs.readFileSync(path.join(chrome, "rules/build.json"), "utf8"));
     assert.match(stamp.build, /^[0-9a-f]{32}$/);
     const protocolBody = fs.readFileSync(path.join(chrome, "tracking-protocols.json"));

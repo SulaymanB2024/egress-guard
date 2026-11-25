@@ -85,7 +85,7 @@
     "default_popup": "popup.html"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self'; frame-ancestors 'none'"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' http://egress-guard.invalid; frame-ancestors 'none'"
   },
   "optional_permissions": [
     "nativeMessaging",
